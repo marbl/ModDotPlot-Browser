@@ -570,6 +570,8 @@ export class ImportedTrackManager {
     let lastY = 0;
     let offsetX = 0;
     let offsetY = 0;
+    let dragWidth = 0;
+    let dragHeight = 0;
     let ghost: HTMLElement | null = null;
     const stack = axis === "x" ? this.#options.xStack : this.#options.yStack;
     panel.addEventListener("pointerdown", (event) => {
@@ -581,6 +583,8 @@ export class ImportedTrackManager {
       const bounds = panel.getBoundingClientRect();
       offsetX = event.clientX - bounds.left;
       offsetY = event.clientY - bounds.top;
+      dragWidth = bounds.width;
+      dragHeight = bounds.height;
       holdTimer = window.setTimeout(() => {
         if (pointerId < 0) return;
         active = true;
@@ -606,13 +610,10 @@ export class ImportedTrackManager {
       if (!inside) {
         return;
       }
-      const target = document.elementsFromPoint(lastX, lastY).find(
-        (element) => element instanceof HTMLElement
-          && element !== panel
-          && element.classList.contains("feature-track-panel")
-          && element.parentElement === stack,
-      );
-      if (target instanceof HTMLElement) swapElements(panel, target);
+      const dragCenter = axis === "x"
+        ? lastY - offsetY + dragHeight / 2
+        : lastX - offsetX + dragWidth / 2;
+      reorderPanelAtCoordinate(panel, stack, axis, dragCenter);
     };
 
     const finish = (event: PointerEvent): void => {
@@ -857,6 +858,52 @@ function importedTrackSize(lanes: number): number {
 
 function pointInRect(x: number, y: number, rect: DOMRect): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+/** Selects an adjacent visual slot only after the dragged track crosses its midpoint. */
+export function midpointSwapDirection(
+  coordinate: number,
+  precedingMidpoint: number | null,
+  followingMidpoint: number | null,
+): -1 | 0 | 1 {
+  if (precedingMidpoint !== null && coordinate < precedingMidpoint) return -1;
+  if (followingMidpoint !== null && coordinate > followingMidpoint) return 1;
+  return 0;
+}
+
+function reorderPanelAtCoordinate(
+  panel: HTMLElement,
+  stack: HTMLElement,
+  axis: FeatureTrackAxis,
+  coordinate: number,
+): void {
+  for (let pass = 0; pass < stack.childElementCount; pass += 1) {
+    const panels = [...stack.children]
+      .filter((element): element is HTMLElement => element instanceof HTMLElement
+        && !element.hidden
+        && element.classList.contains("feature-track-panel"))
+      .map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          element,
+          midpoint: axis === "x"
+            ? bounds.top + bounds.height / 2
+            : bounds.left + bounds.width / 2,
+        };
+      })
+      .sort((left, right) => left.midpoint - right.midpoint);
+    const current = panels.findIndex((candidate) => candidate.element === panel);
+    if (current < 0) return;
+    const direction = midpointSwapDirection(
+      coordinate,
+      panels[current - 1]?.midpoint ?? null,
+      panels[current + 1]?.midpoint ?? null,
+    );
+    if (direction === 0) return;
+    const target = panels[current + direction]?.element;
+    if (!target) return;
+    swapElements(panel, target);
+  }
 }
 
 function swapElements(first: HTMLElement, second: HTMLElement): void {

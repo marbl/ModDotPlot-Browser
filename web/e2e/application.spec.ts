@@ -343,7 +343,7 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
   await page.mouse.down();
   await page.waitForTimeout(220);
   await expect(page.locator(".track-drag-ghost")).toBeVisible();
-  await page.mouse.move(cpgPanelBounds.x + cpgPanelBounds.width / 2, cpgPanelBounds.y + cpgPanelBounds.height / 2);
+  await page.mouse.move(cpgPanelBounds.x + cpgPanelBounds.width / 2, cpgPanelBounds.y + cpgPanelBounds.height / 4);
   await page.mouse.up();
   await expect(page.locator(".track-drag-ghost")).toHaveCount(0);
   await expect(page.locator("#gc-track-x-panel")).not.toHaveClass(/is-track-drag-source/);
@@ -572,11 +572,27 @@ test("BED and GFF tracks import, follow their sequence, and disable by dragging 
   const currentBedBounds = await bedPanel.boundingBox();
   const geneBounds = await genePanel.boundingBox();
   if (!currentBedBounds || !geneBounds) throw new Error("imported tracks have no bounds");
+  const bedStartsAboveGene = currentBedBounds.y < geneBounds.y;
+  const geneMidpoint = geneBounds.y + geneBounds.height / 2;
+  const initialOrderSign = Math.sign(orderBefore.bed - orderBefore.gene);
   await page.mouse.move(currentBedBounds.x + currentBedBounds.width / 2, currentBedBounds.y + currentBedBounds.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(220);
   await expect(page.locator(".track-drag-ghost")).toBeVisible();
-  await page.mouse.move(geneBounds.x + geneBounds.width / 2, geneBounds.y + geneBounds.height / 2);
+  await page.mouse.move(
+    geneBounds.x + geneBounds.width / 2,
+    geneMidpoint + (bedStartsAboveGene ? -2 : 2),
+  );
+  expect(Math.sign(((await bedPanel.boundingBox())?.y ?? 0) - ((await genePanel.boundingBox())?.y ?? 0)))
+    .toBe(initialOrderSign);
+  const crossedMidpoint = geneMidpoint + (bedStartsAboveGene ? 2 : -2);
+  await page.mouse.move(geneBounds.x + geneBounds.width / 2, crossedMidpoint);
+  await expect.poll(async () => Math.sign(
+    ((await bedPanel.boundingBox())?.y ?? 0) - ((await genePanel.boundingBox())?.y ?? 0),
+  )).toBe(-initialOrderSign);
+  await page.mouse.move(geneBounds.x + geneBounds.width / 2, crossedMidpoint + (bedStartsAboveGene ? 1 : -1));
+  expect(Math.sign(((await bedPanel.boundingBox())?.y ?? 0) - ((await genePanel.boundingBox())?.y ?? 0)))
+    .toBe(-initialOrderSign);
   await page.mouse.up();
   await expect(page.locator(".track-drag-ghost")).toHaveCount(0);
   const orderAfter = {

@@ -8,6 +8,7 @@ import {
   trackAxisEligible,
   type ImportedFeature,
 } from "../src/imported-track-types";
+import { midpointSwapDirection } from "../src/imported-track";
 
 describe("imported feature tracks", () => {
   it("recognizes supported text formats and UCSC itemRgb colors", () => {
@@ -53,6 +54,18 @@ describe("imported feature tracks", () => {
       ["b", 1],
       ["c", 1],
     ]);
+  });
+
+  it("reorders only beyond an adjacent track midpoint", () => {
+    expect(midpointSwapDirection(19.9, 20, 40)).toBe(-1);
+    expect(midpointSwapDirection(20, 20, 40)).toBe(0);
+    expect(midpointSwapDirection(39.9, 20, 40)).toBe(0);
+    expect(midpointSwapDirection(40, 20, 40)).toBe(0);
+    expect(midpointSwapDirection(40.1, 20, 40)).toBe(1);
+
+    // After a downward swap, the same pointer coordinate is between the new neighbors
+    // and therefore cannot immediately swap the track back.
+    expect(midpointSwapDirection(40.1, 20, 60)).toBe(0);
   });
 });
 

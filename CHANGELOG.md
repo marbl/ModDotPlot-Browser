@@ -7,6 +7,11 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+* Stabilized direct track reordering: a dragged track now swaps only after its center
+  crosses the adjacent track midpoint, preventing rapid back-and-forth oscillation.
+
 ## [0.2.0-beta.4] - 2026-08-29
 
 ### Changed
