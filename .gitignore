@@ -1,0 +1,8 @@
+/target/
+/web/dist/
+/web/node_modules/
+/web/src/wasm/
+*.log
+.DS_Store
+.idea/
+.vscode/

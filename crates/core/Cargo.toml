@@ -1,0 +1,12 @@
+[package]
+name = "moddotplot-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Scientific computation core for moddotplot-rs"
+
+[dependencies]
+
+[lints]
+workspace = true

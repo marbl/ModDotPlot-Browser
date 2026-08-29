@@ -1,0 +1,2 @@
+schema	fixture	x_bases	y_bases	resolution	k	registers	b_bits	sparse_cap	min_expected_matches	ani_floor	build_ms	matrix_median_ms	correction_ms	selection_ms	first_view_ms	bytes	retained_sparse_cores	retained_sparse_hashes	corrected_directed_cells
+backend-v2-performance	chm13_chr1_full	248387328	248387328	1000	21	2048	14	8192	8.0	0.80	2961.812	23029.439	2857.711	20171.724	25991.251	92914913	6	35866	11986
