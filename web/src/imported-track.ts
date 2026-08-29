@@ -605,15 +605,21 @@ export class ImportedTrackManager {
       if (!active) return;
       event.preventDefault();
       const bounds = stack.getBoundingClientRect();
-      const inside = pointInRect(lastX, lastY, bounds);
-      if (ghost) updateDragGhost(ghost, lastX, lastY, offsetX, offsetY, !inside);
-      if (!inside) {
+      const inReorderRegion = pointInTrackReorderRegion(
+        lastX,
+        lastY,
+        bounds,
+        axis,
+        dragWidth,
+        dragHeight,
+      );
+      if (ghost) updateDragGhost(ghost, lastX, lastY, offsetX, offsetY, !inReorderRegion);
+      if (!inReorderRegion) {
         return;
       }
-      const dragCenter = axis === "x"
-        ? lastY - offsetY + dragHeight / 2
-        : lastX - offsetX + dragWidth / 2;
-      reorderPanelAtCoordinate(panel, stack, axis, dragCenter);
+      const dragStart = axis === "x" ? lastY - offsetY : lastX - offsetX;
+      const dragEnd = dragStart + (axis === "x" ? dragHeight : dragWidth);
+      reorderPanelAtInterval(panel, stack, axis, dragStart, dragEnd);
     };
 
     const finish = (event: PointerEvent): void => {
@@ -630,7 +636,14 @@ export class ImportedTrackManager {
       window.clearTimeout(holdTimer);
       if (active) {
         const bounds = stack.getBoundingClientRect();
-        const shouldDisable = !cancelled && !pointInRect(lastX, lastY, bounds);
+        const shouldDisable = !cancelled && !pointInTrackReorderRegion(
+          lastX,
+          lastY,
+          bounds,
+          axis,
+          dragWidth,
+          dragHeight,
+        );
         panel.classList.remove("is-track-drag-source");
         ghost?.remove();
         ghost = null;
@@ -856,26 +869,39 @@ function importedTrackSize(lanes: number): number {
   return Math.max(MIN_IMPORTED_TRACK_SIZE, lanes * LANE_SIZE + 7);
 }
 
-function pointInRect(x: number, y: number, rect: DOMRect): boolean {
-  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+function pointInTrackReorderRegion(
+  x: number,
+  y: number,
+  rect: DOMRect,
+  axis: FeatureTrackAxis,
+  trackWidth: number,
+  trackHeight: number,
+): boolean {
+  return axis === "x"
+    ? x >= rect.left && x <= rect.right
+      && y >= rect.top - trackHeight && y <= rect.bottom + trackHeight
+    : y >= rect.top && y <= rect.bottom
+      && x >= rect.left - trackWidth && x <= rect.right + trackWidth;
 }
 
-/** Selects an adjacent visual slot only after the dragged track crosses its midpoint. */
-export function midpointSwapDirection(
-  coordinate: number,
-  precedingMidpoint: number | null,
-  followingMidpoint: number | null,
+/** Selects an adjacent slot only after the dragged track completely clears it. */
+export function fullTrackSwapDirection(
+  dragStart: number,
+  dragEnd: number,
+  precedingStart: number | null,
+  followingEnd: number | null,
 ): -1 | 0 | 1 {
-  if (precedingMidpoint !== null && coordinate < precedingMidpoint) return -1;
-  if (followingMidpoint !== null && coordinate > followingMidpoint) return 1;
+  if (precedingStart !== null && dragEnd <= precedingStart) return -1;
+  if (followingEnd !== null && dragStart >= followingEnd) return 1;
   return 0;
 }
 
-function reorderPanelAtCoordinate(
+function reorderPanelAtInterval(
   panel: HTMLElement,
   stack: HTMLElement,
   axis: FeatureTrackAxis,
-  coordinate: number,
+  dragStart: number,
+  dragEnd: number,
 ): void {
   for (let pass = 0; pass < stack.childElementCount; pass += 1) {
     const panels = [...stack.children]
@@ -886,18 +912,18 @@ function reorderPanelAtCoordinate(
         const bounds = element.getBoundingClientRect();
         return {
           element,
-          midpoint: axis === "x"
-            ? bounds.top + bounds.height / 2
-            : bounds.left + bounds.width / 2,
+          start: axis === "x" ? bounds.top : bounds.left,
+          end: axis === "x" ? bounds.bottom : bounds.right,
         };
       })
-      .sort((left, right) => left.midpoint - right.midpoint);
+      .sort((left, right) => left.start - right.start);
     const current = panels.findIndex((candidate) => candidate.element === panel);
     if (current < 0) return;
-    const direction = midpointSwapDirection(
-      coordinate,
-      panels[current - 1]?.midpoint ?? null,
-      panels[current + 1]?.midpoint ?? null,
+    const direction = fullTrackSwapDirection(
+      dragStart,
+      dragEnd,
+      panels[current - 1]?.start ?? null,
+      panels[current + 1]?.end ?? null,
     );
     if (direction === 0) return;
     const target = panels[current + direction]?.element;
