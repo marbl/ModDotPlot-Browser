@@ -95,7 +95,7 @@ one GPU texture per tile channel.
 
 ### PackedSequence
 
-Two bits store each base and a validity bitmap distinguishes `A/C/G/T/U` from ambiguity
+Two bits store each base and a sparse invalid-base bit vector distinguishes `A/C/G/T/U` from ambiguity
 or gaps. `U/u` is normalized to `T/t`. Coordinates remain `u64`; no normalization may
 shift them. FASTA is parsed incrementally and records are committed transactionally.
 
@@ -212,7 +212,7 @@ Memory admission happens before large allocations.
 
 * Wasm zoom-axis cache: 192 MiB.
 * Prepared frozen axes: 384 MiB.
-* Application-owned Wasm session budget: 1.5 GiB.
+* Application-owned Wasm session budget: 3 GiB.
 * Renderer CPU/GPU tile cache: nominally 192 MiB, with visible/fallback protection.
 
 The Wasm axis cache uses a recency map with logarithmic touch/eviction and tracks

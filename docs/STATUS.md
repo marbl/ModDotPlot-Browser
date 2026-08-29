@@ -24,7 +24,7 @@ by the named evidence; it does not imply broad research validation.
   replace them individually as they finish; post-paint detail is uncertainty-selected,
   and cancellable.
   Coarse visual fallback, zoom tiling, prefetch, and exact terminal tiles are retained.
-* Frozen production axes, 1.5 GiB session admission, prepared-axis and zoom-cache
+* Frozen production axes, 3 GiB session admission, prepared-axis and zoom-cache
   budgets, logarithmic recency tracking, and coordinated renderer eviction.
 * Public sketch and exact tile builders validate ranges, dimensions, and compatibility
   before output allocation and return typed errors through the Wasm boundary.
@@ -33,8 +33,9 @@ by the named evidence; it does not imply broad research validation.
 * Stackable GC% and CpG observed/expected axis tracks with incremental composition
   indexing, one unsmoothed bar per sampled display column or row, overscanned pan
   caches, immediate stale-track blanking, and value mouseovers.
-* Worker-streamed plain-text and gzip BED3–12, GFF3, and GTF annotation import with
-  validation reporting,
+* Worker-streamed plain-text, gzip, and BGZF FASTA and BED3–12/GFF3/GTF annotation
+  import with bounded parallel BGZF decompression, bulk packed-base ingestion,
+  sparse invalid-base storage, compact completed-record storage, and validation reporting,
   conservative confirmed chromosome aliases, sequence-aware automatic axis assignment,
   sequence-associated axis eligibility, UCSC colors, category-colored grouped gene
   models with distinct CDS geometry, one-to-ten-row deterministic lane packing,

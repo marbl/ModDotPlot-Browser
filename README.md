@@ -34,7 +34,7 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
 
 ## Features
 
-* Load multiple FASTA records, including gzip FASTA, without upload or installation.
+* Load multiple FASTA records, including gzip and BGZF FASTA, without upload or installation.
 * Select any loaded record independently for the X and Y axes.
 * Render 500, 1,000, 2,000, or 4,000 overview cells per axis.
 * Paint completed quick blocks immediately and refine uncertain tiles asynchronously.
@@ -42,7 +42,7 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
 * Switch between containment-derived ANI and support-aware orientation coloring.
 * Reach an exact k-mer dotplot at terminal zoom.
 * Recolor cached results with an 80% to 100% three-anchor transfer function.
-* Stack local GC% and CpG tracks or imported plain/gzip BED/GFF/GTF annotations along either axis.
+* Stack local GC% and CpG tracks or imported plain/gzip/BGZF BED/GFF/GTF annotations along either axis.
 * Report computation progress, estimated application memory, and method provenance.
 
 See the [user guide](docs/USER_GUIDE.md) for operation and interpretation.

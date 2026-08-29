@@ -40,13 +40,80 @@ pub struct CanonicalKmer {
     pub orientation: Orientation,
 }
 
-/// Compact sequence storage using two bits per base and one validity bit per base.
+const SPARSE_BIT_BLOCK_SHIFT: usize = 12;
+const SPARSE_BIT_BLOCK_BITS: usize = 1 << SPARSE_BIT_BLOCK_SHIFT;
+const SPARSE_BIT_WORDS: usize = SPARSE_BIT_BLOCK_BITS / u64::BITS as usize;
+
+/// Two-level sparse bit vector used for the uncommon invalid-base positions.
+///
+/// The first level costs one `u32` only through the last block containing an invalid
+/// base. Second-level 4-Kibit blocks are allocated only when at least one bit is set.
+/// Lookup remains constant-time in sequence-scanning hot paths.
+#[derive(Clone, Default, Eq, PartialEq)]
+struct SparseBitVector {
+    block_ids: Vec<u32>,
+    blocks: Vec<[u64; SPARSE_BIT_WORDS]>,
+}
+
+impl SparseBitVector {
+    fn insert(&mut self, position: usize) {
+        let block_index = position >> SPARSE_BIT_BLOCK_SHIFT;
+        if self.block_ids.len() <= block_index {
+            self.block_ids.resize(block_index + 1, 0);
+        }
+        let stored_id = self.block_ids[block_index];
+        let block_id = if stored_id == 0 {
+            self.blocks.push([0; SPARSE_BIT_WORDS]);
+            let new_id = u32::try_from(self.blocks.len())
+                .expect("supported sequence has fewer than u32::MAX sparse blocks");
+            self.block_ids[block_index] = new_id;
+            new_id
+        } else {
+            stored_id
+        };
+        let within_block = position & (SPARSE_BIT_BLOCK_BITS - 1);
+        self.blocks[block_id as usize - 1][within_block / u64::BITS as usize] |=
+            1_u64 << (within_block % u64::BITS as usize);
+    }
+
+    fn contains(&self, position: usize) -> bool {
+        let block_index = position >> SPARSE_BIT_BLOCK_SHIFT;
+        let Some(&block_id) = self.block_ids.get(block_index) else {
+            return false;
+        };
+        if block_id == 0 {
+            return false;
+        }
+        let within_block = position & (SPARSE_BIT_BLOCK_BITS - 1);
+        self.blocks[block_id as usize - 1][within_block / u64::BITS as usize]
+            & (1_u64 << (within_block % u64::BITS as usize))
+            != 0
+    }
+
+    fn estimated_heap_bytes(&self) -> usize {
+        self.block_ids
+            .capacity()
+            .saturating_mul(std::mem::size_of::<u32>())
+            .saturating_add(
+                self.blocks
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<[u64; SPARSE_BIT_WORDS]>()),
+            )
+    }
+
+    fn shrink_to_fit(&mut self) {
+        self.block_ids.shrink_to_fit();
+        self.blocks.shrink_to_fit();
+    }
+}
+
+/// Compact sequence storage using two bits per base and sparse invalid-base bits.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct PackedSequence {
     name: String,
     len: u64,
     bases: Vec<u8>,
-    valid: Vec<u8>,
+    invalid: SparseBitVector,
 }
 
 impl fmt::Debug for PackedSequence {
@@ -108,16 +175,88 @@ impl PackedSequence {
         if base_index.is_multiple_of(4) {
             self.bases.push(0);
         }
-        if base_index.is_multiple_of(8) {
-            self.valid.push(0);
-        }
 
         let base_shift = (base_index % 4) * 2;
         self.bases[base_index / 4] |= code << base_shift;
-        if is_valid {
-            self.valid[base_index / 8] |= 1 << (base_index % 8);
+        if !is_valid {
+            self.invalid.insert(base_index);
         }
         self.len += 1;
+    }
+
+    /// Appends one whitespace-free IUPAC sequence run in packed groups of eight.
+    ///
+    /// Returns the zero-based position of the first unsupported byte after retaining
+    /// the valid prefix. FASTA parsing uses this bulk path to avoid per-base parser
+    /// state transitions for ordinary wrapped sequence lines.
+    #[inline]
+    pub(crate) fn push_iupac_chunk(&mut self, chunk: &[u8]) -> Result<(), usize> {
+        let current_len = usize::try_from(self.len).expect("sequence exceeds addressable memory");
+        let final_len = current_len.saturating_add(chunk.len());
+        self.bases
+            .reserve(final_len.div_ceil(4).saturating_sub(self.bases.len()));
+
+        let mut offset = 0;
+        while offset < chunk.len() && !self.len.is_multiple_of(8) {
+            if encode_iupac_base(chunk[offset]).is_none() {
+                return Err(offset);
+            }
+            self.push_ascii(chunk[offset]);
+            offset += 1;
+        }
+
+        while offset + 8 <= chunk.len() {
+            let c0 = BASE_ENCODING[usize::from(chunk[offset])];
+            let c1 = BASE_ENCODING[usize::from(chunk[offset + 1])];
+            let c2 = BASE_ENCODING[usize::from(chunk[offset + 2])];
+            let c3 = BASE_ENCODING[usize::from(chunk[offset + 3])];
+            let c4 = BASE_ENCODING[usize::from(chunk[offset + 4])];
+            let c5 = BASE_ENCODING[usize::from(chunk[offset + 5])];
+            let c6 = BASE_ENCODING[usize::from(chunk[offset + 6])];
+            let c7 = BASE_ENCODING[usize::from(chunk[offset + 7])];
+            if (c0 | c1 | c2 | c3 | c4 | c5 | c6 | c7) & UNSUPPORTED_BASE != 0 {
+                for index in 0..8 {
+                    if encode_iupac_base(chunk[offset + index]).is_none() {
+                        return Err(offset + index);
+                    }
+                    self.push_ascii(chunk[offset + index]);
+                }
+                offset += 8;
+                continue;
+            }
+            let low = (c0 & 3) | ((c1 & 3) << 2) | ((c2 & 3) << 4) | ((c3 & 3) << 6);
+            let high = (c4 & 3) | ((c5 & 3) << 2) | ((c6 & 3) << 4) | ((c7 & 3) << 6);
+            let validity = ((c0 >> 2) & 1)
+                | (((c1 >> 2) & 1) << 1)
+                | (((c2 >> 2) & 1) << 2)
+                | (((c3 >> 2) & 1) << 3)
+                | (((c4 >> 2) & 1) << 4)
+                | (((c5 >> 2) & 1) << 5)
+                | (((c6 >> 2) & 1) << 6)
+                | (((c7 >> 2) & 1) << 7);
+            self.bases.push(low);
+            self.bases.push(high);
+            if validity != u8::MAX {
+                let block_start =
+                    usize::try_from(self.len).expect("sequence exceeds addressable memory");
+                for index in 0..8 {
+                    if validity & (1 << index) == 0 {
+                        self.invalid.insert(block_start + index);
+                    }
+                }
+            }
+            self.len += 8;
+            offset += 8;
+        }
+
+        while offset < chunk.len() {
+            if encode_iupac_base(chunk[offset]).is_none() {
+                return Err(offset);
+            }
+            self.push_ascii(chunk[offset]);
+            offset += 1;
+        }
+        Ok(())
     }
 
     /// Returns the two-bit base and validity at `position`.
@@ -127,8 +266,7 @@ impl PackedSequence {
         }
         let position = usize::try_from(position).ok()?;
         let code = (self.bases[position / 4] >> ((position % 4) * 2)) & 0b11;
-        let valid = (self.valid[position / 8] & (1 << (position % 8))) != 0;
-        Some((code, valid))
+        Some((code, !self.invalid.contains(position)))
     }
 
     /// Returns packed base bytes for persistence or Wasm transfer.
@@ -136,17 +274,19 @@ impl PackedSequence {
         &self.bases
     }
 
-    /// Returns the validity bitmap for persistence or Wasm transfer.
-    pub fn validity_bits(&self) -> &[u8] {
-        &self.valid
-    }
-
     /// Approximate bytes owned by heap allocations, excluding allocator overhead.
     pub fn estimated_heap_bytes(&self) -> usize {
         self.name
             .capacity()
             .saturating_add(self.bases.capacity())
-            .saturating_add(self.valid.capacity())
+            .saturating_add(self.invalid.estimated_heap_bytes())
+    }
+
+    /// Releases geometric growth slack after a streamed FASTA record is complete.
+    pub(crate) fn compact_storage(&mut self) {
+        self.name.shrink_to_fit();
+        self.bases.shrink_to_fit();
+        self.invalid.shrink_to_fit();
     }
 
     /// Copies a half-open coordinate range into an independently owned sequence.
@@ -278,6 +418,36 @@ fn encode_base(base: u8) -> (u8, bool) {
     }
 }
 
+fn encode_iupac_base(base: u8) -> Option<(u8, bool)> {
+    let encoded = BASE_ENCODING[usize::from(base)];
+    (encoded & UNSUPPORTED_BASE == 0).then_some((encoded & 3, encoded & VALID_BASE != 0))
+}
+
+const VALID_BASE: u8 = 0b0000_0100;
+const UNSUPPORTED_BASE: u8 = 0b1000_0000;
+const BASE_ENCODING: [u8; 256] = base_encoding();
+
+const fn base_encoding() -> [u8; 256] {
+    let mut table = [UNSUPPORTED_BASE; 256];
+    table[b'A' as usize] = VALID_BASE;
+    table[b'a' as usize] = VALID_BASE;
+    table[b'C' as usize] = VALID_BASE | 1;
+    table[b'c' as usize] = VALID_BASE | 1;
+    table[b'G' as usize] = VALID_BASE | 2;
+    table[b'g' as usize] = VALID_BASE | 2;
+    table[b'T' as usize] = VALID_BASE | 3;
+    table[b't' as usize] = VALID_BASE | 3;
+    table[b'U' as usize] = VALID_BASE | 3;
+    table[b'u' as usize] = VALID_BASE | 3;
+    let ambiguous = b"RYSWKMBDHVNryswkmbdhvn-.";
+    let mut index = 0;
+    while index < ambiguous.len() {
+        table[ambiguous[index] as usize] = 0;
+        index += 1;
+    }
+    table
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +463,57 @@ mod tests {
         assert_eq!(decoded[3], (3, true));
         assert_eq!(decoded[4], (0, false));
         assert_eq!(decoded[8], (3, true));
+    }
+
+    #[test]
+    fn sparse_invalid_bits_cross_block_boundaries() {
+        let mut bits = SparseBitVector::default();
+        for position in [
+            0,
+            SPARSE_BIT_BLOCK_BITS - 1,
+            SPARSE_BIT_BLOCK_BITS,
+            1_000_000,
+        ] {
+            bits.insert(position);
+        }
+        for position in [
+            0,
+            SPARSE_BIT_BLOCK_BITS - 1,
+            SPARSE_BIT_BLOCK_BITS,
+            1_000_000,
+        ] {
+            assert!(bits.contains(position));
+        }
+        for position in [
+            1,
+            SPARSE_BIT_BLOCK_BITS - 2,
+            SPARSE_BIT_BLOCK_BITS + 1,
+            999_999,
+        ] {
+            assert!(!bits.contains(position));
+        }
+        assert_eq!(bits.blocks.len(), 3);
+        assert!(bits.estimated_heap_bytes() < 4_096);
+    }
+
+    #[test]
+    fn canonical_sequence_does_not_allocate_invalidity_storage() {
+        let mut sequence = PackedSequence::from_ascii("valid", &vec![b'A'; 1_000_000]);
+        sequence.compact_storage();
+        assert_eq!(sequence.invalid.estimated_heap_bytes(), 0);
+        assert_eq!(sequence.bases.len(), 250_000);
+    }
+
+    #[test]
+    fn bulk_iupac_packing_matches_scalar_packing_at_unaligned_boundaries() {
+        let mut bulk = PackedSequence::from_ascii("test", b"ACG");
+        bulk.push_iupac_chunk(b"TacgUN.-ACGT").unwrap();
+        let scalar = PackedSequence::from_ascii("test", b"ACGTacgUN.-ACGT");
+        assert_eq!(bulk, scalar);
+
+        let invalid = bulk.push_iupac_chunk(b"ACGT!AAA").unwrap_err();
+        assert_eq!(invalid, 4);
+        assert_eq!(bulk.len(), scalar.len() + 4);
     }
 
     #[test]

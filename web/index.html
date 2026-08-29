@@ -18,11 +18,11 @@
           <h1>moddotplot-rs</h1>
           <button id="drop-zone" class="drop-zone" type="button">
             <span id="drop-title" class="drop-title">Drop FASTA files here</span>
-            <span class="drop-detail">or choose files · FASTA and FASTA.gz · practical limit depends on browser memory</span>
+            <span class="drop-detail">or choose files · FASTA, gzip, and BGZF · practical limit depends on browser memory</span>
             <span class="privacy-note">Your sequence never leaves this browser.</span>
           </button>
         </div>
-        <input id="file-input" type="file" accept=".fa,.fasta,.fna,.fas,.fa.gz,.fasta.gz,.fna.gz,.gz" multiple hidden />
+        <input id="file-input" type="file" accept=".fa,.fasta,.fna,.fas,.fa.gz,.fasta.gz,.fna.gz,.gz,.bgz,.bgzf" multiple hidden />
       </section>
 
       <section id="workspace" class="workspace" hidden>
@@ -113,9 +113,9 @@
             </div>
             <div class="feature-track-control-item feature-track-add-control">
               <button id="add-track" class="add-track-button" type="button">Add track</button>
-              <small>Drop BED, GFF3, or GTF files, including .gz files, directly on an axis, or let Add track assign one.</small>
+              <small>Drop BED, GFF3, or GTF files, including gzip/BGZF files, directly on an axis, or let Add track assign one.</small>
             </div>
-            <input id="track-file-input" type="file" accept=".bed,.gff,.gff3,.gtf,.gff2,.bed.gz,.gff.gz,.gff3.gz,.gtf.gz,.gff2.gz" multiple hidden />
+            <input id="track-file-input" type="file" accept=".bed,.gff,.gff3,.gtf,.gff2,.bed.gz,.gff.gz,.gff3.gz,.gtf.gz,.gff2.gz,.bed.bgz,.gff.bgz,.gff3.bgz,.gtf.bgz,.gff2.bgz,.bgzf" multiple hidden />
           </details>
 
           <details class="advanced-controls">

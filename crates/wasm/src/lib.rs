@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 
 const MAX_CACHED_AXIS_BYTES: usize = 192 * 1024 * 1024;
 const MAX_PREPARED_AXIS_BYTES: usize = 384 * 1024 * 1024;
-const MAX_WASM_SESSION_BYTES: usize = 1_536 * 1024 * 1024;
+const MAX_WASM_SESSION_BYTES: usize = 3 * 1024 * 1024 * 1024;
 const MAX_PENDING_PREPARATION_TILE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TILE_EDGE: usize = 256;
 
@@ -1015,7 +1015,7 @@ impl ComputeSession {
         if self.estimated_memory_bytes() > MAX_WASM_SESSION_BYTES {
             self.sequences.truncate(first);
             return Err(JsError::new(
-                "Loaded sequences exceed the 1.5 GiB Wasm session budget.",
+                "Loaded sequences exceed the 3 GiB Wasm session budget.",
             ));
         }
         let metadata = self.metadata_for_range(first, self.sequences.len());

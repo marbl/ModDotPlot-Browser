@@ -7,6 +7,22 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.2.0-beta.4] - 2026-08-29
+
+### Changed
+
+* Accelerated streamed FASTA uptake with table-driven eight-base packing, 4 MiB Wasm
+  handoffs, compact completed-record storage, and percentage-throttled progress updates.
+* Raised the application-owned Wasm session budget from 1.5 GiB to 3 GiB for complete
+  diploid human assemblies, while retaining every parsed chromosome in the session.
+* Replaced the dense validity bitmap with a constant-time two-level sparse invalid-base
+  bit vector, avoiding one retained validity bit for every canonical base.
+
+### Added
+
+* Streaming BGZF support for FASTA and annotation input, using bounded parallel block
+  decompression while preserving member order.
+
 ## [0.2.0-beta.3] - 2026-08-29
 
 ### Changed
@@ -153,7 +169,8 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.3...HEAD
+[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.4...HEAD
+[0.2.0-beta.4]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.3...v0.2.0-beta.4
 [0.2.0-beta.3]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.2...v0.2.0-beta.3
 [0.2.0-beta.2]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.1...v0.2.0-beta.2
 [0.2.0-beta.1]: https://github.com/marbl/moddotplot-rs/compare/v0.1.0...v0.2.0-beta.1

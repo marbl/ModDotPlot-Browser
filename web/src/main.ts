@@ -847,9 +847,12 @@ function showError(message: string): void {
 function rejectSequenceLoad(message: string): void {
   const attemptedFiles = [...lastFiles];
   clearSession();
+  const guidance = /(?:memory|budget)/i.test(message)
+    ? "The selected multi-FASTA contains more packed sequence than one browser session can retain. Load a chromosome, haplotype, or smaller record subset."
+    : "Check that every sequence record begins with a > header line, then try again.";
   showSequenceLoadDialog(
     `${fileList(attemptedFiles)} could not be parsed as FASTA. No sequence data was loaded.`,
-    [message, "Check that every sequence record begins with a > header line, then try again."],
+    [message, guidance],
   );
 }
 
@@ -864,7 +867,7 @@ function showSequenceLoadDialog(summary: string, details: string[]): void {
 }
 
 function isAnnotationFileName(name: string): boolean {
-  return /\.(?:bed|gff3?|gff2|gtf)(?:\.txt)?(?:\.gz)?$/i.test(name);
+  return /\.(?:bed|gff3?|gff2|gtf)(?:\.txt)?(?:\.(?:gz|bgz|bgzf))?$/i.test(name);
 }
 
 function fileList(files: File[]): string {

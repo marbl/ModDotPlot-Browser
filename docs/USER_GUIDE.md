@@ -17,8 +17,8 @@ workers and WebAssembly on `file://` pages.
 
 ## Create a plot
 
-1. Drop one or more FASTA or gzip-compressed FASTA files on the input area, or use the
-   file chooser.
+1. Drop one or more plain, gzip-compressed, or BGZF FASTA files on the input area, or
+   use the file chooser. BGZF is detected from its header even when the suffix is `.gz`.
 2. Wait for the sequence records to appear. The status line reports loading,
    signature construction, tile drawing, and refinement progress. A rotating helix is
    shown in the plot while it is empty and active work is underway.
@@ -28,8 +28,10 @@ workers and WebAssembly on `file://` pages.
    its tiles after the quick viewport has been painted.
 
 Multiple records and files may be loaded together. Each FASTA record is an independent
-axis choice. A single record may contain up to 1,000,000,000 bases, although practical
-very-large-record support remains limited by browser memory in the v0.2 beta.
+axis choice. A single record may contain up to 1,000,000,000 bases, although the total
+packed records retained together must fit the 3 GiB Wasm session budget. Complete
+diploid human assemblies are retained eagerly so later axis changes never depend on the
+source file remaining unchanged.
 
 Upper- and lowercase `U` are accepted and normalized to `T`; they are indistinguishable
 after loading. IUPAC ambiguity and gap characters retain their coordinates but prevent
@@ -152,9 +154,10 @@ Hover over a GC% or CpG bar to see its value and genomic window.
 #### Imported annotations
 
 Drop a BED, GFF3, or GTF file on the X or Y coordinate axis, or use **Add track** at
-the bottom of the Feature tracks panel. Plain-text and `.gz` versions are accepted. An
-axis is highlighted while it is a valid drop target. File drops elsewhere in the
-application are intercepted and reported instead of opening the file in the browser.
+the bottom of the Feature tracks panel. Plain-text, gzip, and BGZF versions are
+accepted. An axis is highlighted while it is a valid drop target. File drops elsewhere
+in the application are intercepted and reported instead of opening the file in the
+browser.
 
 For a self-comparison, **Add track** associates the file with that sequence. For a
 pairwise comparison, the browser scans sequence identifiers first. A unique match is
@@ -223,7 +226,7 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.2.0-beta.3 is a functional preview and has not completed the full scientific
+* v0.2.0-beta.4 is a functional preview and has not completed the full scientific
   release-validation plan.
 * Very large records are limited by available browser memory; sharding and disk spill
   are planned before claiming robust 1 Gb operation.
@@ -245,8 +248,10 @@ development server as described in the [README](../README.md).
 
 ### A compressed FASTA is rejected
 
-Confirm that the filename and bytes are gzip-compatible and that the browser is
-current. As a fallback, decompress the file before loading it.
+Confirm that the bytes are gzip or BGZF compatible and that the browser is current.
+For a memory-budget error, load a chromosome, haplotype, or smaller record subset; an
+uncompressed copy contains the same packed sequence payload and will not avoid that
+limit.
 
 ### Navigation becomes slow after extensive use
 

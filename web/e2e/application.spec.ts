@@ -37,6 +37,19 @@ function intervalMidpoint(summary: string, axis: "x" | "y"): number {
   return (Number(match[1].replaceAll(",", "")) + Number(match[2].replaceAll(",", ""))) / 2;
 }
 
+function bgzfBlock(contents: string): Buffer {
+  const gzip = gzipSync(Buffer.from(contents));
+  const block = Buffer.alloc(gzip.byteLength + 8);
+  gzip.copy(block, 0, 0, 10);
+  block[3] = 0x04;
+  block.writeUInt16LE(6, 10);
+  block.write("BC", 12, "ascii");
+  block.writeUInt16LE(2, 14);
+  block.writeUInt16LE(block.byteLength - 1, 16);
+  gzip.copy(block, 18, 10);
+  return block;
+}
+
 test("short inputs enter exact mode without network egress", async ({ page }) => {
   const unexpectedRequests: string[] = [];
   page.on("request", (request) => {
@@ -251,6 +264,27 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#scientific-provenance")).toContainText("Exact canonical 21-mer mode");
   await expect(page.locator("#file-input")).not.toHaveAttribute("accept", /bed|gff|gtf/i);
+});
+
+test("BGZF multi-FASTA members load as one ordered sequence stream", async ({ page }) => {
+  await page.goto("/");
+  const bgzf = Buffer.concat([
+    bgzfBlock(">chrA\nACGTACGT"),
+    bgzfBlock("ACGT\n>chrB\n"),
+    bgzfBlock("TTTTCCCC\n"),
+  ]);
+  await page.locator("#file-input").setInputFiles({
+    name: "two-records.fa.gz",
+    mimeType: "application/gzip",
+    buffer: bgzf,
+  });
+
+  await expect(page.locator("#x-sequence option")).toHaveText([
+    "chrA · 12 bp",
+    "chrB · 8 bp",
+  ]);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  await expect(page.locator("#sequence-load-dialog")).toBeHidden();
 });
 
 test("stacked sequence tracks pan with the plot and preserve its genomic viewport", async ({ page }) => {

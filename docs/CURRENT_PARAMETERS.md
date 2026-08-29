@@ -25,7 +25,7 @@
 | Heatmap minimum / midpoint / maximum | 85% / 92% / 100% |
 | Zoom-axis cache budget | 192 MiB |
 | Prepared-axis budget | 384 MiB |
-| Wasm session budget | 1536 MiB |
+| Wasm session budget | 3072 MiB |
 | Maximum tile edge | 256 cells |
 
 Exact terminal mode, user-selected alternatives, and per-tile configuration digests are described in the scientific specification.

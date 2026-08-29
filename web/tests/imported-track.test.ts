@@ -13,8 +13,10 @@ describe("imported feature tracks", () => {
   it("recognizes supported text formats and UCSC itemRgb colors", () => {
     expect(inferFeatureFormat("regions.bed")).toBe("bed");
     expect(inferFeatureFormat("regions.bed.gz")).toBe("bed");
+    expect(inferFeatureFormat("regions.bed.bgz")).toBe("bed");
     expect(inferFeatureFormat("genes.gff3")).toBe("gff3");
     expect(inferFeatureFormat("genes.gff3.gz")).toBe("gff3");
+    expect(inferFeatureFormat("genes.gff3.bgzf")).toBe("gff3");
     expect(inferFeatureFormat("genes.gtf")).toBe("gtf");
     expect(inferFeatureFormat("genes.gtf.gz")).toBe("gtf");
     expect(inferFeatureFormat("features.txt", "chr1\t0\t10")).toBe("bed");

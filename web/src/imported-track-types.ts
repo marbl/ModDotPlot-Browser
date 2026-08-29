@@ -77,7 +77,7 @@ export type TrackParserMessage =
   | { type: "error"; requestId: number; message: string; issues: ImportIssue[] };
 
 export function inferFeatureFormat(fileName: string, firstDataLine = ""): ImportedTrackFormat | null {
-  const lower = fileName.toLowerCase().replace(/\.gz$/, "");
+  const lower = fileName.toLowerCase().replace(/\.(?:gz|bgz|bgzf)$/, "");
   if (/\.(bed)(?:\.txt)?$/.test(lower)) return "bed";
   if (/\.(gff|gff3)(?:\.txt)?$/.test(lower)) return "gff3";
   if (/\.(gtf|gff2)(?:\.txt)?$/.test(lower)) return "gtf";

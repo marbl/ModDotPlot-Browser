@@ -95,9 +95,27 @@ impl FastaParser {
     /// data before the first header, or an empty completed record.
     pub fn push_chunk(&mut self, chunk: &[u8]) -> Result<Vec<PackedSequence>, FastaError> {
         let mut completed = Vec::new();
-        for &byte in chunk {
+        let mut index = 0;
+        while index < chunk.len() {
+            let byte = chunk[index];
             let offset = self.byte_offset;
+
+            if self.mode == Mode::Sequence
+                && !byte.is_ascii_whitespace()
+                && !(self.at_line_start && matches!(byte, b'>' | b';'))
+            {
+                let run_length = chunk[index..]
+                    .iter()
+                    .position(u8::is_ascii_whitespace)
+                    .unwrap_or(chunk.len() - index);
+                let run = &chunk[index..index + run_length];
+                self.push_sequence_run(run, offset)?;
+                index += run.len();
+                continue;
+            }
+
             self.byte_offset += 1;
+            index += 1;
 
             if byte == b'\r' {
                 continue;
@@ -169,6 +187,37 @@ impl FastaParser {
         Ok(completed)
     }
 
+    fn push_sequence_run(&mut self, run: &[u8], offset: u64) -> Result<(), FastaError> {
+        let Some(current) = self.current.as_mut() else {
+            return Err(self.error_at("internal FASTA parser state error", offset));
+        };
+        let remaining = self.max_sequence_length.saturating_sub(current.len());
+        let accepted = run
+            .len()
+            .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        self.at_line_start = false;
+        if let Err(relative) = current.push_iupac_chunk(&run[..accepted]) {
+            self.byte_offset += u64::try_from(relative).unwrap_or(u64::MAX) + 1;
+            let invalid = run[relative];
+            return Err(self.error_at(
+                &format!("invalid FASTA sequence byte 0x{invalid:02x}"),
+                offset + u64::try_from(relative).unwrap_or(u64::MAX),
+            ));
+        }
+        self.byte_offset += u64::try_from(accepted).unwrap_or(u64::MAX);
+        if accepted < run.len() {
+            self.byte_offset += 1;
+            return Err(self.error_at(
+                &format!(
+                    "FASTA record exceeds the supported {}-base limit",
+                    self.max_sequence_length
+                ),
+                offset + u64::try_from(accepted).unwrap_or(u64::MAX),
+            ));
+        }
+        Ok(())
+    }
+
     /// Finishes the stream and returns the final completed record.
     ///
     /// # Errors
@@ -214,13 +263,14 @@ impl FastaParser {
     }
 
     fn take_current(&mut self) -> Result<PackedSequence, FastaError> {
-        let sequence = self.current.take().expect("current record is present");
+        let mut sequence = self.current.take().expect("current record is present");
         if sequence.is_empty() {
             return Err(self.error_at(
                 &format!("FASTA record '{}' contains no sequence", sequence.name()),
                 self.byte_offset,
             ));
         }
+        sequence.compact_storage();
         Ok(sequence)
     }
 

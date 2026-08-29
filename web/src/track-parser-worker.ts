@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 
+import { decompressBgzfStream, isBgzfBlob } from "./bgzf";
 import {
   assignFeatureLanes,
   gffFeatureColor,
@@ -498,7 +499,7 @@ function issue(state: ParseState, message: string): void {
 }
 
 function stripExtension(name: string): string {
-  return name.replace(/\.(?:bed|gff3?|gff2|gtf)(?:\.txt)?(?:\.gz)?$/i, "") || "Imported features";
+  return name.replace(/\.(?:bed|gff3?|gff2|gtf)(?:\.txt)?(?:\.(?:gz|bgz|bgzf))?$/i, "") || "Imported features";
 }
 
 async function readLines(
@@ -506,7 +507,7 @@ async function readLines(
   consume: (line: string) => void,
   progress: (fraction: number) => void,
 ): Promise<void> {
-  const compressed = file.name.toLowerCase().endsWith(".gz");
+  const compressed = /\.(?:gz|bgz|bgzf)$/i.test(file.name);
   let bytesRead = 0;
   let lastPercentage = -1;
   const reportBytes = (): void => {
@@ -529,8 +530,12 @@ async function readLines(
         controller.enqueue(chunk);
       },
     }));
-    const gzipBytes = stream as unknown as ReadableStream<BufferSource>;
-    stream = gzipBytes.pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>;
+    if (await isBgzfBlob(file)) {
+      stream = decompressBgzfStream(stream);
+    } else {
+      const gzipBytes = stream as unknown as ReadableStream<BufferSource>;
+      stream = gzipBytes.pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>;
+    }
   }
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -551,7 +556,7 @@ async function readLines(
   } catch (error: unknown) {
     if (!compressed) throw error;
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Could not decompress ${file.name} as gzip: ${reason}`);
+    throw new Error(`Could not decompress ${file.name} as gzip/BGZF: ${reason}`);
   }
   pending += decoder.decode();
   if (pending.length > 0) consume(pending);

@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import init, { ComputeSession, ScientificConfig } from "./wasm/moddotplot_wasm.js";
+import { decompressBgzfStream, isBgzfBlob } from "./bgzf";
 import type {
   ComparisonParameters,
   FeatureTrackRequest,
@@ -36,6 +37,7 @@ let pendingPresentation: {
   requestId: number;
   resolve: () => void;
 } | null = null;
+const FASTA_INGEST_BATCH_BYTES = 4 * 1024 * 1024;
 
 const engineReady = init().then((wasm) => {
   wasmMemory = wasm.memory;
@@ -242,12 +244,26 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
   const staging = new ComputeSession();
   const totalBytes = files.reduce((total, file) => total + file.size, 0);
   let completedBytes = 0;
+  let lastProgressFile = "";
+  let lastProgressPercentage = -1;
+  const reportProgress = (file: File, currentBytes: number): void => {
+    const progress = totalBytes > 0
+      ? (completedBytes + Math.min(currentBytes, file.size)) / totalBytes
+      : 0;
+    const percentage = Math.floor(progress * 100);
+    if (file.name === lastProgressFile && percentage === lastProgressPercentage) return;
+    lastProgressFile = file.name;
+    lastProgressPercentage = percentage;
+    if (operationIsCurrent()) {
+      post({ type: "status", text: `Reading ${file.name}`, progress, busy: true });
+    }
+  };
   try {
     for (const file of files) {
       if (!operationIsCurrent()) return;
       staging.begin_fasta();
       let stream: ReadableStream<Uint8Array> = file.stream();
-      const compressedFile = file.name.toLowerCase().endsWith(".gz");
+      const compressedFile = /\.(?:gz|bgz|bgzf)$/i.test(file.name);
       if (compressedFile) {
         if (!("DecompressionStream" in globalThis)) {
           throw new Error("This browser cannot decompress gzip FASTA files; use an uncompressed FASTA.");
@@ -256,20 +272,37 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
         stream = stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
           transform(chunk, controller) {
             compressedBytes += chunk.byteLength;
-            const progress = totalBytes > 0
-              ? (completedBytes + Math.min(compressedBytes, file.size)) / totalBytes
-              : 0;
-            if (operationIsCurrent()) {
-              post({ type: "status", text: `Reading ${file.name}`, progress, busy: true });
-            }
+            reportProgress(file, compressedBytes);
             controller.enqueue(chunk);
           },
         }));
-        const compressed = stream as unknown as ReadableStream<BufferSource>;
-        stream = compressed.pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>;
+        if (await isBgzfBlob(file)) {
+          stream = decompressBgzfStream(stream);
+        } else {
+          const compressed = stream as unknown as ReadableStream<BufferSource>;
+          stream = compressed.pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>;
+        }
       }
       const reader = stream.getReader();
       let fileBytes = 0;
+      let batchBytes = 0;
+      let batchChunks: Uint8Array[] = [];
+      const flushBatch = (): void => {
+        if (batchBytes === 0) return;
+        if (batchChunks.length === 1) {
+          staging.push_fasta_chunk(batchChunks[0] ?? new Uint8Array());
+        } else {
+          const batch = new Uint8Array(batchBytes);
+          let offset = 0;
+          for (const chunk of batchChunks) {
+            batch.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          staging.push_fasta_chunk(batch);
+        }
+        batchBytes = 0;
+        batchChunks = [];
+      };
       while (true) {
         const result = await reader.read();
         if (!operationIsCurrent()) {
@@ -277,15 +310,19 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
           return;
         }
         if (result.done) break;
-        staging.push_fasta_chunk(result.value);
         fileBytes += result.value.byteLength;
         if (!compressedFile) {
-          const progress = totalBytes > 0
-            ? (completedBytes + Math.min(fileBytes, file.size)) / totalBytes
-            : 0;
-          post({ type: "status", text: `Reading ${file.name}`, progress, busy: true });
+          reportProgress(file, fileBytes);
+        }
+        if (batchBytes === 0 && result.value.byteLength >= FASTA_INGEST_BATCH_BYTES) {
+          staging.push_fasta_chunk(result.value);
+        } else {
+          batchChunks.push(result.value);
+          batchBytes += result.value.byteLength;
+          if (batchBytes >= FASTA_INGEST_BATCH_BYTES) flushBatch();
         }
       }
+      flushBatch();
       staging.finish_fasta();
       completedBytes += file.size;
     }
