@@ -226,7 +226,7 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.2.0-beta.4 is a functional preview and has not completed the full scientific
+* v0.2.0 is a functional preview and has not completed the full scientific
   release-validation plan.
 * Very large records are limited by available browser memory; sharding and disk spill
   are planned before claiming robust 1 Gb operation.

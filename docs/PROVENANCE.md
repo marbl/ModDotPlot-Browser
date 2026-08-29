@@ -12,8 +12,8 @@ than restating it, reducing the risk of attribution drift. Machine-readable auth
 software version, preferred citation, and method references are maintained in
 [`CITATION.cff`](../CITATION.cff).
 
-The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current local beta is
-`v0.2.0-beta.4`. Scientific tiles carry
+The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current release is
+`v0.2.0`. Scientific tiles carry
 a versioned configuration digest covering every estimator parameter that can affect
 their numeric output. The browser displays the digest and principal parameters under
 Advanced options. Release builds also include a CycloneDX SBOM, a dependency license

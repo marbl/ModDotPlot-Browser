@@ -7,6 +7,8 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-29
+
 ### Changed
 
 * Stabilized direct track reordering: a dragged track now swaps only after its center
@@ -176,7 +178,8 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.4...HEAD
+[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.4...v0.2.0
 [0.2.0-beta.4]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.3...v0.2.0-beta.4
 [0.2.0-beta.3]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.2...v0.2.0-beta.3
 [0.2.0-beta.2]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.1...v0.2.0-beta.2
