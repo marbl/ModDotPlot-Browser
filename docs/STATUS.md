@@ -76,8 +76,8 @@ The exact fixture and reporting command are in
 
 The current chromosome-scale browser report uses complete CHM13 and HG002 paternal
 chromosome 1 records. On the release host, the CHM13 self view reached a coherent quick
-view in 4.64 seconds and stable refinement in 7.40 seconds; the pairwise view reached
-those points in 5.38 and 10.97 seconds after selection. A fixed navigation trace
+view in 4.78 seconds and stable refinement in 7.59 seconds; the pairwise view reached
+those points in 5.47 and 11.15 seconds after selection. A fixed navigation trace
 plateaued at the same reported memory in both cycles. Full provenance and machine data
 are in the [v0.2.0-beta.1 validation record](releases/v0.2.0-beta.1/VALIDATION.md).
 
