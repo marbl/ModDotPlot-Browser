@@ -87,8 +87,13 @@ h1 {
 }
 .landing-content { display: grid; gap: 22px; justify-items: center; }
 
-.drop-zone {
+.drop-zone-frame {
   width: min(660px, 75vw);
+  display: grid;
+}
+
+.drop-zone {
+  width: 100%;
   min-height: 310px;
   display: flex;
   flex-direction: column;
@@ -117,8 +122,12 @@ h1 {
   letter-spacing: -0.025em;
 }
 
-.drop-detail, .privacy-note { color: var(--muted); font-size: 14px; }
-.privacy-note { margin-top: 26px; font-size: 12px; }
+.drop-detail { color: var(--muted); font-size: 14px; }
+.choose-files { text-decoration: underline; text-underline-offset: 2px; }
+.caveat-note, .privacy-note { color: var(--muted); font-size: 12px; }
+.caveat-note { margin-top: 26px; }
+.app-version { color: #969099; font-size: 9px; font-variant-numeric: tabular-nums; }
+.landing-version { justify-self: end; padding: 4px 3px 0 0; }
 
 .workspace {
   display: grid;
@@ -385,15 +394,18 @@ details[open] summary { margin-bottom: 4px; }
   text-overflow: ellipsis;
 }
 .status.error { color: #a32c3d; }
-.memory-usage {
+.control-footer {
   margin-top: auto;
   padding-top: 9px;
   border-top: 1px solid var(--line);
-  color: var(--muted);
   text-align: center;
+}
+.memory-usage {
+  color: var(--muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
+.control-version { display: block; margin-top: 3px; }
 
 .plot-shell {
   display: grid;
@@ -739,5 +751,5 @@ body.is-track-pointer-dragging * { cursor: grabbing !important; }
   .feature-track-controls[open] .imported-track-list:has(> #imported-track-empty:not([hidden])) { display: none; }
   .add-track-button { margin-top: 0; padding-block: 4px; }
   #identity-histogram { height: 20px; max-height: 20px; }
-  .memory-usage { padding-top: 6px; }
+  .control-footer { padding-top: 6px; }
 }

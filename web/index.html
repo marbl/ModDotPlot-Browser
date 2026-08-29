@@ -16,11 +16,15 @@
       <section id="landing" class="landing" aria-labelledby="drop-title">
         <div class="landing-content">
           <h1>moddotplot-rs</h1>
-          <button id="drop-zone" class="drop-zone" type="button">
-            <span id="drop-title" class="drop-title">Drop FASTA files here</span>
-            <span class="drop-detail">or choose files · FASTA, gzip, and BGZF · practical limit depends on browser memory</span>
-            <span class="privacy-note">Your sequence never leaves this browser.</span>
-          </button>
+          <div class="drop-zone-frame">
+            <button id="drop-zone" class="drop-zone" type="button">
+              <span id="drop-title" class="drop-title">Drop FASTA files here</span>
+              <span class="drop-detail">or <span class="choose-files">choose files</span> · FASTA, gzip, and BGZF · ok for human-sized genomes, memory permitting</span>
+              <span class="caveat-note">100% vibe-coded with Codex, provided &quot;as is&quot;</span>
+              <span class="privacy-note">Your sequence never leaves this browser</span>
+            </button>
+            <span id="landing-version" class="app-version landing-version"></span>
+          </div>
         </div>
         <input id="file-input" type="file" accept=".fa,.fasta,.fna,.fas,.fa.gz,.fasta.gz,.fna.gz,.gz,.bgz,.bgzf" multiple hidden />
       </section>
@@ -160,7 +164,10 @@
           </details>
 
           <button id="reset-view" class="quiet-button" type="button">Reset view</button>
-          <div id="memory-usage" class="memory-usage" title="Estimated sequence, cache, JavaScript, and graphics memory">Memory —</div>
+          <div class="control-footer">
+            <div id="memory-usage" class="memory-usage" title="Estimated sequence, cache, JavaScript, and graphics memory">Memory —</div>
+            <span id="control-version" class="app-version control-version"></span>
+          </div>
         </aside>
 
         <section id="plot-column" class="plot-column">

@@ -8,7 +8,7 @@ import {
   trackAxisEligible,
   type ImportedFeature,
 } from "../src/imported-track-types";
-import { fullTrackSwapDirection } from "../src/imported-track";
+import { midpointSwapDirection } from "../src/imported-track";
 
 describe("imported feature tracks", () => {
   it("recognizes supported text formats and UCSC itemRgb colors", () => {
@@ -56,14 +56,16 @@ describe("imported feature tracks", () => {
     ]);
   });
 
-  it("reorders only after the dragged track completely clears its neighbor", () => {
-    expect(fullTrackSwapDirection(-19, 1, 0, 60)).toBe(0);
-    expect(fullTrackSwapDirection(-20, 0, 0, 60)).toBe(-1);
-    expect(fullTrackSwapDirection(59, 79, 0, 60)).toBe(0);
-    expect(fullTrackSwapDirection(60, 80, 0, 60)).toBe(1);
+  it("reorders only beyond an adjacent track midpoint", () => {
+    expect(midpointSwapDirection(19.9, 20, 40)).toBe(-1);
+    expect(midpointSwapDirection(20, 20, 40)).toBe(0);
+    expect(midpointSwapDirection(39.9, 20, 40)).toBe(0);
+    expect(midpointSwapDirection(40, 20, 40)).toBe(0);
+    expect(midpointSwapDirection(40.1, 20, 40)).toBe(1);
 
-    // Once swapped downward, overlap with the prior track cannot immediately reverse it.
-    expect(fullTrackSwapDirection(60, 80, 20, 100)).toBe(0);
+    // After a downward swap, the same pointer coordinate is between the new neighbors
+    // and therefore cannot immediately swap the track back.
+    expect(midpointSwapDirection(40.1, 20, 60)).toBe(0);
   });
 });
 

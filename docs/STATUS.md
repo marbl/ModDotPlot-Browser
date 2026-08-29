@@ -39,7 +39,7 @@ by the named evidence; it does not imply broad research validation.
   conservative confirmed chromosome aliases, sequence-aware automatic axis assignment,
   sequence-associated axis eligibility, UCSC colors, category-colored grouped gene
   models with distinct CDS geometry, one-to-ten-row deterministic lane packing,
-  synchronous pan, feature mouseovers, full-clearance direct strip reordering,
+  synchronous pan, feature mouseovers, midpoint-triggered direct strip reordering,
   pointer-following drag previews, and first-release drag-away disabling.
 * Actionable compute-worker recovery that rebuilds the engine and reloads the user's
   retained browser `File` objects after a worker crash.

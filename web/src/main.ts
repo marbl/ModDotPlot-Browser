@@ -30,6 +30,8 @@ import type {
 const landing = element<HTMLElement>("landing");
 const workspace = element<HTMLElement>("workspace");
 const dropZone = element<HTMLButtonElement>("drop-zone");
+const landingVersion = element<HTMLElement>("landing-version");
+const controlVersion = element<HTMLElement>("control-version");
 const fileInput = element<HTMLInputElement>("file-input");
 const clearButton = element<HTMLButtonElement>("clear-button");
 const xSelect = element<HTMLSelectElement>("x-sequence");
@@ -51,6 +53,9 @@ const plotFrame = element<HTMLElement>("plot-frame");
 const plotLoading = element<HTMLElement>("plot-loading");
 const dnaLoader = new DnaLoader();
 plotLoading.append(dnaLoader.canvas);
+const versionLabel = `v${__APP_VERSION__}`;
+landingVersion.textContent = versionLabel;
+controlVersion.textContent = versionLabel;
 const plotColumn = element<HTMLElement>("plot-column");
 const canvas = element<HTMLCanvasElement>("plot-canvas");
 const xAxisCanvas = element<HTMLCanvasElement>("x-axis-overlay");
