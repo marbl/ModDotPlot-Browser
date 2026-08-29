@@ -332,4 +332,19 @@ mod tests {
         let expected = PackedSequence::from_ascii("slice", b"CGTNCC");
         assert_eq!(slice, expected);
     }
+
+    #[test]
+    fn uracil_is_normalized_to_thymine_without_coordinate_changes() {
+        let uracil = PackedSequence::from_ascii("rna", b"aCuUGcUu");
+        let thymine = PackedSequence::from_ascii("dna", b"ACTTGCTT");
+        assert_eq!(uracil.len(), thymine.len());
+        assert_eq!(
+            uracil
+                .canonical_kmers(5, 0, uracil.len())
+                .collect::<Vec<_>>(),
+            thymine
+                .canonical_kmers(5, 0, thymine.len())
+                .collect::<Vec<_>>(),
+        );
+    }
 }

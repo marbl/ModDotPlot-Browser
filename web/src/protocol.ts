@@ -10,7 +10,26 @@ export interface ComparisonParameters {
   resolution: number;
   previewRegisterCount: number;
   detailedRegisterCount: number;
+  sparseCorrection: boolean;
   k: number;
+}
+
+export interface ScientificConfigMetadata {
+  version: number;
+  digest: string;
+  hashAlgorithm: string;
+  hashSeed: string;
+  estimator: string;
+  k: number;
+  registerCount: number;
+  hllPrecision: number;
+  bBits: number;
+  verificationBits: number;
+  sparseCoreCap: number;
+  aniFloor: number;
+  minimumDetectionProbability: number;
+  identityScale: number;
+  missingIdentity: number;
 }
 
 export interface TileCoordinate {
@@ -23,7 +42,7 @@ export interface CachedTileCoordinate extends TileCoordinate {
 }
 
 export type MainToWorkerMessage =
-  | { type: "load"; files: File[] }
+  | { type: "load"; generation: number; files: File[] }
   | { type: "prepare"; generation: number; requestId: number; parameters: ComparisonParameters }
   | { type: "cancel-tiles"; generation: number; requestId: number }
   | { type: "preview-presented"; generation: number; requestId: number }
@@ -40,10 +59,11 @@ export type MainToWorkerMessage =
       mode: "sketch" | "kmer";
       tiles: TileCoordinate[];
     }
-  | { type: "clear" };
+  | { type: "clear"; generation: number };
 
 export interface MatrixTilePayload {
   generation: number;
+  configDigest: string;
   quality: "preview" | "refined" | "exact";
   resolution: number;
   x: number;
@@ -60,8 +80,13 @@ export interface MatrixTilePayload {
 export type WorkerToMainMessage =
   | { type: "ready" }
   | { type: "status"; text: string; progress?: number; busy?: boolean }
-  | { type: "sequences"; sequences: SequenceMetadata[] }
-  | { type: "comparison-ready"; generation: number; parameters: ComparisonParameters }
+  | { type: "sequences"; generation: number; sequences: SequenceMetadata[] }
+  | {
+      type: "comparison-ready";
+      generation: number;
+      parameters: ComparisonParameters;
+      configurations: ScientificConfigMetadata[];
+    }
   | { type: "preview-complete"; generation: number; requestId: number }
   | ({ type: "tile" } & MatrixTilePayload)
   | { type: "complete"; generation: number; elapsedMs: number; estimatedBytes: number }

@@ -1,41 +1,28 @@
-//! Deterministic rolling and MashMap-compatible hash backends.
+//! Deterministic canonical ntHash2 stream used by the production estimator.
 
-use crate::dna::{CanonicalKmerIter, Orientation, PackedSequence};
+use crate::dna::{Orientation, PackedSequence};
 
-/// Hash streams evaluated by the direct OPH backend.
+/// Selected production hash stream.
+///
+/// The enum remains part of scientific provenance so a future hash change requires an
+/// explicit configuration-version change. No runtime-selectable alternative is shipped.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(u8)]
 pub enum HashAlgorithm {
-    /// Canonical packed two-bit word followed by `fmix64`.
-    PackedFmix64 = 0,
     /// Official ntHash2 canonical split-rotation hash.
     NtHash2 = 1,
-    /// MashMap-compatible `MurmurHash3` over both ASCII strands.
-    MashMapMurmur3 = 2,
 }
 
 impl HashAlgorithm {
-    /// Stable identifier used by benchmark reports and persisted metadata.
+    /// Stable identifier used by configuration digests and provenance.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::PackedFmix64 => "packed_fmix64",
             Self::NtHash2 => "nthash2",
-            Self::MashMapMurmur3 => "mashmap_murmur3",
-        }
-    }
-
-    /// Converts the stable numeric representation used by the Wasm benchmark API.
-    pub const fn from_id(id: u8) -> Option<Self> {
-        match id {
-            0 => Some(Self::PackedFmix64),
-            1 => Some(Self::NtHash2),
-            2 => Some(Self::MashMapMurmur3),
-            _ => None,
         }
     }
 }
 
-/// One coordinate-preserving canonical hash from an interchangeable backend.
+/// One coordinate-preserving canonical hash.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PositionedHash {
     /// Zero-based k-mer start coordinate.
@@ -46,73 +33,16 @@ pub struct PositionedHash {
     pub orientation: Orientation,
 }
 
-/// A canonical hash and its orientation relative to the source sequence.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CanonicalHash {
-    /// Lower of the forward and reverse-complement hashes.
-    pub hash: u64,
-    /// Orientation of the representation that produced `hash`.
-    pub orientation: Orientation,
-}
-
-/// Iterator over one of the supported canonical hash streams.
-pub enum CanonicalHashIter<'a> {
-    /// Packed canonical two-bit k-mers with a short avalanche finalizer.
-    Packed {
-        /// Coordinate-preserving canonical k-mer stream.
-        kmers: CanonicalKmerIter<'a>,
-        /// K-mer length mixed into each hash.
-        k: u8,
-        /// Public deterministic seed.
-        seed: u64,
-    },
-    /// Native ntHash2 rolling state.
-    NtHash2(NtHash2Iter<'a>),
-    /// MashMap-compatible `MurmurHash3` reference stream.
-    MashMap {
-        /// Coordinate-preserving canonical k-mer stream.
-        kmers: CanonicalKmerIter<'a>,
-        /// K-mer length used to restore the two ASCII strands.
-        k: u8,
-        /// MashMap-compatible 32-bit `MurmurHash3` seed.
-        seed: u32,
-    },
-}
-
-impl Iterator for CanonicalHashIter<'_> {
-    type Item = PositionedHash;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Packed { kmers, k, seed } => kmers.next().map(|kmer| PositionedHash {
-                start: kmer.start,
-                hash: hash_canonical(kmer.bits, *k, *seed),
-                orientation: kmer.orientation,
-            }),
-            Self::NtHash2(iterator) => iterator.next(),
-            Self::MashMap { kmers, k, seed } => kmers.next().map(|kmer| {
-                let selected = mashmap_hash_canonical(kmer.bits, *k, kmer.orientation, *seed);
-                PositionedHash {
-                    start: kmer.start,
-                    hash: selected.hash,
-                    orientation: selected.orientation,
-                }
-            }),
-        }
-    }
-}
-
-/// Streams canonical hashes for k-mer starts in `[start, end)`.
+/// Streams canonical ntHash2 hashes for k-mer starts in `[start, end)`.
 ///
-/// The ntHash2 stream is a clean Rust implementation of the published split-rotation
-/// recurrence. It is pinned against official implementation vectors in this module's
-/// tests. The `MashMap` stream intentionally reconstructs ASCII strands to remain a
-/// faithful, slower scientific reference.
+/// Seed zero returns the exact published ntHash2 canonical stream and is the only
+/// production setting. Nonzero seeds apply `fmix64(hash ^ seed)` and exist solely for
+/// multi-seed statistical validation; the direct production iterator pays no extra
+/// finalizer or per-k-mer seed branch.
 ///
 /// # Panics
 ///
-/// Panics if `k` is outside `1..=31`, or if the seed cannot fit the MashMap-compatible
-/// 32-bit seed when that reference backend is selected.
+/// Panics if `k` is outside `1..=31`.
 pub fn canonical_hashes(
     sequence: &PackedSequence,
     k: u8,
@@ -122,19 +52,40 @@ pub fn canonical_hashes(
     seed: u64,
 ) -> CanonicalHashIter<'_> {
     match algorithm {
-        HashAlgorithm::PackedFmix64 => CanonicalHashIter::Packed {
-            kmers: sequence.canonical_kmers(k, start, end),
-            k,
-            seed,
-        },
-        HashAlgorithm::NtHash2 => {
+        HashAlgorithm::NtHash2 if seed == 0 => {
             CanonicalHashIter::NtHash2(NtHash2Iter::new(sequence, k, start, end))
         }
-        HashAlgorithm::MashMapMurmur3 => CanonicalHashIter::MashMap {
-            kmers: sequence.canonical_kmers(k, start, end),
-            k,
-            seed: u32::try_from(seed).expect("MashMap's seed is a u32"),
+        HashAlgorithm::NtHash2 => CanonicalHashIter::SeededNtHash2 {
+            inner: NtHash2Iter::new(sequence, k, start, end),
+            seed,
         },
+    }
+}
+
+/// Direct production ntHash2 stream or a validation-only seeded permutation of it.
+pub enum CanonicalHashIter<'a> {
+    /// Exact published ntHash2 output used by production seed zero.
+    NtHash2(NtHash2Iter<'a>),
+    /// Seeded avalanche used only to sample independent validation layouts.
+    SeededNtHash2 {
+        /// Underlying exact published ntHash2 stream.
+        inner: NtHash2Iter<'a>,
+        /// Nonzero validation-only avalanche seed.
+        seed: u64,
+    },
+}
+
+impl Iterator for CanonicalHashIter<'_> {
+    type Item = PositionedHash;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::NtHash2(inner) => inner.next(),
+            Self::SeededNtHash2 { inner, seed } => inner.next().map(|mut item| {
+                item.hash = fmix64(item.hash ^ *seed);
+                item
+            }),
+        }
     }
 }
 
@@ -275,140 +226,8 @@ fn nthash_sror(value: u64) -> u64 {
     ((value >> 1) & 0xffff_fffe_ffff_ffff) | wrapped
 }
 
-/// Hashes a canonical two-bit k-mer with a fixed integer-only finalizer.
-///
-/// The length is mixed explicitly so differently sized k-mers with the same leading
-/// encoding do not share a hash. This backend is versioned independently from the
-/// pinned MashMap-reference hash.
-pub fn hash_canonical(bits: u64, k: u8, seed: u64) -> u64 {
-    let length_tag = u64::from(k).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    fmix64(bits ^ seed ^ length_tag)
-}
-
-/// Hashes both orientations exactly as `MashMap3` and selects the lower value.
-///
-/// `MashMap3` applies `MurmurHash3_x64_128` with seed 42 to ASCII forward and
-/// reverse-complement k-mers, then retains the first 64-bit word. `bits` is the
-/// canonical two-bit representation produced by [`crate::dna::PackedSequence`];
-/// `canonical_orientation` identifies whether that representation was forward or
-/// reverse relative to the source.
-///
-/// # Panics
-///
-/// Panics if `k` is outside `1..=31`.
-pub fn mashmap_hash_canonical(
-    bits: u64,
-    k: u8,
-    canonical_orientation: Orientation,
-    seed: u32,
-) -> CanonicalHash {
-    assert!((1..=31).contains(&k));
-    let mut canonical = [0_u8; 31];
-    for (index, output) in canonical.iter_mut().enumerate().take(usize::from(k)) {
-        let shift = 2 * (usize::from(k) - index - 1);
-        *output = b"ACGT"[((bits >> shift) & 3) as usize];
-    }
-    let canonical = &canonical[..usize::from(k)];
-    let mut opposite = [0_u8; 31];
-    for (output, &base) in opposite.iter_mut().zip(canonical.iter().rev()) {
-        *output = match base {
-            b'A' => b'T',
-            b'C' => b'G',
-            b'G' => b'C',
-            b'T' => b'A',
-            _ => unreachable!("the decoded two-bit alphabet is always canonical DNA"),
-        };
-    }
-    let canonical_hash = murmur3_x64_128_first(canonical, seed);
-    let opposite_hash = murmur3_x64_128_first(&opposite[..usize::from(k)], seed);
-    match canonical_hash.cmp(&opposite_hash) {
-        std::cmp::Ordering::Less => CanonicalHash {
-            hash: canonical_hash,
-            orientation: canonical_orientation,
-        },
-        std::cmp::Ordering::Greater => CanonicalHash {
-            hash: opposite_hash,
-            orientation: opposite_orientation(canonical_orientation),
-        },
-        std::cmp::Ordering::Equal => CanonicalHash {
-            hash: canonical_hash,
-            orientation: Orientation::Both,
-        },
-    }
-}
-
-/// Returns the first 64-bit word of `MurmurHash3_x64_128`.
-///
-/// This integer-only implementation explicitly reads little-endian blocks, matching
-/// `MashMap`'s supported x86-64 platforms while remaining deterministic in WebAssembly.
-pub fn murmur3_x64_128_first(bytes: &[u8], seed: u32) -> u64 {
-    const C1: u64 = 0x87c3_7b91_1142_53d5;
-    const C2: u64 = 0x4cf5_ad43_2745_937f;
-    let mut h1 = u64::from(seed);
-    let mut h2 = u64::from(seed);
-    let (blocks, tail) = bytes.as_chunks::<16>();
-    for block in blocks {
-        let mut first = [0_u8; 8];
-        let mut second = [0_u8; 8];
-        first.copy_from_slice(&block[..8]);
-        second.copy_from_slice(&block[8..]);
-        let mut k1 = u64::from_le_bytes(first);
-        let mut k2 = u64::from_le_bytes(second);
-
-        k1 = k1.wrapping_mul(C1).rotate_left(31).wrapping_mul(C2);
-        h1 ^= k1;
-        h1 = h1
-            .rotate_left(27)
-            .wrapping_add(h2)
-            .wrapping_mul(5)
-            .wrapping_add(0x52dc_e729);
-
-        k2 = k2.wrapping_mul(C2).rotate_left(33).wrapping_mul(C1);
-        h2 ^= k2;
-        h2 = h2
-            .rotate_left(31)
-            .wrapping_add(h1)
-            .wrapping_mul(5)
-            .wrapping_add(0x3849_5ab5);
-    }
-
-    let mut k1 = 0_u64;
-    let mut k2 = 0_u64;
-    for (index, &byte) in tail.iter().take(8).enumerate() {
-        k1 ^= u64::from(byte) << (8 * index);
-    }
-    for (index, &byte) in tail.iter().skip(8).enumerate() {
-        k2 ^= u64::from(byte) << (8 * index);
-    }
-    if tail.len() > 8 {
-        h2 ^= k2.wrapping_mul(C2).rotate_left(33).wrapping_mul(C1);
-    }
-    if !tail.is_empty() {
-        h1 ^= k1.wrapping_mul(C1).rotate_left(31).wrapping_mul(C2);
-    }
-
-    let length = bytes.len() as u64;
-    h1 ^= length;
-    h2 ^= length;
-    h1 = h1.wrapping_add(h2);
-    h2 = h2.wrapping_add(h1);
-    h1 = fmix64(h1);
-    h2 = fmix64(h2);
-    h1 = h1.wrapping_add(h2);
-    h1
-}
-
-fn opposite_orientation(orientation: Orientation) -> Orientation {
-    match orientation {
-        Orientation::Forward => Orientation::Reverse,
-        Orientation::Reverse => Orientation::Forward,
-        Orientation::Both => Orientation::Both,
-        Orientation::Unknown => Orientation::Unknown,
-    }
-}
-
-/// `MurmurHash3`'s 64-bit avalanche finalizer.
-pub fn fmix64(mut value: u64) -> u64 {
+/// `MurmurHash3`'s `fmix64` finalizer, retained only for internal decorrelation.
+pub(crate) fn fmix64(mut value: u64) -> u64 {
     value ^= value >> 33;
     value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
     value ^= value >> 33;
@@ -422,52 +241,11 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn hashing_is_deterministic_and_length_separated() {
-        assert_eq!(hash_canonical(123, 21, 42), hash_canonical(123, 21, 42));
-        assert_ne!(hash_canonical(123, 20, 42), hash_canonical(123, 21, 42));
-        assert_ne!(hash_canonical(123, 21, 41), hash_canonical(123, 21, 42));
-    }
-
-    #[test]
-    fn murmur_empty_vector_matches_the_reference_definition() {
-        assert_eq!(murmur3_x64_128_first(b"", 0), 0);
-    }
-
-    #[test]
-    fn murmur_vectors_match_mashmap_commit_1a07d0e() {
-        let fixtures = [
-            (b"".as_slice(), 17_305_828_677_633_410_339_u64),
-            (b"A".as_slice(), 16_750_156_190_880_784_680),
-            (b"ACGA".as_slice(), 3_697_418_565_283_905_118),
-            (b"ACGTACGTACGTACGT".as_slice(), 4_706_917_051_267_373_191),
-            (
-                b"GATTACAGATTACAGATTACA".as_slice(),
-                14_386_777_217_808_752_167,
-            ),
-        ];
-        for (sequence, expected) in fixtures {
-            assert_eq!(murmur3_x64_128_first(sequence, 42), expected);
-        }
-    }
-
-    #[test]
-    fn mashmap_hash_is_reverse_complement_invariant_with_opposite_strand() {
-        let forward = mashmap_hash_canonical(0b00_01_10_00, 4, Orientation::Forward, 42);
-        let reverse = mashmap_hash_canonical(0b00_01_10_00, 4, Orientation::Reverse, 42);
-        assert_eq!(forward.hash, reverse.hash);
-        assert_eq!(
-            forward.orientation,
-            opposite_orientation(reverse.orientation)
-        );
-    }
-
-    #[test]
     fn nthash2_matches_official_commit_c26bd45_vectors() {
         let sequence = PackedSequence::from_ascii("official", b"ATCGTACGATGCATGCATGCTGACG");
-        let observed =
-            canonical_hashes(&sequence, 6, 0, sequence.len(), HashAlgorithm::NtHash2, 42)
-                .map(|item| item.hash)
-                .collect::<Vec<_>>();
+        let observed = canonical_hashes(&sequence, 6, 0, sequence.len(), HashAlgorithm::NtHash2, 0)
+            .map(|item| item.hash)
+            .collect::<Vec<_>>();
         let expected = [
             0x245f_4291_74d6_e9b1,
             0xadc1_da5b_636f_030c,
@@ -482,32 +260,44 @@ mod tests {
     }
 
     #[test]
-    fn every_hash_stream_is_reverse_complement_invariant() {
+    fn reverse_complements_have_equal_hashes_and_opposite_strands() {
         let forward = PackedSequence::from_ascii("forward", b"GATTACAGATTACAGATTACA");
         let reverse = PackedSequence::from_ascii("reverse", b"TGTAATCTGTAATCTGTAATC");
-        for algorithm in [
-            HashAlgorithm::PackedFmix64,
-            HashAlgorithm::NtHash2,
-            HashAlgorithm::MashMapMurmur3,
-        ] {
-            let left = canonical_hashes(&forward, 21, 0, 1, algorithm, 42)
-                .next()
-                .unwrap();
-            let right = canonical_hashes(&reverse, 21, 0, 1, algorithm, 42)
-                .next()
-                .unwrap();
-            assert_eq!(left.hash, right.hash, "{algorithm:?}");
-            assert_ne!(left.orientation, right.orientation, "{algorithm:?}");
-        }
+        let left = canonical_hashes(&forward, 21, 0, 1, HashAlgorithm::NtHash2, 0)
+            .next()
+            .unwrap();
+        let right = canonical_hashes(&reverse, 21, 0, 1, HashAlgorithm::NtHash2, 0)
+            .next()
+            .unwrap();
+        assert_eq!(left.hash, right.hash);
+        assert_ne!(left.orientation, right.orientation);
+    }
+
+    #[test]
+    fn validation_seed_changes_layout_without_changing_canonical_strand() {
+        let forward = PackedSequence::from_ascii("forward", b"GATTACAGATTACAGATTACA");
+        let reverse = PackedSequence::from_ascii("reverse", b"TGTAATCTGTAATCTGTAATC");
+        let direct = canonical_hashes(&forward, 21, 0, 1, HashAlgorithm::NtHash2, 0)
+            .next()
+            .unwrap();
+        let seeded = canonical_hashes(&forward, 21, 0, 1, HashAlgorithm::NtHash2, 17)
+            .next()
+            .unwrap();
+        let seeded_reverse = canonical_hashes(&reverse, 21, 0, 1, HashAlgorithm::NtHash2, 17)
+            .next()
+            .unwrap();
+        assert_ne!(direct.hash, seeded.hash);
+        assert_eq!(seeded.hash, seeded_reverse.hash);
+        assert_ne!(seeded.orientation, seeded_reverse.orientation);
     }
 
     #[test]
     fn nthash2_range_and_ambiguity_match_coordinate_semantics() {
         let sequence = PackedSequence::from_ascii("range", b"ACGTACGTNACGTACGTACGT");
-        let all = canonical_hashes(&sequence, 5, 0, sequence.len(), HashAlgorithm::NtHash2, 42)
+        let all = canonical_hashes(&sequence, 5, 0, sequence.len(), HashAlgorithm::NtHash2, 0)
             .collect::<Vec<_>>();
         let range =
-            canonical_hashes(&sequence, 5, 10, 14, HashAlgorithm::NtHash2, 42).collect::<Vec<_>>();
+            canonical_hashes(&sequence, 5, 10, 14, HashAlgorithm::NtHash2, 0).collect::<Vec<_>>();
         let expected = all
             .into_iter()
             .filter(|item| (10..14).contains(&item.start))
@@ -516,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn backend_hashes_have_uniform_oph_buckets_without_observed_collisions() {
+    fn nthash2_has_uniform_oph_buckets_without_observed_collisions() {
         let mut state = 0x6a09_e667_f3bc_c909_u64;
         let mut ascii = Vec::with_capacity(131_072);
         for _ in 0..ascii.capacity() {
@@ -526,42 +316,26 @@ mod tests {
             ascii.push(b"ACGT"[((state >> 61) & 3) as usize]);
         }
         let sequence = PackedSequence::from_ascii("uniformity", &ascii);
-        for algorithm in [
-            HashAlgorithm::PackedFmix64,
-            HashAlgorithm::NtHash2,
-            HashAlgorithm::MashMapMurmur3,
-        ] {
-            let mut buckets = vec![0_u32; 1_024];
-            let mut observed = HashMap::<u64, u64>::new();
-            let kmers = sequence.canonical_kmers(21, 0, sequence.len());
-            let hashes = canonical_hashes(&sequence, 21, 0, sequence.len(), algorithm, 42);
-            for (kmer, item) in kmers.zip(hashes) {
-                let bucket = usize::try_from(item.hash >> 54).expect("ten bits fit usize");
-                buckets[bucket] += 1;
-                if let Some(previous) = observed.insert(item.hash, kmer.bits) {
-                    assert_eq!(previous, kmer.bits, "64-bit collision in {algorithm:?}");
-                }
-            }
-            let total = buckets.iter().sum::<u32>();
-            let expected = f64::from(total) / 1_024.0;
-            let chi_square = buckets
-                .into_iter()
-                .map(|count| {
-                    let delta = f64::from(count) - expected;
-                    delta * delta / expected
-                })
-                .sum::<f64>();
-            if algorithm == HashAlgorithm::MashMapMurmur3 {
-                assert!(
-                    chi_square > 10_000.0,
-                    "MashMap's min-of-strands hash should expose its OPH bucket bias"
-                );
-            } else {
-                assert!(
-                    chi_square < 1_350.0,
-                    "nonuniform OPH buckets for {algorithm:?}: chi-square={chi_square}"
-                );
+        let mut buckets = vec![0_u32; 1_024];
+        let mut observed = HashMap::<u64, u64>::new();
+        let kmers = sequence.canonical_kmers(21, 0, sequence.len());
+        let hashes = canonical_hashes(&sequence, 21, 0, sequence.len(), HashAlgorithm::NtHash2, 0);
+        for (kmer, item) in kmers.zip(hashes) {
+            let bucket = usize::try_from(item.hash >> 54).expect("ten bits fit usize");
+            buckets[bucket] += 1;
+            if let Some(previous) = observed.insert(item.hash, kmer.bits) {
+                assert_eq!(previous, kmer.bits, "64-bit hash collision");
             }
         }
+        let total = buckets.iter().sum::<u32>();
+        let expected = f64::from(total) / 1_024.0;
+        let chi_square = buckets
+            .into_iter()
+            .map(|count| {
+                let delta = f64::from(count) - expected;
+                delta * delta / expected
+            })
+            .sum::<f64>();
+        assert!(chi_square < 1_350.0, "nonuniform OPH buckets: {chi_square}");
     }
 }

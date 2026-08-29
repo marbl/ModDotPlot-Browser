@@ -1,5 +1,6 @@
 import type { MatrixTilePayload } from "./protocol";
 import { initialViewport, panBy, zoomAt, type ViewportState } from "./viewport";
+import { selectTileEvictionCandidate } from "./cache";
 
 const MISSING_IDENTITY = 65_535;
 const MAX_TILE_CACHE_BYTES = 192 * 1024 * 1024;
@@ -56,10 +57,10 @@ interface Uniforms {
 export class DotplotRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGL2RenderingContext;
-  readonly #program: WebGLProgram;
-  readonly #uniforms: Uniforms;
+  #program: WebGLProgram;
+  #uniforms: Uniforms;
   readonly #tiles = new Map<string, GpuTile>();
-  readonly #fallbackBaseTexture: WebGLTexture;
+  #fallbackBaseTexture: WebGLTexture;
   readonly #resizeObserver: ResizeObserver;
   #metadata: PlotMetadata = { resolution: 1, domainLength: 1, xLength: 1, yLength: 1 };
   #view: ViewportState = initialViewport(1);
@@ -76,6 +77,7 @@ export class DotplotRenderer {
   #hoverListener: ((datum: HoverDatum | null, event: PointerEvent) => void) | null = null;
   #viewListener: ((change: ViewChange) => void) | null = null;
   #evictionListener: ((tile: { resolution: number; x: number; y: number }) => void) | null = null;
+  #contextLost = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.#canvas = canvas;
@@ -87,29 +89,10 @@ export class DotplotRenderer {
     });
     if (!gl) throw new Error("WebGL2 is required by moddotplot-rs");
     this.#gl = gl;
-    this.#program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER);
-    this.#uniforms = {
-      tile: requiredUniform(gl, this.#program, "u_tile"),
-      view: requiredUniform(gl, this.#program, "u_view"),
-      identity: requiredUniform(gl, this.#program, "u_identity"),
-      direction: requiredUniform(gl, this.#program, "u_direction"),
-      support: requiredUniform(gl, this.#program, "u_support"),
-      bases: requiredUniform(gl, this.#program, "u_bases"),
-      mode: requiredUniform(gl, this.#program, "u_mode"),
-      heatmapMin: requiredUniform(gl, this.#program, "u_heatmap_min"),
-      heatmapMid: requiredUniform(gl, this.#program, "u_heatmap_mid"),
-      heatmapMax: requiredUniform(gl, this.#program, "u_heatmap_max"),
-      exact: requiredUniform(gl, this.#program, "u_exact"),
-    };
-    this.#fallbackBaseTexture = createIntegerTexture(
-      gl,
-      1,
-      1,
-      gl.R8UI,
-      gl.UNSIGNED_BYTE,
-      new Uint8Array([4]),
-    );
-    this.#initializeGeometry();
+    this.#program = null as unknown as WebGLProgram;
+    this.#uniforms = null as unknown as Uniforms;
+    this.#fallbackBaseTexture = null as unknown as WebGLTexture;
+    this.#initializeWebGL();
     this.#bindInteractions();
     this.#resizeObserver = new ResizeObserver(() => this.#resize());
     this.#resizeObserver.observe(canvas);
@@ -127,7 +110,7 @@ export class DotplotRenderer {
   }
 
   addTile(payload: MatrixTilePayload): void {
-    const key = tileKey(payload.resolution, payload.x, payload.y);
+    const key = tileKey(payload.resolution, payload.x, payload.y, payload.configDigest);
     const prior = this.#tiles.get(key);
     if (prior && qualityRank(prior.quality) > qualityRank(payload.quality)) return;
     if (prior) {
@@ -275,7 +258,44 @@ export class DotplotRenderer {
     gl.disable(gl.BLEND);
   }
 
+  #initializeWebGL(): void {
+    const gl = this.#gl;
+    this.#program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER);
+    this.#uniforms = {
+      tile: requiredUniform(gl, this.#program, "u_tile"),
+      view: requiredUniform(gl, this.#program, "u_view"),
+      identity: requiredUniform(gl, this.#program, "u_identity"),
+      direction: requiredUniform(gl, this.#program, "u_direction"),
+      support: requiredUniform(gl, this.#program, "u_support"),
+      bases: requiredUniform(gl, this.#program, "u_bases"),
+      mode: requiredUniform(gl, this.#program, "u_mode"),
+      heatmapMin: requiredUniform(gl, this.#program, "u_heatmap_min"),
+      heatmapMid: requiredUniform(gl, this.#program, "u_heatmap_mid"),
+      heatmapMax: requiredUniform(gl, this.#program, "u_heatmap_max"),
+      exact: requiredUniform(gl, this.#program, "u_exact"),
+    };
+    this.#fallbackBaseTexture = createIntegerTexture(
+      gl,
+      1,
+      1,
+      gl.R8UI,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([4]),
+    );
+    this.#initializeGeometry();
+  }
+
   #bindInteractions(): void {
+    this.#canvas.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      this.#contextLost = true;
+    });
+    this.#canvas.addEventListener("webglcontextrestored", () => {
+      this.#contextLost = false;
+      this.#initializeWebGL();
+      for (const tile of this.#tiles.values()) this.#restoreTextures(tile);
+      this.#requestRender();
+    });
     this.#canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
       const rect = this.#canvas.getBoundingClientRect();
@@ -325,6 +345,31 @@ export class DotplotRenderer {
       }
     });
     this.#canvas.addEventListener("dblclick", () => this.resetView());
+    this.#canvas.addEventListener("keydown", (event) => {
+      const panFraction = 0.1;
+      if (event.key === "ArrowLeft") {
+        this.#view = panBy(this.#view, -this.#view.width * panFraction, 0);
+      } else if (event.key === "ArrowRight") {
+        this.#view = panBy(this.#view, this.#view.width * panFraction, 0);
+      } else if (event.key === "ArrowUp") {
+        this.#view = panBy(this.#view, 0, this.#view.height * panFraction);
+      } else if (event.key === "ArrowDown") {
+        this.#view = panBy(this.#view, 0, -this.#view.height * panFraction);
+      } else if (event.key === "+" || event.key === "=") {
+        this.#view = zoomAt(this.#view, 0.8, 0.5, 0.5);
+      } else if (event.key === "-" || event.key === "_") {
+        this.#view = zoomAt(this.#view, 1.25, 0.5, 0.5);
+      } else if (event.key === "Home") {
+        this.resetView();
+        event.preventDefault();
+        return;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      this.#requestRender();
+      this.#notifyViewChange();
+    });
   }
 
   #hoverAt(event: PointerEvent): HoverDatum | null {
@@ -354,7 +399,14 @@ export class DotplotRenderer {
         candidateX < candidate.x + candidate.width &&
         candidateY >= candidate.y &&
         candidateY < candidate.y + candidate.height &&
-        (!tile || candidate.resolution > tile.resolution)
+        (
+          !tile
+          || candidate.resolution > tile.resolution
+          || (
+            candidate.resolution === tile.resolution
+            && qualityRank(candidate.quality) > qualityRank(tile.quality)
+          )
+        )
       ) {
         tile = candidate;
         xIndex = candidateX;
@@ -406,6 +458,7 @@ export class DotplotRenderer {
   }
 
   #render(): void {
+    if (this.#contextLost) return;
     const gl = this.#gl;
     gl.clearColor(0.975, 0.973, 0.965, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -416,7 +469,9 @@ export class DotplotRenderer {
     gl.uniform1f(this.#uniforms.heatmapMid, this.#heatmap.midpoint);
     gl.uniform1f(this.#uniforms.heatmapMax, this.#heatmap.max);
 
-    const tiles = [...this.#tiles.values()].sort((left, right) => left.resolution - right.resolution);
+    const tiles = [...this.#tiles.values()].sort((left, right) =>
+      left.resolution - right.resolution || qualityRank(left.quality) - qualityRank(right.quality)
+    );
     for (const tile of tiles) {
       if (!this.#isRenderableResolution(tile.resolution)) continue;
       const bounds = tileBounds(tile, this.#metadata.resolution);
@@ -439,6 +494,22 @@ export class DotplotRenderer {
     if (tile.baseTexture) this.#gl.deleteTexture(tile.baseTexture);
   }
 
+  #restoreTextures(tile: GpuTile): void {
+    const gl = this.#gl;
+    tile.identityTexture = createIntegerTexture(
+      gl, tile.width, tile.height, gl.R16UI, gl.UNSIGNED_SHORT, tile.identity,
+    );
+    tile.directionTexture = createIntegerTexture(
+      gl, tile.width, tile.height, gl.R16I, gl.SHORT, tile.direction,
+    );
+    tile.supportTexture = createIntegerTexture(
+      gl, tile.width, tile.height, gl.R16UI, gl.UNSIGNED_SHORT, tile.directionSupport,
+    );
+    tile.baseTexture = tile.bases
+      ? createIntegerTexture(gl, tile.width, 1, gl.R8UI, gl.UNSIGNED_BYTE, tile.bases)
+      : null;
+  }
+
   #notifyViewChange(): void {
     this.#viewListener?.({
       view: { ...this.#view },
@@ -449,23 +520,20 @@ export class DotplotRenderer {
 
   #pruneTiles(): void {
     while (this.#cachedTileBytes > MAX_TILE_CACHE_BYTES) {
-      const fallbackResolution = [...this.#tiles.values()].reduce((best, tile) => {
-        if (tile.resolution >= this.#activeResolution) return best;
-        if (!intersectsView(tileBounds(tile, this.#metadata.resolution), this.#view)) return best;
-        return Math.max(best, tile.resolution);
-      }, this.#metadata.resolution);
-      const unprotected = [...this.#tiles.entries()].filter(([, tile]) => {
-        if (tile.resolution === this.#metadata.resolution) return false;
-        const visible = intersectsView(tileBounds(tile, this.#metadata.resolution), this.#view);
-        return !visible
-          || (tile.resolution !== this.#activeResolution && tile.resolution !== fallbackResolution);
-      });
-      const expired = unprotected.reduce<[string, GpuTile] | null>((oldest, candidate) => {
-        if (!oldest || candidate[1].lastUsed < oldest[1].lastUsed) return candidate;
-        return oldest;
-      }, null);
+      const expired = selectTileEvictionCandidate(
+        [...this.#tiles.entries()].map(([key, tile]) => ({
+          key,
+          resolution: tile.resolution,
+          lastUsed: tile.lastUsed,
+          visible: intersectsView(tileBounds(tile, this.#metadata.resolution), this.#view),
+        })),
+        this.#metadata.resolution,
+        this.#activeResolution,
+      );
       if (!expired) return;
-      const [key, tile] = expired;
+      const key = expired.key;
+      const tile = this.#tiles.get(key);
+      if (!tile) continue;
       this.#deleteTextures(tile);
       this.#tiles.delete(key);
       this.#cachedTileBytes -= tile.storageBytes;
@@ -504,8 +572,8 @@ function intersectsView(tile: TileBounds, view: ViewportState): boolean {
   );
 }
 
-function tileKey(resolution: number, x: number, y: number): string {
-  return `${resolution}:${x}:${y}`;
+function tileKey(resolution: number, x: number, y: number, configDigest: string): string {
+  return `${resolution}:${x}:${y}:${configDigest}`;
 }
 
 function qualityRank(quality: MatrixTilePayload["quality"]): number {
@@ -668,7 +736,12 @@ void main() {
     if (support == 0u) {
       color = neutral_color;
     } else {
-      color = mix(neutral_color, direction >= 0.0 ? forward_color : reverse_color, abs(direction));
+      float support_confidence = 1.0 - exp(-float(support) / 8.0);
+      color = mix(
+        neutral_color,
+        direction >= 0.0 ? forward_color : reverse_color,
+        abs(direction) * support_confidence
+      );
     }
     float safe_max = max(u_heatmap_max, u_heatmap_min + 0.00001);
     color = mix(vec3(0.975, 0.973, 0.965), color, smoothstep(u_heatmap_min, safe_max, identity));

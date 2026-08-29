@@ -308,4 +308,18 @@ mod tests {
         assert!(error.message.contains("4-base limit"));
         assert_eq!(error.line, 2);
     }
+
+    #[test]
+    fn streaming_fasta_normalizes_uracil_like_thymine() {
+        let mut rna_parser = FastaParser::new();
+        rna_parser.push_chunk(b">seq\nacU").unwrap();
+        rna_parser.push_chunk(b"UGCuu\n").unwrap();
+        let rna = rna_parser.finish().unwrap().remove(0);
+
+        let mut dna_parser = FastaParser::new();
+        dna_parser.push_chunk(b">seq\nACTTGCTT\n").unwrap();
+        let dna = dna_parser.finish().unwrap().remove(0);
+
+        assert_eq!(rna, dna);
+    }
 }

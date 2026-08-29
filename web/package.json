@@ -1,18 +1,33 @@
 {
   "name": "moddotplot-rs-ui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0-beta.1",
   "type": "module",
+  "engines": {
+    "node": "25.9.0",
+    "npm": "11.12.1"
+  },
+  "packageManager": "npm@11.12.1",
   "scripts": {
     "dev": "vite",
     "build:wasm": "wasm-pack build ../crates/wasm --target web --out-dir ../../web/src/wasm --release",
-    "build": "tsc --noEmit && vite build",
-    "test": "vitest run",
+    "build:ui": "tsc --noEmit && vite build",
+    "build": "npm run build:release",
+    "build:release": "npm test && npm run build:wasm && npm run build:ui && npm run docs && npm run docs:check && npm run sbom",
+    "docs": "node ../scripts/generate-current-parameters.mjs",
+    "docs:check": "node ../scripts/check-docs.mjs",
+    "preview": "vite preview",
+    "sbom": "node ../scripts/generate-sbom.mjs",
+    "verify": "npm run build:release && npm run test:e2e",
+    "test": "vitest run tests",
+    "test:e2e": "playwright test --project=chromium --project=firefox --project=webkit",
+    "test:e2e:chrome": "playwright test --project=chrome",
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "typescript": "^5.9.0",
-    "vite": "^7.1.0",
-    "vitest": "^3.2.0"
+    "@playwright/test": "1.62.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "3.2.7"
   }
 }

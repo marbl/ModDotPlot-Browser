@@ -1,7 +1,7 @@
 //! Exact canonical k-mer dotplot tiles for maximum zoom.
 
 use crate::dna::{Orientation, PackedSequence};
-use crate::matrix::{MISSING_IDENTITY, MatrixTile};
+use crate::matrix::{MISSING_IDENTITY, MatrixTile, TileBuildError};
 
 /// Request for a row-major exact k-mer tile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,19 +26,24 @@ pub struct KmerTileRequest {
 /// reverse direction; unequal valid k-mers receive identity 0. Missing, padded, or
 /// ambiguity-overlapping k-mers use the missing sentinel.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics for a zero domain, an invalid k-mer length, an origin outside the domain, or
-/// output dimensions that overflow addressable memory.
+/// Returns [`TileBuildError`] before allocation for an invalid domain, k-mer length,
+/// coordinate, or output size.
 pub fn compute_kmer_tile(
     x: &PackedSequence,
     y: &PackedSequence,
     request: KmerTileRequest,
-) -> MatrixTile {
-    assert!(request.domain_length > 0);
-    assert!((1..=31).contains(&request.k));
-    assert!(request.x_start < request.domain_length);
-    assert!(request.y_start < request.domain_length);
+) -> Result<MatrixTile, TileBuildError> {
+    if request.domain_length == 0 || !(1..=31).contains(&request.k) {
+        return Err(TileBuildError::Parameters);
+    }
+    if request.x_start >= request.domain_length || request.y_start >= request.domain_length {
+        return Err(TileBuildError::Range);
+    }
+    if request.width == 0 || request.height == 0 {
+        return Err(TileBuildError::Dimensions);
+    }
     let width = request
         .width
         .min(usize::try_from(request.domain_length - request.x_start).unwrap_or(usize::MAX));
@@ -47,7 +52,7 @@ pub fn compute_kmer_tile(
         .min(usize::try_from(request.domain_length - request.y_start).unwrap_or(usize::MAX));
     let cell_count = width
         .checked_mul(height)
-        .expect("k-mer tile dimensions overflow");
+        .ok_or(TileBuildError::Dimensions)?;
     let mut tile = MatrixTile {
         width,
         height,
@@ -55,8 +60,8 @@ pub fn compute_kmer_tile(
         direction: vec![0; cell_count],
         direction_support: vec![0; cell_count],
     };
-    let x_kmers = exact_range(x, request.x_start, width, request.k);
-    let y_kmers = exact_range(y, request.y_start, height, request.k);
+    let x_kmers = exact_range(x, request.x_start, width, request.k)?;
+    let y_kmers = exact_range(y, request.y_start, height, request.k)?;
     for (row, right) in y_kmers.iter().enumerate() {
         let Some((right_bits, right_orientation)) = right else {
             continue;
@@ -80,7 +85,7 @@ pub fn compute_kmer_tile(
             };
         }
     }
-    tile
+    Ok(tile)
 }
 
 fn exact_range(
@@ -88,16 +93,17 @@ fn exact_range(
     start: u64,
     count: usize,
     k: u8,
-) -> Vec<Option<(u64, Orientation)>> {
-    let end = start.saturating_add(u64::try_from(count).expect("tile dimension fits u64"));
+) -> Result<Vec<Option<(u64, Orientation)>>, TileBuildError> {
+    let count_u64 = u64::try_from(count).map_err(|_| TileBuildError::Dimensions)?;
+    let end = start.saturating_add(count_u64);
     let mut result = vec![None; count];
     for kmer in sequence.canonical_kmers(k, start, end) {
-        let local = usize::try_from(kmer.start - start).expect("local k-mer index fits usize");
+        let local = usize::try_from(kmer.start - start).map_err(|_| TileBuildError::Range)?;
         if let Some(cell) = result.get_mut(local) {
             *cell = Some((kmer.bits, kmer.orientation));
         }
     }
-    result
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -119,7 +125,8 @@ mod tests {
                 height: 5,
                 k: 3,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(tile.identity[0], 10_000);
         assert_eq!(tile.identity[1], 0);
         assert_eq!(tile.identity[4 * 5 + 4], MISSING_IDENTITY);
@@ -136,7 +143,8 @@ mod tests {
                 height: 1,
                 k: 5,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(reverse_tile.identity[0], 10_000);
         assert_eq!(reverse_tile.direction[0], -i16::MAX);
     }

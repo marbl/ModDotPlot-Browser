@@ -1,6 +1,8 @@
 //! Directed containment and orientation estimation.
 
-use crate::sketch::{BitSlicedSignature, OphSketch, RegisterComparison};
+use crate::sketch::{
+    BitSlicedSignature, OphJaccardEstimator, OphSketch, RegisterComparison, verified_winner_jaccard,
+};
 
 /// Directional support derived only from complete-hash register matches.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -62,9 +64,35 @@ pub fn estimate_containment(
     b: u8,
     register_limit: usize,
 ) -> Option<ContainmentEstimate> {
+    estimate_containment_with(
+        x,
+        y,
+        k,
+        b,
+        register_limit,
+        OphJaccardEstimator::VerifiedWinners,
+    )
+}
+
+/// Estimates directed containment with an explicit OPH resemblance statistic.
+pub fn estimate_containment_with(
+    x: &OphSketch,
+    y: &OphSketch,
+    k: u8,
+    b: u8,
+    register_limit: usize,
+    estimator: OphJaccardEstimator,
+) -> Option<ContainmentEstimate> {
     let x_cardinality = x.estimated_cardinality();
     let y_cardinality = y.estimated_cardinality();
     let registers = x.compare_bbit(y, b, register_limit);
+    let mut registers = registers;
+    registers.jaccard = match estimator {
+        OphJaccardEstimator::BbitCollisionCorrected => registers.jaccard,
+        OphJaccardEstimator::VerifiedWinners => {
+            verified_winner_jaccard(registers.verified_matches, registers.considered)
+        }
+    };
     estimate_from_comparison(x_cardinality, y_cardinality, k, registers)
 }
 
@@ -77,11 +105,56 @@ pub fn estimate_containment_bit_sliced(
     b: u8,
     register_limit: usize,
 ) -> Option<ContainmentEstimate> {
+    estimate_containment_bit_sliced_with(
+        x,
+        y,
+        k,
+        b,
+        register_limit,
+        OphJaccardEstimator::VerifiedWinners,
+    )
+}
+
+/// Estimates directed containment using an explicit OPH resemblance statistic.
+#[inline]
+pub fn estimate_containment_bit_sliced_with(
+    x: &BitSlicedSignature,
+    y: &BitSlicedSignature,
+    k: u8,
+    b: u8,
+    register_limit: usize,
+    estimator: OphJaccardEstimator,
+) -> Option<ContainmentEstimate> {
+    let registers = x.compare(y, b, register_limit);
+    let mut registers = registers;
+    registers.jaccard = match estimator {
+        OphJaccardEstimator::BbitCollisionCorrected => registers.jaccard,
+        OphJaccardEstimator::VerifiedWinners => {
+            verified_winner_jaccard(registers.verified_matches, registers.considered)
+        }
+    };
     estimate_from_comparison(
         x.estimated_cardinality(),
         y.estimated_cardinality(),
         k,
-        x.compare(y, b, register_limit),
+        registers,
+    )
+}
+
+/// Test-only scalar interpretation of a frozen bit-sliced signature.
+#[cfg(test)]
+pub(crate) fn estimate_containment_bit_sliced_scalar(
+    x: &BitSlicedSignature,
+    y: &BitSlicedSignature,
+    k: u8,
+    b: u8,
+    register_limit: usize,
+) -> Option<ContainmentEstimate> {
+    estimate_from_comparison(
+        x.estimated_cardinality(),
+        y.estimated_cardinality(),
+        k,
+        x.compare_scalar(y, b, register_limit),
     )
 }
 
@@ -94,14 +167,38 @@ pub fn estimate_containment_from_comparison(
     y_cardinality: f64,
     k: u8,
     b: u8,
-    mut registers: RegisterComparison,
+    registers: RegisterComparison,
 ) -> Option<ContainmentEstimate> {
-    registers.jaccard = crate::sketch::collision_corrected_jaccard(
-        registers.bbit_matches,
-        registers.verified_matches,
-        registers.considered,
+    estimate_containment_from_comparison_with(
+        x_cardinality,
+        y_cardinality,
+        k,
         b,
-    );
+        registers,
+        OphJaccardEstimator::VerifiedWinners,
+    )
+}
+
+/// Estimates containment from counters using an explicit OPH resemblance statistic.
+pub fn estimate_containment_from_comparison_with(
+    x_cardinality: f64,
+    y_cardinality: f64,
+    k: u8,
+    b: u8,
+    mut registers: RegisterComparison,
+    estimator: OphJaccardEstimator,
+) -> Option<ContainmentEstimate> {
+    registers.jaccard = match estimator {
+        OphJaccardEstimator::BbitCollisionCorrected => crate::sketch::collision_corrected_jaccard(
+            registers.bbit_matches,
+            registers.verified_matches,
+            registers.considered,
+            b,
+        ),
+        OphJaccardEstimator::VerifiedWinners => {
+            verified_winner_jaccard(registers.verified_matches, registers.considered)
+        }
+    };
     estimate_from_comparison(x_cardinality, y_cardinality, k, registers)
 }
 

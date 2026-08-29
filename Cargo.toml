@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/core", "crates/phase0", "crates/wasm"]
+members = ["crates/core", "crates/wasm"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0-beta.1"
 edition = "2024"
 license = "MIT-0"
 repository = "https://github.com/marbl/moddotplot-rs"

@@ -1,4 +1,3 @@
-import type { FeatureTrack, TrackFeature } from "./features";
 import { formatAxisCoordinate } from "./format";
 import type { ViewChange } from "./renderer";
 
@@ -26,8 +25,6 @@ export class AxisOverlay {
     yLength: 1,
   };
   #view: ViewChange | null = null;
-  #tracks: Partial<Record<AxisName, FeatureTrack>> = {};
-  #dropListener: ((axis: AxisName, file: File) => void) | null = null;
 
   constructor(xCanvas: HTMLCanvasElement, yCanvas: HTMLCanvasElement) {
     this.#xCanvas = xCanvas;
@@ -35,48 +32,17 @@ export class AxisOverlay {
     this.#observer = new ResizeObserver(() => this.#resize());
     this.#observer.observe(xCanvas);
     this.#observer.observe(yCanvas);
-    this.#bindDrop(xCanvas, "x");
-    this.#bindDrop(yCanvas, "y");
     this.#resize();
   }
 
   setMetadata(metadata: AxisMetadata): void {
     this.#metadata = metadata;
-    this.#tracks = {};
     this.#draw();
   }
 
   setView(view: ViewChange): void {
     this.#view = view;
     this.#draw();
-  }
-
-  setTrack(axis: AxisName, track: FeatureTrack): void {
-    this.#tracks[axis] = track;
-    this.#draw();
-  }
-
-  onTrackDrop(listener: (axis: AxisName, file: File) => void): void {
-    this.#dropListener = listener;
-  }
-
-  #bindDrop(canvas: HTMLCanvasElement, axis: AxisName): void {
-    for (const eventName of ["dragenter", "dragover"]) {
-      canvas.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        canvas.classList.add("is-track-target");
-      });
-    }
-    for (const eventName of ["dragleave", "drop"]) {
-      canvas.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        canvas.classList.remove("is-track-target");
-      });
-    }
-    canvas.addEventListener("drop", (event) => {
-      const file = event.dataTransfer?.files[0];
-      if (file) this.#dropListener?.(axis, file);
-    });
   }
 
   #resize(): void {
@@ -119,7 +85,6 @@ export class AxisOverlay {
       context.lineTo(width, 0.5);
       context.stroke();
       drawTicksX(context, range.start, range.end, width);
-      drawTrackX(context, this.#tracks.x, range.start, range.end, width, 30);
       context.fillStyle = "#454149";
       context.font = "12px ui-sans-serif, system-ui, sans-serif";
       context.textAlign = "center";
@@ -130,7 +95,6 @@ export class AxisOverlay {
       context.lineTo(width - 0.5, height);
       context.stroke();
       drawTicksY(context, range.start, range.end, width, height);
-      drawTrackY(context, this.#tracks.y, range.start, range.end, width - 33, height);
       context.save();
       context.translate(12, height / 2);
       context.rotate(-Math.PI / 2);
@@ -189,96 +153,6 @@ function drawTicksY(context: CanvasRenderingContext2D, start: number, end: numbe
     context.stroke();
     context.fillText(formatAxisCoordinate(value), width - 9, labelY);
   }
-}
-
-function drawTrackX(context: CanvasRenderingContext2D, track: FeatureTrack | undefined, start: number, end: number, width: number, y: number): void {
-  if (!track) {
-    context.fillStyle = "#aaa49d";
-    context.textAlign = "left";
-    context.fillText("drop BED/GFF", 5, y + 9);
-    return;
-  }
-  context.fillStyle = "#6d6871";
-  context.textAlign = "left";
-  context.fillText(ellipsize(track.fileName, 24), 5, y - 3);
-  for (const feature of featureModels(visibleFeatures(track, start, end))) {
-    drawFeatureX(context, feature, start, end, width, y);
-  }
-}
-
-function drawTrackY(context: CanvasRenderingContext2D, track: FeatureTrack | undefined, start: number, end: number, x: number, height: number): void {
-  if (!track) {
-    context.save();
-    context.translate(x - 8, height - 5);
-    context.rotate(-Math.PI / 2);
-    context.fillStyle = "#aaa49d";
-    context.fillText("drop BED/GFF", 0, 0);
-    context.restore();
-    return;
-  }
-  for (const feature of featureModels(visibleFeatures(track, start, end))) {
-    drawFeatureY(context, feature, start, end, x, height);
-  }
-}
-
-function drawFeatureX(context: CanvasRenderingContext2D, feature: TrackFeature, start: number, end: number, width: number, y: number): void {
-  const x1 = map(feature.start, start, end, 0, width);
-  const x2 = map(feature.end, start, end, 0, width);
-  context.strokeStyle = "#426a72";
-  context.fillStyle = "#527f87";
-  context.beginPath();
-  context.moveTo(x1, y + 7);
-  context.lineTo(x2, y + 7);
-  context.stroke();
-  const blocks = feature.blocks.length > 0 ? feature.blocks : [{ start: feature.start, end: feature.end, kind: "block" as const }];
-  for (const block of blocks) {
-    const left = map(block.start, start, end, 0, width);
-    const right = map(block.end, start, end, 0, width);
-    context.fillRect(left, y + (block.kind === "thick" ? 2 : 4), Math.max(1, right - left), block.kind === "thick" ? 10 : 6);
-  }
-}
-
-function drawFeatureY(context: CanvasRenderingContext2D, feature: TrackFeature, start: number, end: number, x: number, height: number): void {
-  const y1 = map(feature.start, start, end, height, 0);
-  const y2 = map(feature.end, start, end, height, 0);
-  context.strokeStyle = "#426a72";
-  context.fillStyle = "#527f87";
-  context.beginPath();
-  context.moveTo(x, y1);
-  context.lineTo(x, y2);
-  context.stroke();
-  const blocks = feature.blocks.length > 0 ? feature.blocks : [{ start: feature.start, end: feature.end, kind: "block" as const }];
-  for (const block of blocks) {
-    const top = map(block.end, start, end, height, 0);
-    const bottom = map(block.start, start, end, height, 0);
-    context.fillRect(x - (block.kind === "thick" ? 5 : 3), top, block.kind === "thick" ? 10 : 6, Math.max(1, bottom - top));
-  }
-}
-
-function visibleFeatures(track: FeatureTrack, start: number, end: number): TrackFeature[] {
-  const result: TrackFeature[] = [];
-  for (const feature of track.features) {
-    if (feature.end <= start) continue;
-    if (feature.start >= end) break;
-    result.push(feature);
-    if (result.length >= 500) break;
-  }
-  return result;
-}
-
-function featureModels(features: TrackFeature[]): TrackFeature[] {
-  const models = new Map<string, TrackFeature>();
-  for (const feature of features) {
-    const existing = models.get(feature.group);
-    if (!existing) {
-      models.set(feature.group, { ...feature, blocks: [...feature.blocks] });
-      continue;
-    }
-    existing.start = Math.min(existing.start, feature.start);
-    existing.end = Math.max(existing.end, feature.end);
-    existing.blocks.push(...feature.blocks);
-  }
-  return [...models.values()];
 }
 
 function map(value: number, start: number, end: number, outputStart: number, outputEnd: number): number {

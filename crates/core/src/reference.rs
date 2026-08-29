@@ -1,39 +1,36 @@
 //! Exact small-input set calculations used for scientific validation.
 
 use crate::dna::{Orientation, PackedSequence};
-use crate::hash::hash_canonical;
 use std::collections::BTreeMap;
 
-/// Exact distinct canonical k-mer hash set with combined strand observations.
+/// Exact distinct canonical k-mer set with combined strand observations.
+///
+/// Canonical two-bit words are injective for the supported `k <= 31`, so this
+/// reference is independent of every production hash function and its collision
+/// behavior.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ExactHashSet {
+pub struct ExactKmerSet {
+    k: u8,
     items: BTreeMap<u64, Orientation>,
 }
 
-impl ExactHashSet {
+impl ExactKmerSet {
     /// Constructs the exact set of valid k-mers starting in `[start, end)`.
     ///
     /// # Panics
     ///
     /// Panics if `k` is outside `1..=31`.
-    pub fn from_interval(
-        sequence: &PackedSequence,
-        start: u64,
-        end: u64,
-        k: u8,
-        seed: u64,
-    ) -> Self {
+    pub fn from_interval(sequence: &PackedSequence, start: u64, end: u64, k: u8) -> Self {
         let mut items = BTreeMap::<u64, Orientation>::new();
         for kmer in sequence.canonical_kmers(k, start, end) {
-            let hash = hash_canonical(kmer.bits, k, seed);
             items
-                .entry(hash)
+                .entry(kmer.bits)
                 .and_modify(|orientation| {
                     *orientation = orientation.combine(kmer.orientation);
                 })
                 .or_insert(kmer.orientation);
         }
-        Self { items }
+        Self { k, items }
     }
 
     /// Number of distinct hashes.
@@ -47,7 +44,12 @@ impl ExactHashSet {
     }
 
     /// Exact directed containment of this set in `other`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the two exact sets were constructed with different k-mer lengths.
     pub fn containment_in(&self, other: &Self) -> Option<f64> {
+        assert_eq!(self.k, other.k, "exact k-mer sets must use the same k");
         if self.is_empty() {
             return None;
         }
@@ -60,7 +62,12 @@ impl ExactHashSet {
     }
 
     /// Exact Jaccard similarity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the two exact sets were constructed with different k-mer lengths.
     pub fn jaccard(&self, other: &Self) -> Option<f64> {
+        assert_eq!(self.k, other.k, "exact k-mer sets must use the same k");
         let union = self
             .items
             .keys()
@@ -95,10 +102,10 @@ pub struct ExactSimilarity {
 
 /// Computes the exact score for two core sets and their expanded neighbors.
 pub fn exact_moddotplot_score(
-    x_core: &ExactHashSet,
-    x_expanded: &ExactHashSet,
-    y_core: &ExactHashSet,
-    y_expanded: &ExactHashSet,
+    x_core: &ExactKmerSet,
+    x_expanded: &ExactKmerSet,
+    y_core: &ExactKmerSet,
+    y_expanded: &ExactKmerSet,
     k: u8,
 ) -> Option<ExactSimilarity> {
     let x_in_y = x_core.containment_in(y_expanded);
@@ -123,8 +130,18 @@ mod tests {
     #[test]
     fn core_is_exactly_contained_in_its_expansion() {
         let sequence = PackedSequence::from_ascii("seq", b"ACGTTGCATGTCGCATGATGCATGAGAGCT");
-        let core = ExactHashSet::from_interval(&sequence, 5, 15, 7, 42);
-        let expanded = ExactHashSet::from_interval(&sequence, 0, 25, 7, 42);
+        let core = ExactKmerSet::from_interval(&sequence, 5, 15, 7);
+        let expanded = ExactKmerSet::from_interval(&sequence, 0, 25, 7);
         assert_eq!(core.containment_in(&expanded), Some(1.0));
+    }
+
+    #[test]
+    fn uracil_and_thymine_have_identical_exact_sets() {
+        let rna = PackedSequence::from_ascii("rna", b"ACUUGCUUACGU");
+        let dna = PackedSequence::from_ascii("dna", b"ACTTGCTTACGT");
+        let rna_set = ExactKmerSet::from_interval(&rna, 0, rna.len(), 5);
+        let dna_set = ExactKmerSet::from_interval(&dna, 0, dna.len(), 5);
+        assert_eq!(rna_set, dna_set);
+        assert_eq!(rna_set.containment_in(&dna_set), Some(1.0));
     }
 }

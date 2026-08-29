@@ -1,13 +1,19 @@
 /// <reference lib="webworker" />
 
-import init, { ComputeSession } from "./wasm/moddotplot_wasm.js";
+import init, { ComputeSession, ScientificConfig } from "./wasm/moddotplot_wasm.js";
 import type {
   ComparisonParameters,
   MainToWorkerMessage,
+  ScientificConfigMetadata,
   SequenceMetadata,
   WorkerToMainMessage,
 } from "./protocol";
 import { transposeTile } from "./tile";
+import {
+  refinementKey,
+  selectRefinementTiles,
+  tileRefinementPriority,
+} from "./refinement";
 
 const context = self as DedicatedWorkerGlobalScope;
 let session: ComputeSession;
@@ -16,8 +22,13 @@ let activeGeneration = 0;
 let activeTileRequestId = -1;
 let activeParameters: ComparisonParameters | null = null;
 let loadedSequences: SequenceMetadata[] = [];
+const scientificConfigs = new Map<number, ScientificConfig>();
 const publishedTiles = new Set<string>();
+const refinementPriority = new Map<string, number>();
 let preparationToken = 0;
+let operationEpoch = 0;
+let executingEpoch = 0;
+let messageQueue = Promise.resolve();
 let pendingPresentation: {
   generation: number;
   requestId: number;
@@ -31,9 +42,38 @@ const engineReady = init().then((wasm) => {
 });
 
 context.onmessage = (event: MessageEvent<MainToWorkerMessage>): void => {
-  void handleMessage(event.data).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    post({ type: "error", message });
+  const message = event.data;
+  if (message.type === "preview-presented") {
+    if (
+      pendingPresentation?.generation === message.generation
+      && pendingPresentation.requestId === message.requestId
+    ) {
+      releasePresentationWait();
+    }
+    return;
+  }
+  if (message.type === "cancel-tiles") {
+    operationEpoch += 1;
+    if (message.generation === activeGeneration) {
+      activeTileRequestId = message.requestId;
+      releasePresentationWait();
+    }
+    return;
+  }
+  if (message.type === "evict-tiles") {
+    if (message.generation === activeGeneration) {
+      for (const tile of message.tiles) forgetPublishedTile(tile.resolution, tile.x, tile.y);
+    }
+    return;
+  }
+  const ticket = ++operationEpoch;
+  messageQueue = messageQueue.then(async () => {
+    executingEpoch = ticket;
+    await handleMessage(message);
+  }).catch((error: unknown) => {
+    if (ticket !== operationEpoch) return;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    post({ type: "error", message: errorMessage });
   });
 };
 
@@ -41,20 +81,36 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
   await engineReady;
   switch (message.type) {
     case "load":
-      activeGeneration += 1;
+      activeGeneration = message.generation;
       activeTileRequestId = -1;
       activeParameters = null;
-      loadedSequences = [];
       publishedTiles.clear();
+      refinementPriority.clear();
       releasePresentationWait();
-      await loadFiles(message.files);
+      await loadFiles(message.files, message.generation);
       break;
     case "prepare":
       activeGeneration = message.generation;
       activeTileRequestId = message.requestId;
       activeParameters = message.parameters;
       publishedTiles.clear();
+      refinementPriority.clear();
       releasePresentationWait();
+      releaseScientificConfigs();
+      if (message.parameters.previewRegisterCount < message.parameters.detailedRegisterCount) {
+        scientificConfigs.set(
+          message.parameters.previewRegisterCount,
+          new ScientificConfig(message.parameters.k, message.parameters.previewRegisterCount, false),
+        );
+      }
+      scientificConfigs.set(
+        message.parameters.detailedRegisterCount,
+        new ScientificConfig(
+          message.parameters.k,
+          message.parameters.detailedRegisterCount,
+          message.parameters.sparseCorrection,
+        ),
+      );
       session.retain_prepared_levels(
         message.parameters.previewRegisterCount,
         message.parameters.detailedRegisterCount,
@@ -62,22 +118,8 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
       await prepareComparison(message.generation, message.requestId, message.parameters);
       break;
     case "cancel-tiles":
-      if (message.generation === activeGeneration) {
-        activeTileRequestId = message.requestId;
-        releasePresentationWait();
-      }
-      break;
     case "preview-presented":
-      if (
-        pendingPresentation?.generation === message.generation
-        && pendingPresentation.requestId === message.requestId
-      ) {
-        releasePresentationWait();
-      }
-      break;
     case "evict-tiles":
-      if (message.generation !== activeGeneration) return;
-      for (const tile of message.tiles) forgetPublishedTile(tile.resolution, tile.x, tile.y);
       break;
     case "request-tiles":
       if (message.generation !== activeGeneration || !activeParameters) return;
@@ -92,70 +134,86 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
       );
       break;
     case "clear":
-      activeGeneration += 1;
+      activeGeneration = message.generation;
       activeTileRequestId = -1;
       activeParameters = null;
       loadedSequences = [];
       publishedTiles.clear();
+      refinementPriority.clear();
       releasePresentationWait();
+      releaseScientificConfigs();
       session.clear();
       break;
   }
 }
 
-async function loadFiles(files: File[]): Promise<void> {
-  session.clear();
+async function loadFiles(files: File[], generation: number): Promise<void> {
+  const staging = new ComputeSession();
   const totalBytes = files.reduce((total, file) => total + file.size, 0);
   let completedBytes = 0;
-  for (const file of files) {
-    session.begin_fasta();
-    let stream: ReadableStream<Uint8Array> = file.stream();
-    const compressedFile = file.name.toLowerCase().endsWith(".gz");
-    if (compressedFile) {
-      if (!("DecompressionStream" in globalThis)) {
-        throw new Error("This browser cannot decompress gzip FASTA files; use an uncompressed FASTA.");
+  try {
+    for (const file of files) {
+      if (!operationIsCurrent()) return;
+      staging.begin_fasta();
+      let stream: ReadableStream<Uint8Array> = file.stream();
+      const compressedFile = file.name.toLowerCase().endsWith(".gz");
+      if (compressedFile) {
+        if (!("DecompressionStream" in globalThis)) {
+          throw new Error("This browser cannot decompress gzip FASTA files; use an uncompressed FASTA.");
+        }
+        let compressedBytes = 0;
+        stream = stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            compressedBytes += chunk.byteLength;
+            const progress = totalBytes > 0
+              ? (completedBytes + Math.min(compressedBytes, file.size)) / totalBytes
+              : 0;
+            if (operationIsCurrent()) {
+              post({ type: "status", text: `Reading ${file.name}`, progress, busy: true });
+            }
+            controller.enqueue(chunk);
+          },
+        }));
+        const compressed = stream as unknown as ReadableStream<BufferSource>;
+        stream = compressed.pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>;
       }
-      let compressedBytes = 0;
-      stream = stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          compressedBytes += chunk.byteLength;
+      const reader = stream.getReader();
+      let fileBytes = 0;
+      while (true) {
+        const result = await reader.read();
+        if (!operationIsCurrent()) {
+          await reader.cancel();
+          return;
+        }
+        if (result.done) break;
+        staging.push_fasta_chunk(result.value);
+        fileBytes += result.value.byteLength;
+        if (!compressedFile) {
           const progress = totalBytes > 0
-            ? (completedBytes + Math.min(compressedBytes, file.size)) / totalBytes
+            ? (completedBytes + Math.min(fileBytes, file.size)) / totalBytes
             : 0;
           post({ type: "status", text: `Reading ${file.name}`, progress, busy: true });
-          controller.enqueue(chunk);
-        },
-      }));
-      // lib.dom types DecompressionStream as BufferSource even though browser file
-      // streams yield Uint8Array chunks. The runtime types are identical here.
-      const compressed = stream as unknown as ReadableStream<BufferSource>;
-      stream = compressed.pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>;
-    }
-    const reader = stream.getReader();
-    let fileBytes = 0;
-    while (true) {
-      const result = await reader.read();
-      if (result.done) break;
-      session.push_fasta_chunk(result.value);
-      fileBytes += result.value.byteLength;
-      if (!compressedFile) {
-        const progress = totalBytes > 0
-          ? (completedBytes + Math.min(fileBytes, file.size)) / totalBytes
-          : 0;
-        post({ type: "status", text: `Reading ${file.name}`, progress, busy: true });
+        }
       }
+      staging.finish_fasta();
+      completedBytes += file.size;
     }
-    session.finish_fasta();
-    completedBytes += file.size;
+    if (!operationIsCurrent()) return;
+    const raw = staging.sequences() as Array<{ index: number; name: string; length: number | bigint }>;
+    const committed = raw.map((sequence) => ({
+      index: sequence.index,
+      name: sequence.name,
+      length: Number(sequence.length),
+    }));
+    session.free();
+    session = staging;
+    loadedSequences = committed;
+    post({ type: "sequences", generation, sequences: loadedSequences });
+    post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
+    return;
+  } finally {
+    if (session !== staging) staging.free();
   }
-  const raw = session.sequences() as Array<{ index: number; name: string; length: number | bigint }>;
-  loadedSequences = raw.map((sequence) => ({
-    index: sequence.index,
-    name: sequence.name,
-    length: Number(sequence.length),
-  }));
-  post({ type: "sequences", sequences: loadedSequences });
-  post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
 }
 
 async function prepareComparison(
@@ -164,6 +222,36 @@ async function prepareComparison(
   parameters: ComparisonParameters,
 ): Promise<void> {
   const started = performance.now();
+  const domainLength = Math.max(
+    loadedSequences.find((sequence) => sequence.index === parameters.xIndex)?.length ?? 0,
+    loadedSequences.find((sequence) => sequence.index === parameters.yIndex)?.length ?? 0,
+  );
+  if (parameters.resolution === domainLength) {
+    releaseScientificConfigs();
+    session.select_exact_comparison(parameters.xIndex, parameters.yIndex, parameters.k);
+    post({
+      type: "comparison-ready",
+      generation,
+      parameters,
+      configurations: [],
+    });
+    const tiles = allTileCoordinates(parameters.resolution, parameters.xIndex === parameters.yIndex);
+    await computeExactRequestedTiles(
+      generation,
+      requestId,
+      parameters.resolution,
+      tiles,
+      parameters,
+    );
+    if (!isCurrentTileRequest(generation, requestId)) return;
+    post({
+      type: "complete",
+      generation,
+      elapsedMs: performance.now() - started,
+      estimatedBytes: allocatedWorkerBytes(),
+    });
+    return;
+  }
   const distinctPasses = parameters.previewRegisterCount < parameters.detailedRegisterCount;
   const firstRegisters = distinctPasses
     ? parameters.previewRegisterCount
@@ -175,9 +263,17 @@ async function prepareComparison(
     parameters,
     firstRegisters,
     !distinctPasses,
+    true,
+    firstQuality,
+    null,
   );
   if (!firstPrepared) return;
-  post({ type: "comparison-ready", generation, parameters });
+  post({
+    type: "comparison-ready",
+    generation,
+    parameters,
+    configurations: [...scientificConfigs.values()].map(configMetadata),
+  });
   await computeLevel(
     generation,
     requestId,
@@ -189,21 +285,35 @@ async function prepareComparison(
   if (distinctPasses) {
     await waitForPreviewPresentation(generation, requestId);
     if (!isCurrentTileRequest(generation, requestId)) return;
-    const detailedPrepared = await prepareOverviewLevel(
-      generation,
-      requestId,
-      parameters,
-      parameters.detailedRegisterCount,
-      true,
+    const overviewTiles = allTileCoordinates(
+      parameters.resolution,
+      parameters.xIndex === parameters.yIndex,
     );
-    if (!detailedPrepared) return;
-    await computeLevel(
-      generation,
-      requestId,
-      parameters,
-      parameters.detailedRegisterCount,
+    const detailedTiles = prioritizeForRefinement(
+      parameters.resolution,
+      overviewTiles,
       "refined",
     );
+    if (detailedTiles.length > 0) {
+      const detailedPrepared = await prepareOverviewLevel(
+        generation,
+        requestId,
+        parameters,
+        parameters.detailedRegisterCount,
+        true,
+        true,
+        "refined",
+        detailedTiles,
+      );
+      if (!detailedPrepared) return;
+      await computeLevel(
+        generation,
+        requestId,
+        parameters,
+        parameters.detailedRegisterCount,
+        "refined",
+      );
+    }
   }
   if (!isCurrentTileRequest(generation, requestId)) return;
   post({
@@ -219,38 +329,65 @@ async function prepareOverviewLevel(
   requestId: number,
   parameters: ComparisonParameters,
   registerCount: number,
-  adaptive: boolean,
+  detailed: boolean,
+  progressive: boolean,
+  quality: "preview" | "refined",
+  progressiveTileFilter: Array<{ x: number; y: number }> | null,
 ): Promise<boolean> {
-  const label = adaptive ? "Building high-detail signatures" : "Building quick signatures";
+  const label = detailed ? "Building high-detail signatures" : "Building quick signatures";
   post({ type: "status", text: label, progress: 0, busy: true });
-  if (adaptive) {
-    session.begin_prepare_comparison(
-      parameters.xIndex,
-      parameters.yIndex,
-      parameters.resolution,
-      registerCount,
-      12,
-      parameters.k,
-    );
-  } else {
-    session.begin_prepare_preview(
-      parameters.xIndex,
-      parameters.yIndex,
-      parameters.resolution,
-      registerCount,
-      12,
-      parameters.k,
+  const config = requireScientificConfig(registerCount);
+  session.begin_prepare_scientific(
+    parameters.xIndex,
+    parameters.yIndex,
+    parameters.resolution,
+    config,
+    progressive,
+  );
+  if (progressiveTileFilter) {
+    session.set_preparation_tile_filter(
+      Uint32Array.from(progressiveTileFilter.flatMap((tile) => [tile.x, tile.y])),
     );
   }
   const token = ++preparationToken;
   let progress = 0;
-  const chunkBins = Math.max(16, Math.min(64, Math.ceil(parameters.resolution / 16)));
+  const chunkBins = progressive
+    ? 256
+    : Math.max(16, Math.min(64, Math.ceil(parameters.resolution / 16)));
   while (progress < 1) {
     if (!isCurrentTileRequest(generation, requestId)) {
       if (token === preparationToken) session.cancel_preparation();
       return false;
     }
     progress = session.prepare_comparison_chunk(chunkBins);
+    if (progressive) {
+      while (true) {
+        const tile = session.take_preparation_tile();
+        if (!tile) break;
+        const x = tile.x;
+        const y = tile.y;
+        const width = tile.width;
+        const height = tile.height;
+        const identity = tile.take_identity();
+        const direction = tile.take_direction();
+        const directionSupport = tile.take_direction_support();
+        tile.free();
+        publishSketchTile(
+          generation,
+          parameters.resolution,
+          x,
+          y,
+          width,
+          height,
+          quality,
+          config.digest,
+          parameters.xIndex === parameters.yIndex,
+          identity,
+          direction,
+          directionSupport,
+        );
+      }
+    }
     post({ type: "status", text: label, progress, busy: true });
     await yieldToMessages();
   }
@@ -264,71 +401,58 @@ async function computeLevel(
   registerLimit: number,
   quality: "preview" | "refined",
 ): Promise<void> {
+  const config = requireScientificConfig(registerLimit);
   const tileSize = 256;
-  const tilesPerAxis = Math.ceil(parameters.resolution / tileSize);
   const selfComparison = parameters.xIndex === parameters.yIndex;
-  const total = selfComparison
-    ? (tilesPerAxis * (tilesPerAxis + 1)) / 2
-    : tilesPerAxis * tilesPerAxis;
   let completed = 0;
-  for (let y = 0; y < parameters.resolution; y += tileSize) {
-    const firstX = selfComparison ? y : 0;
-    for (let x = firstX; x < parameters.resolution; x += tileSize) {
+  const coordinates = prioritizeForRefinement(
+    parameters.resolution,
+    allTileCoordinates(parameters.resolution, selfComparison),
+    quality,
+  );
+  const total = Math.max(1, coordinates.length);
+  if (coordinates.length === 0) {
+    post({
+      type: "status",
+      text: "Quick overview is already visually settled",
+      progress: 1,
+      busy: true,
+    });
+  }
+  for (const { x, y } of coordinates) {
       if (!isCurrentTileRequest(generation, requestId)) return;
-      const tile = session.compute_tile(
+      const key = `${parameters.resolution}:${x}:${y}:${quality}`;
+      if (publishedTiles.has(key)) {
+        completed += 1;
+        continue;
+      }
+      const tile = session.compute_tile_scientific(
         x,
         y,
         tileSize,
         tileSize,
-        14,
-        registerLimit,
-        quality === "refined",
+        config,
       );
-      const identity = tile.identity().slice();
-      const direction = tile.direction().slice();
-      const directionSupport = tile.direction_support().slice();
+      const identity = tile.take_identity();
+      const direction = tile.take_direction();
+      const directionSupport = tile.take_direction_support();
       const width = tile.width;
       const height = tile.height;
       tile.free();
-      const mirror = selfComparison && x !== y
-        ? transposeTile(identity, direction, directionSupport, width, height)
-        : null;
-      context.postMessage(
-        {
-          type: "tile",
-          generation,
-          quality,
-          resolution: parameters.resolution,
-          x,
-          y,
-          width,
-          height,
-          identity,
-          direction,
-          directionSupport,
-        },
-        [identity.buffer, direction.buffer, directionSupport.buffer],
+      publishSketchTile(
+        generation,
+        parameters.resolution,
+        x,
+        y,
+        width,
+        height,
+        quality,
+        config.digest,
+        selfComparison,
+        identity,
+        direction,
+        directionSupport,
       );
-      publishedTiles.add(`${parameters.resolution}:${x}:${y}:${quality}`);
-      if (mirror) {
-        context.postMessage(
-          {
-            type: "tile",
-            generation,
-            quality,
-            resolution: parameters.resolution,
-            x: y,
-            y: x,
-            width: mirror.width,
-            height: mirror.height,
-            identity: mirror.identity,
-            direction: mirror.direction,
-            directionSupport: mirror.directionSupport,
-          },
-          [mirror.identity.buffer, mirror.direction.buffer, mirror.directionSupport.buffer],
-        );
-        publishedTiles.add(`${parameters.resolution}:${y}:${x}:${quality}`);
-      }
       completed += 1;
       post({
         type: "status",
@@ -337,7 +461,6 @@ async function computeLevel(
         busy: true,
       });
       await yieldToMessages();
-    }
   }
 }
 
@@ -378,6 +501,11 @@ async function computeRequestedTiles(
   if (distinctPasses && isCurrentTileRequest(generation, requestId)) {
     await waitForPreviewPresentation(generation, requestId);
     if (!isCurrentTileRequest(generation, requestId)) return;
+    if (!hasDetailedCandidates(resolution, tiles)) {
+      post({ type: "status", text: `Ready · ${resolution.toLocaleString()}-cell quick detail is visually settled` });
+      post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
+      return;
+    }
     if (
       resolution === parameters.resolution
       && !session.has_prepared_level(parameters.detailedRegisterCount)
@@ -388,6 +516,9 @@ async function computeRequestedTiles(
         parameters,
         parameters.detailedRegisterCount,
         true,
+        true,
+        "refined",
+        prioritizeForRefinement(resolution, tiles, "refined"),
       );
       if (!prepared) return;
     }
@@ -426,9 +557,9 @@ async function computeExactRequestedTiles(
         256,
         256,
       );
-      const identity = tile.identity().slice();
-      const direction = tile.direction().slice();
-      const directionSupport = tile.direction_support().slice();
+      const identity = tile.take_identity();
+      const direction = tile.take_direction();
+      const directionSupport = tile.take_direction_support();
       const width = tile.width;
       const height = tile.height;
       tile.free();
@@ -443,6 +574,7 @@ async function computeExactRequestedTiles(
         {
           type: "tile",
           generation,
+          configDigest: `exact-k${parameters.k}`,
           quality: "exact",
           resolution,
           x: coordinate.x,
@@ -462,6 +594,7 @@ async function computeExactRequestedTiles(
           {
             type: "tile",
             generation,
+            configDigest: `exact-k${parameters.k}`,
             quality: "exact",
             resolution,
             x: coordinate.y,
@@ -507,91 +640,204 @@ async function computeRequestedLevel(
   quality: "preview" | "refined",
   selfComparison: boolean,
 ): Promise<void> {
+  const config = requireScientificConfig(registerLimit);
   let completed = 0;
-  for (const coordinate of tiles) {
+  const prioritizedTiles = prioritizeForRefinement(resolution, tiles, quality);
+  for (const coordinate of prioritizedTiles) {
     if (!isCurrentTileRequest(generation, requestId)) return;
     const key = `${resolution}:${coordinate.x}:${coordinate.y}:${quality}`;
     if (!publishedTiles.has(key)) {
       const tile = resolution === parametersResolution()
-        ? session.compute_tile(
+        ? session.compute_tile_scientific(
             coordinate.x,
             coordinate.y,
             256,
             256,
-            14,
-            registerLimit,
-            quality === "refined",
+            config,
           )
-        : session.compute_zoom_tile(
+        : session.compute_zoom_tile_scientific(
             resolution,
             coordinate.x,
             coordinate.y,
             256,
             256,
-            14,
-            registerLimit,
-            quality === "refined",
+            config,
           );
-      const identity = tile.identity().slice();
-      const direction = tile.direction().slice();
-      const directionSupport = tile.direction_support().slice();
+      const identity = tile.take_identity();
+      const direction = tile.take_direction();
+      const directionSupport = tile.take_direction_support();
       const width = tile.width;
       const height = tile.height;
       tile.free();
-      const mirror = selfComparison && coordinate.x !== coordinate.y
-        ? transposeTile(identity, direction, directionSupport, width, height)
-        : null;
-      context.postMessage(
-        {
-          type: "tile",
-          generation,
-          quality,
-          resolution,
-          x: coordinate.x,
-          y: coordinate.y,
-          width,
-          height,
-          identity,
-          direction,
-          directionSupport,
-        },
-        [identity.buffer, direction.buffer, directionSupport.buffer],
+      publishSketchTile(
+        generation,
+        resolution,
+        coordinate.x,
+        coordinate.y,
+        width,
+        height,
+        quality,
+        config.digest,
+        selfComparison,
+        identity,
+        direction,
+        directionSupport,
       );
-      publishedTiles.add(key);
-      if (mirror) {
-        context.postMessage(
-          {
-            type: "tile",
-            generation,
-            quality,
-            resolution,
-            x: coordinate.y,
-            y: coordinate.x,
-            width: mirror.width,
-            height: mirror.height,
-            identity: mirror.identity,
-            direction: mirror.direction,
-            directionSupport: mirror.directionSupport,
-          },
-          [mirror.identity.buffer, mirror.direction.buffer, mirror.directionSupport.buffer],
-        );
-        publishedTiles.add(`${resolution}:${coordinate.y}:${coordinate.x}:${quality}`);
-      }
     }
     completed += 1;
     post({
       type: "status",
       text: quality === "preview" ? "Drawing quick detail" : "Refining zoom detail",
-      progress: completed / Math.max(1, tiles.length),
+      progress: completed / Math.max(1, prioritizedTiles.length),
       busy: true,
     });
     await yieldToMessages();
   }
 }
 
+function rememberRefinementPriority(
+  resolution: number,
+  x: number,
+  y: number,
+  identity: Uint16Array,
+  support: Uint16Array,
+): void {
+  refinementPriority.set(refinementKey(resolution, x, y), tileRefinementPriority(identity, support));
+}
+
+function prioritizeForRefinement<T extends { x: number; y: number }>(
+  resolution: number,
+  tiles: T[],
+  quality: "preview" | "refined",
+): T[] {
+  if (quality === "preview") return tiles;
+  return selectRefinementTiles(
+    resolution,
+    tiles,
+    refinementPriority,
+    activeParameters?.sparseCorrection ?? false,
+  );
+}
+
+function hasDetailedCandidates<T extends { x: number; y: number }>(
+  resolution: number,
+  tiles: T[],
+): boolean {
+  return selectRefinementTiles(
+    resolution,
+    tiles,
+    refinementPriority,
+    activeParameters?.sparseCorrection ?? false,
+  ).length > 0;
+}
+
+function publishSketchTile(
+  generation: number,
+  resolution: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  quality: "preview" | "refined",
+  configDigest: string,
+  selfComparison: boolean,
+  identity: Uint16Array,
+  direction: Int16Array,
+  directionSupport: Uint16Array,
+): void {
+  if (quality === "preview") {
+    rememberRefinementPriority(resolution, x, y, identity, directionSupport);
+  }
+  const mirror = selfComparison && x !== y
+    ? transposeTile(identity, direction, directionSupport, width, height)
+    : null;
+  context.postMessage(
+    {
+      type: "tile",
+      generation,
+      configDigest,
+      quality,
+      resolution,
+      x,
+      y,
+      width,
+      height,
+      identity,
+      direction,
+      directionSupport,
+    },
+    [identity.buffer, direction.buffer, directionSupport.buffer],
+  );
+  publishedTiles.add(`${resolution}:${x}:${y}:${quality}`);
+  if (mirror) {
+    context.postMessage(
+      {
+        type: "tile",
+        generation,
+        configDigest,
+        quality,
+        resolution,
+        x: y,
+        y: x,
+        width: mirror.width,
+        height: mirror.height,
+        identity: mirror.identity,
+        direction: mirror.direction,
+        directionSupport: mirror.directionSupport,
+      },
+      [mirror.identity.buffer, mirror.direction.buffer, mirror.directionSupport.buffer],
+    );
+    publishedTiles.add(`${resolution}:${y}:${x}:${quality}`);
+  }
+}
+
 function parametersResolution(): number {
   if (!activeParameters) throw new Error("No active comparison parameters");
   return activeParameters.resolution;
+}
+
+function allTileCoordinates(
+  resolution: number,
+  selfComparison: boolean,
+): Array<{ x: number; y: number }> {
+  const result: Array<{ x: number; y: number }> = [];
+  for (let y = 0; y < resolution; y += 256) {
+    for (let x = selfComparison ? y : 0; x < resolution; x += 256) {
+      result.push({ x, y });
+    }
+  }
+  return result;
+}
+
+function requireScientificConfig(registerCount: number): ScientificConfig {
+  const config = scientificConfigs.get(registerCount);
+  if (!config) throw new Error(`No scientific configuration for ${registerCount} registers.`);
+  return config;
+}
+
+function configMetadata(config: ScientificConfig): ScientificConfigMetadata {
+  return {
+    version: config.version,
+    digest: config.digest,
+    hashAlgorithm: config.hash_algorithm,
+    hashSeed: config.hash_seed,
+    estimator: config.estimator,
+    k: config.k,
+    registerCount: config.register_count,
+    hllPrecision: config.hll_precision,
+    bBits: config.b_bits,
+    verificationBits: config.verification_bits,
+    sparseCoreCap: config.sparse_core_cap,
+    aniFloor: config.ani_floor,
+    minimumDetectionProbability: config.minimum_detection_probability,
+    identityScale: config.identity_scale,
+    missingIdentity: config.missing_identity,
+  };
+}
+
+function releaseScientificConfigs(): void {
+  for (const config of scientificConfigs.values()) config.free();
+  scientificConfigs.clear();
 }
 
 function readBaseCodes(sequenceIndex: number, start: number, count: number): Uint8Array {
@@ -640,7 +886,13 @@ function allocatedWorkerBytes(): number {
 }
 
 function isCurrentTileRequest(generation: number, requestId: number): boolean {
-  return generation === activeGeneration && requestId === activeTileRequestId;
+  return operationIsCurrent()
+    && generation === activeGeneration
+    && requestId === activeTileRequestId;
+}
+
+function operationIsCurrent(): boolean {
+  return executingEpoch === operationEpoch;
 }
 
 function yieldToMessages(): Promise<void> {

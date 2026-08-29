@@ -13,7 +13,7 @@ pub const DEFAULT_EXACT_CORE_CAP: usize = 2_048;
 pub const DEFAULT_PREVIEW_REGISTERS: usize = 256;
 
 /// Default background-refinement register count used by the browser.
-pub const DEFAULT_DETAILED_REGISTERS: usize = 2_048;
+pub const DEFAULT_DETAILED_REGISTERS: usize = 1_024;
 
 /// Converts a desired nonzero-match probability into a Poisson expected-match threshold.
 ///

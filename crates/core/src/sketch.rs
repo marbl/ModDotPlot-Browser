@@ -30,6 +30,26 @@ pub struct RegisterComparison {
     pub ambiguous_matches: u32,
 }
 
+/// Jaccard statistic derived from aligned OPH register winners.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum OphJaccardEstimator {
+    /// Legacy truncated-bit statistic with a constant collision correction.
+    BbitCollisionCorrected = 1,
+    /// Standard OPH matched-winner count divided by non-jointly-empty bins.
+    VerifiedWinners = 2,
+}
+
+impl OphJaccardEstimator {
+    /// Stable identifier used in scientific provenance.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::BbitCollisionCorrected => "bbit_collision_corrected",
+            Self::VerifiedWinners => "verified_winners",
+        }
+    }
+}
+
 /// Word-parallel fixed-register signature derived from an [`OphSketch`].
 ///
 /// Each hash bit is stored as a separate bit plane. Comparing 64 registers therefore
@@ -53,6 +73,10 @@ impl BitSlicedSignature {
     /// Number of represented registers.
     pub fn register_count(&self) -> usize {
         self.register_count
+    }
+
+    pub(crate) fn fingerprint_bits(&self) -> u8 {
+        self.fingerprint_bits
     }
 
     /// Estimated distinct cardinality copied from the source sketch.
@@ -165,6 +189,58 @@ impl BitSlicedSignature {
         );
         comparison
     }
+
+    /// Scalar comparator retained solely as an independent check of bit-sliced logic.
+    #[cfg(test)]
+    pub(crate) fn compare_scalar(
+        &self,
+        other: &Self,
+        b: u8,
+        register_limit: usize,
+    ) -> RegisterComparison {
+        assert_eq!(self.register_count, other.register_count);
+        assert_eq!(self.fingerprint_bits, other.fingerprint_bits);
+        assert!((1..=self.fingerprint_bits).contains(&b));
+        let mut comparison = RegisterComparison::default();
+        for register in 0..register_limit.min(self.register_count) {
+            let word = register / 64;
+            let mask = 1_u64 << (register % 64);
+            let left_occupied = self.occupancy[word] & mask != 0;
+            let right_occupied = other.occupancy[word] & mask != 0;
+            if !left_occupied && !right_occupied {
+                continue;
+            }
+            comparison.considered += 1;
+            if !(left_occupied && right_occupied) {
+                continue;
+            }
+            let bit_equal = |bit: u8| {
+                let plane = usize::from(bit) * self.words + word;
+                (self.planes[plane] ^ other.planes[plane]) & mask == 0
+            };
+            if !(0..b).all(bit_equal) {
+                continue;
+            }
+            comparison.bbit_matches += 1;
+            if !(b..self.fingerprint_bits).all(bit_equal) {
+                continue;
+            }
+            comparison.verified_matches += 1;
+            let ambiguous =
+                (self.ambiguous_orientation[word] | other.ambiguous_orientation[word]) & mask != 0;
+            if ambiguous {
+                comparison.ambiguous_matches += 1;
+            } else if (self.reverse_orientation[word] ^ other.reverse_orientation[word]) & mask != 0
+            {
+                comparison.reverse_matches += 1;
+            } else {
+                comparison.forward_matches += 1;
+            }
+        }
+        comparison.jaccard =
+            verified_winner_jaccard(comparison.verified_matches, comparison.considered);
+        comparison
+    }
 }
 
 /// Mergeable one-permutation sketch with full register winners.
@@ -233,6 +309,41 @@ impl OphSketch {
             .saturating_add(self.cardinality.estimated_heap_bytes())
     }
 
+    /// Projects a fine OPH partition into an exactly equivalent coarser partition.
+    ///
+    /// This supports benchmarking a fused detailed build. The coarse winner is the
+    /// minimum full hash across each contiguous group of fine buckets, which is
+    /// identical to inserting the same stream directly into the coarse sketch.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless the requested count is a power-of-two divisor of the source
+    /// register count and is at least two.
+    #[must_use]
+    pub fn project_registers(&self, register_count: usize) -> Self {
+        assert!(register_count >= 2 && register_count.is_power_of_two());
+        assert!(register_count <= self.registers.len());
+        assert_eq!(self.registers.len() % register_count, 0);
+        let group = self.registers.len() / register_count;
+        let registers = self
+            .registers
+            .chunks_exact(group)
+            .map(|candidates| {
+                candidates
+                    .iter()
+                    .copied()
+                    .filter(|candidate| candidate.occupied)
+                    .min_by_key(|candidate| candidate.hash)
+                    .unwrap_or_default()
+            })
+            .collect();
+        Self {
+            registers,
+            cardinality: self.cardinality.clone(),
+            observations: self.observations,
+        }
+    }
+
     /// Adds one pre-hashed canonical k-mer.
     #[allow(clippy::cast_possible_truncation)]
     pub fn insert(&mut self, hash: u64, orientation: Orientation) {
@@ -276,8 +387,7 @@ impl OphSketch {
 
     /// Compares a prefix of aligned registers with `b` retained hash bits.
     ///
-    /// Empty registers are not densified in this reference kernel. The Phase 0
-    /// benchmark will select and validate the production densification strategy.
+    /// Empty registers remain empty in the selected undensified production estimator.
     ///
     /// # Panics
     ///
@@ -369,50 +479,6 @@ impl OphSketch {
         }
         signature
     }
-
-    /// Encodes a register prefix after deterministic re-randomized densification.
-    ///
-    /// Empty target registers probe a target-specific permutation of the register
-    /// domain and copy the first occupied winner. The probe sequence depends only on
-    /// the target register and public `densification_seed`, so equal sketches densify
-    /// identically. This implementation is a benchmark candidate; production use is
-    /// conditional on the Phase 0 statistical gates.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `fingerprint_bits` is outside `1..=64`.
-    pub fn densified_bit_sliced(
-        &self,
-        fingerprint_bits: u8,
-        register_limit: usize,
-        densification_seed: u64,
-    ) -> BitSlicedSignature {
-        assert!((1..=64).contains(&fingerprint_bits));
-        let register_count = register_limit.min(self.registers.len());
-        let mut densified = self.clone();
-        densified.registers.truncate(register_count);
-        if densified.registers.iter().any(|register| register.occupied) {
-            for target in 0..register_count {
-                if densified.registers[target].occupied {
-                    continue;
-                }
-                for attempt in 0..register_count {
-                    let probe_hash = fmix64(
-                        densification_seed
-                            ^ (target as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
-                            ^ (attempt as u64).wrapping_mul(0xd6e8_feb8_6659_fd93),
-                    );
-                    let donor = usize::try_from(probe_hash % register_count as u64)
-                        .expect("a register index fits usize");
-                    if self.registers[donor].occupied {
-                        densified.registers[target] = self.registers[donor];
-                        break;
-                    }
-                }
-            }
-        }
-        densified.bit_sliced(fingerprint_bits, register_count)
-    }
 }
 
 pub(crate) fn collision_corrected_jaccard(
@@ -434,6 +500,11 @@ pub(crate) fn collision_corrected_jaccard(
     let raw = f64::from(matches) / f64::from(considered);
     let collision = 2_f64.powi(-i32::from(b));
     Some(((raw - collision) / (1.0 - collision)).clamp(0.0, 1.0))
+}
+
+/// Estimates OPH resemblance from verified winner equality over union-occupied bins.
+pub fn verified_winner_jaccard(matches: u32, considered: u32) -> Option<f64> {
+    (considered > 0).then(|| f64::from(matches) / f64::from(considered))
 }
 
 /// Mergeable `HyperLogLog` cardinality sidecar.
@@ -604,16 +675,15 @@ mod tests {
     }
 
     #[test]
-    fn densification_fills_sparse_registers_deterministically() {
-        let mut sketch = OphSketch::new(256, 8);
-        for value in 0..20_u64 {
-            sketch.insert(fmix64(value), Orientation::Forward);
+    fn projected_registers_match_direct_coarse_insertion() {
+        let mut detailed = OphSketch::new(2_048, 10);
+        let mut quick = OphSketch::new(256, 10);
+        for value in 0..100_000_u64 {
+            let hash = fmix64(value.wrapping_mul(0xd6e8_feb8_6659_fd93));
+            detailed.insert(hash, Orientation::Forward);
+            quick.insert(hash, Orientation::Forward);
         }
-        let left = sketch.densified_bit_sliced(32, 256, 17);
-        let right = sketch.densified_bit_sliced(32, 256, 17);
-        let comparison = left.compare(&right, 14, 256);
-        assert_eq!(comparison.considered, 256);
-        assert_eq!(comparison.jaccard, Some(1.0));
+        assert_eq!(detailed.project_registers(256), quick);
     }
 
     #[test]

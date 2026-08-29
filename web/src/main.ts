@@ -1,7 +1,6 @@
 import "./styles.css";
 import { AxisOverlay } from "./axes";
 import { selectDetailResolution, selectTiles } from "./detail";
-import { parseFeatureTrack, type FeatureTrack } from "./features";
 import { formatBases, formatBytes, formatInterval } from "./format";
 import { addIdentitiesToHistogram, normalizeHeatmapRange, type HeatmapRange } from "./heatmap";
 import { DotplotRenderer, type HoverDatum, type ViewChange } from "./renderer";
@@ -22,18 +21,20 @@ const ySelect = element<HTMLSelectElement>("y-sequence");
 const resolutionSelect = element<HTMLSelectElement>("resolution");
 const previewRegisterSelect = element<HTMLSelectElement>("preview-register-count");
 const detailedRegisterSelect = element<HTMLSelectElement>("detailed-register-count");
+const sparseCorrectionInput = element<HTMLInputElement>("sparse-correction");
 const kmerInput = element<HTMLInputElement>("kmer-length");
 const plotDetailNote = element<HTMLElement>("plot-detail-note");
 const sketchRetentionNote = element<HTMLElement>("sketch-retention-note");
+const scientificProvenance = element<HTMLOutputElement>("scientific-provenance");
 const resetViewButton = element<HTMLButtonElement>("reset-view");
 const status = element<HTMLElement>("status");
+const retryEngineButton = element<HTMLButtonElement>("retry-engine");
 const memoryUsage = element<HTMLElement>("memory-usage");
 const hoverCard = element<HTMLElement>("hover-card");
+const plotSummary = element<HTMLElement>("plot-summary");
 const canvas = element<HTMLCanvasElement>("plot-canvas");
 const xAxisCanvas = element<HTMLCanvasElement>("x-axis-overlay");
 const yAxisCanvas = element<HTMLCanvasElement>("y-axis-overlay");
-const xTrackInput = element<HTMLInputElement>("x-track-input");
-const yTrackInput = element<HTMLInputElement>("y-track-input");
 const progressOverlay = element<HTMLElement>("compute-progress");
 const progressRing = element<SVGCircleElement>("progress-ring");
 const progressValue = element<HTMLElement>("progress-value");
@@ -49,10 +50,13 @@ const heatmapOutputs = {
   maximum: element<HTMLOutputElement>("heatmap-max-value"),
 };
 
-const renderer = new DotplotRenderer(canvas);
+const renderer = createRenderer(canvas);
 const axes = new AxisOverlay(xAxisCanvas, yAxisCanvas);
-const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+let worker: Worker;
 let sequences: SequenceMetadata[] = [];
+let lastFiles: File[] = [];
+let recoveryFiles: File[] | null = null;
+let workerFailed = false;
 let generation = 0;
 let prepareTimer = 0;
 let detailTimer = 0;
@@ -64,23 +68,31 @@ let pendingView: ViewChange | null = null;
 let currentMeasurement: "sketch" | "kmer" = "sketch";
 let overviewReadyText = "Ready";
 let wasmBytes = 0;
-let heatmapRange: HeatmapRange = { minimum: 80, midpoint: 90, maximum: 100 };
+let heatmapRange: HeatmapRange = { minimum: 85, midpoint: 92, maximum: 100 };
 let histogramBins = new Uint32Array(101);
 const histogramTiles = new Set<string>();
-const tracks: Partial<Record<"x" | "y", { sequenceIndex: number; track: FeatureTrack }>> = {};
 
-worker.onmessage = (event: MessageEvent<WorkerToMainMessage>): void => {
+function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
   const message = event.data;
   switch (message.type) {
     case "ready":
-      status.textContent = "Ready";
+      if (recoveryFiles) {
+        const files = recoveryFiles;
+        recoveryFiles = null;
+        loadFiles(files, false);
+      } else if (!status.classList.contains("error")) {
+        status.textContent = "Ready";
+        hideProgress();
+      }
       break;
     case "status":
+      if (status.classList.contains("error")) break;
       status.textContent = message.text;
       if (message.busy) showProgress(message.text, message.progress);
       else hideProgress();
       break;
     case "sequences":
+      if (message.generation !== generation) return;
       sequences = message.sequences;
       if (sequences.length === 0) {
         showError("No sequence records were found.");
@@ -92,6 +104,7 @@ worker.onmessage = (event: MessageEvent<WorkerToMainMessage>): void => {
     case "comparison-ready":
       if (message.generation !== generation) return;
       comparisonReady = true;
+      updateScientificProvenance(message.configurations, message.parameters.k);
       status.textContent = "Drawing quick overview";
       if (pendingView && requestedResolution(pendingView) > message.parameters.resolution) {
         cancelAndQueueVisibleDetail(0);
@@ -118,7 +131,9 @@ worker.onmessage = (event: MessageEvent<WorkerToMainMessage>): void => {
       if (message.generation !== generation) return;
       wasmBytes = message.estimatedBytes;
       overviewReadyText = `Ready · ${(message.elapsedMs / 1000).toFixed(1)} s`;
-      if (currentMeasurement === "sketch") status.textContent = overviewReadyText;
+      if (currentMeasurement === "sketch" && !status.classList.contains("error")) {
+        status.textContent = overviewReadyText;
+      }
       hideProgress();
       updateMemory();
       break;
@@ -130,9 +145,9 @@ worker.onmessage = (event: MessageEvent<WorkerToMainMessage>): void => {
       showError(message.message);
       break;
   }
-};
+}
 
-worker.onerror = (event): void => showError(event.message || "The compute worker stopped unexpectedly.");
+startWorker();
 
 dropZone.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => {
@@ -161,6 +176,7 @@ for (const control of [
   resolutionSelect,
   previewRegisterSelect,
   detailedRegisterSelect,
+  sparseCorrectionInput,
   kmerInput,
 ]) {
   control.addEventListener("change", () => {
@@ -184,6 +200,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-color-m
 }
 resetViewButton.addEventListener("click", () => renderer.resetView());
 clearButton.addEventListener("click", clearSession);
+retryEngineButton.addEventListener("click", restartEngine);
 renderer.onHover(showHover);
 renderer.onViewChange((change) => {
   pendingView = change;
@@ -193,21 +210,23 @@ renderer.onViewChange((change) => {
 renderer.onTileEvict((tile) => {
   post({ type: "evict-tiles", generation, tiles: [tile] });
 });
-axes.onTrackDrop((axis, file) => void loadTrack(axis, file));
-bindTrackInput("x", xAxisCanvas, xTrackInput);
-bindTrackInput("y", yAxisCanvas, yTrackInput);
 updateHeatmap("midpoint");
 drawHistogram();
 updateParameterNotes();
 
-function loadFiles(files: File[]): void {
+function loadFiles(files: File[], remember = true): void {
+  if (remember) lastFiles = [...files];
+  generation += 1;
+  tileRequestId += 1;
+  comparisonReady = false;
   landing.hidden = true;
   workspace.hidden = false;
   clearButton.hidden = false;
+  retryEngineButton.hidden = true;
   status.classList.remove("error");
   status.textContent = "Reading sequence";
   showProgress("Reading sequence");
-  post({ type: "load", files });
+  post({ type: "load", generation, files });
 }
 
 function populateSelectors(): void {
@@ -242,6 +261,7 @@ function prepareComparison(): void {
     resolution: Math.min(Number(resolutionSelect.value), Math.max(1, activeDomainLength)),
     previewRegisterCount: Number(previewRegisterSelect.value),
     detailedRegisterCount: Number(detailedRegisterSelect.value),
+    sparseCorrection: sparseCorrectionInput.checked,
     k: Number(kmerInput.value),
   };
   generation += 1;
@@ -268,8 +288,6 @@ function prepareComparison(): void {
     xLength: x.length,
     yLength: y.length,
   });
-  restoreTrack("x", xIndex);
-  restoreTrack("y", yIndex);
   status.classList.remove("error");
   status.textContent = "Building overview signatures";
   showProgress("Building overview signatures", 0);
@@ -330,6 +348,7 @@ function requestedResolution(change: ViewChange): number {
 function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   if (!datum) {
     hoverCard.hidden = true;
+    plotSummary.textContent = "No plot position selected.";
     return;
   }
   const identity = datum.identity === null ? "idy —" : `idy ${datum.identity.toFixed(2)}%`;
@@ -338,6 +357,7 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
     <span>x ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}</span>
     <span>y ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}</span>
   `;
+  plotSummary.textContent = `${identity}; x ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}; y ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}.`;
   const frame = hoverCard.parentElement?.getBoundingClientRect();
   if (frame) {
     hoverCard.style.left = `${Math.min(frame.width - 180, Math.max(8, event.clientX - frame.left + 14))}px`;
@@ -448,50 +468,14 @@ function updateMemory(): void {
   memoryUsage.textContent = total > 0 ? `Memory ~${formatBytes(total)}` : "Memory —";
 }
 
-function bindTrackInput(
-  axis: "x" | "y",
-  axisCanvas: HTMLCanvasElement,
-  input: HTMLInputElement,
-): void {
-  axisCanvas.addEventListener("dblclick", () => input.click());
-  input.addEventListener("change", () => {
-    const file = input.files?.[0];
-    if (file) void loadTrack(axis, file);
-    input.value = "";
-  });
-}
-
-async function loadTrack(axis: "x" | "y", file: File): Promise<void> {
-  const parameters = activeParameters;
-  if (!parameters) return;
-  const sequenceIndex = axis === "x" ? parameters.xIndex : parameters.yIndex;
-  const sequence = sequences.find((item) => item.index === sequenceIndex);
-  if (!sequence) return;
-  try {
-    status.textContent = `Loading ${file.name}`;
-    showProgress("Loading feature track");
-    const track = parseFeatureTrack(await file.text(), file.name, sequence.name, sequence.length);
-    tracks[axis] = { sequenceIndex, track };
-    axes.setTrack(axis, track);
-    status.classList.remove("error");
-    status.textContent = `${track.format} track loaded on ${axis.toUpperCase()} · ${track.features.length.toLocaleString()} features`;
-    hideProgress();
-  } catch (error) {
-    showError(error instanceof Error ? error.message : String(error));
-  }
-}
-
-function restoreTrack(axis: "x" | "y", sequenceIndex: number): void {
-  const saved = tracks[axis];
-  if (saved?.sequenceIndex === sequenceIndex) axes.setTrack(axis, saved.track);
-}
-
 function clearSession(): void {
   window.clearTimeout(prepareTimer);
   window.clearTimeout(detailTimer);
   generation += 1;
   tileRequestId += 1;
   sequences = [];
+  lastFiles = [];
+  recoveryFiles = null;
   comparisonReady = false;
   currentMeasurement = "sketch";
   activeParameters = null;
@@ -499,15 +483,15 @@ function clearSession(): void {
   wasmBytes = 0;
   histogramBins = new Uint32Array(101);
   histogramTiles.clear();
-  delete tracks.x;
-  delete tracks.y;
   renderer.clearTiles();
-  post({ type: "clear" });
+  if (workerFailed) startWorker();
+  post({ type: "clear", generation });
   fileInput.value = "";
   workspace.hidden = true;
   landing.hidden = false;
   clearButton.hidden = true;
   hoverCard.hidden = true;
+  retryEngineButton.hidden = true;
   hideProgress();
   updateMemory();
 }
@@ -518,6 +502,43 @@ function showError(message: string): void {
   hideProgress();
 }
 
+function startWorker(): void {
+  workerFailed = false;
+  worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+  worker.onmessage = handleWorkerMessage;
+  worker.onerror = (event): void => {
+    event.preventDefault();
+    handleWorkerFailure(event.message || "The compute worker stopped unexpectedly.");
+  };
+  worker.onmessageerror = (): void => {
+    handleWorkerFailure("The compute worker returned an unreadable message.");
+  };
+}
+
+function handleWorkerFailure(message: string): void {
+  if (workerFailed) return;
+  workerFailed = true;
+  comparisonReady = false;
+  worker.terminate();
+  showError(`${message} Restart the compute engine to reload the selected FASTA files.`);
+  retryEngineButton.hidden = false;
+}
+
+function restartEngine(): void {
+  if (!workerFailed) worker.terminate();
+  recoveryFiles = lastFiles.length > 0 ? [...lastFiles] : null;
+  comparisonReady = false;
+  activeParameters = null;
+  renderer.clearTiles();
+  wasmBytes = 0;
+  updateMemory();
+  retryEngineButton.hidden = true;
+  status.classList.remove("error");
+  status.textContent = "Restarting compute engine";
+  showProgress("Restarting compute engine");
+  startWorker();
+}
+
 function post(message: MainToWorkerMessage): void {
   worker.postMessage(message);
 }
@@ -526,4 +547,53 @@ function element<T extends Element>(id: string): T {
   const found = document.getElementById(id);
   if (!found) throw new Error(`Missing required element #${id}`);
   return found as unknown as T;
+}
+
+function createRenderer(target: HTMLCanvasElement): DotplotRenderer {
+  try {
+    if (!("WebAssembly" in globalThis) || !("Worker" in globalThis) || !("ResizeObserver" in globalThis) || !("DecompressionStream" in globalThis)) {
+      throw new Error("This browser is missing WebAssembly, Web Workers, ResizeObserver, or gzip decompression support.");
+    }
+    return new DotplotRenderer(target);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    document.body.replaceChildren(Object.assign(document.createElement("p"), {
+      className: "fatal-error",
+      textContent: `moddotplot-rs cannot start: ${message}`,
+    }));
+    throw error;
+  }
+}
+
+function updateScientificProvenance(
+  configurations: import("./protocol").ScientificConfigMetadata[],
+  k: number,
+): void {
+  if (configurations.length === 0) {
+    scientificProvenance.textContent = `Exact canonical ${k}-mer mode · software ${__APP_VERSION__}`;
+    scientificProvenance.title = "No sketch estimator is used at this terminal resolution.";
+    return;
+  }
+  const tiers = [...configurations].sort((left, right) => left.registerCount - right.registerCount);
+  const selected = tiers[tiers.length - 1]!;
+  const registerText = tiers.map((tier) => tier.registerCount.toLocaleString()).join(" → ");
+  scientificProvenance.textContent = `${selected.hashAlgorithm} · verified OPH · ${registerText} registers · HLL p${selected.hllPrecision} · config ${selected.digest.slice(0, 8)}`;
+  scientificProvenance.title = [
+    `software=${__APP_VERSION__}`,
+    `config-version=${selected.version}`,
+    `digest=${selected.digest}`,
+    `k=${selected.k}`,
+    `hash=${selected.hashAlgorithm}`,
+    `seed=${selected.hashSeed}`,
+    `estimator=${selected.estimator}`,
+    `registers=${registerText}`,
+    `comparison-bits=${selected.bBits}`,
+    `verification-bits=${selected.verificationBits}`,
+    `hll-precision=${selected.hllPrecision}`,
+    `sparse-cap=${selected.sparseCoreCap}`,
+    `ani-floor=${selected.aniFloor}`,
+    `match-probability=${selected.minimumDetectionProbability}`,
+    `identity-scale=${selected.identityScale}`,
+    `missing=${selected.missingIdentity}`,
+  ].join("\n");
 }

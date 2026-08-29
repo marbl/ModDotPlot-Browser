@@ -2,6 +2,9 @@
 /web/dist/
 /web/node_modules/
 /web/src/wasm/
+/web/playwright-report/
+/web/test-results/
+/release-artifacts/
 *.log
 .DS_Store
 .idea/
