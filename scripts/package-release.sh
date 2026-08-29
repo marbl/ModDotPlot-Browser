@@ -34,6 +34,10 @@ if [ ! -f "$release_notes" ]; then
 fi
 
 npm --prefix web run build
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "release build changed tracked generated files; regenerate and commit them first" >&2
+  exit 1
+fi
 
 artifact_directory="$repository_root/release-artifacts"
 mkdir -p "$artifact_directory"
@@ -55,7 +59,7 @@ cp "$release_notes" "$binary_root/docs/"
 find "$binary_root" -exec touch -t 198001010000 {} +
 (
   cd "$staging_directory"
-  find "moddotplot-rs-$release_version-web" -print | LC_ALL=C sort | tar -cf - -T -
+  find "moddotplot-rs-$release_version-web" -print | LC_ALL=C sort | tar --no-recursion -cf - -T -
 ) | gzip -n > "$binary_archive"
 
 {

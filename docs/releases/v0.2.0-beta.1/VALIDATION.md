@@ -48,6 +48,13 @@ scripts/package-release.sh 0.2.0-beta.1
 * `npm audit --audit-level=moderate` reported zero known vulnerabilities on
   2026-08-29. This registry result is time-sensitive.
 
+Two independent local clones installed the lockfile, ran the complete release build,
+and produced byte-identical static assets. The local packaging preflight then produced
+separate source and web archives, verified all SHA-256 entries, and confirmed the web
+archive contained the license, notices, dependency-license bundle, SBOM, citation
+metadata, user/scientific documentation, and deployable assets. The packaging script
+was hardened during this gate to reject generated-file drift and duplicate tar entries.
+
 ## Scientific report
 
 The bounded 30-configuration estimator/HLL sweep completed successfully. The raw TSV
