@@ -66,8 +66,7 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#landing-version")).toHaveText(/^v\d/);
   await expect(page.locator(".caveat-note")).toHaveText('100% vibe-coded with Codex, provided "as is"');
   await expect(page.locator(".privacy-note")).toHaveText("Your sequence never leaves this browser");
-  await expect(page.locator(".drop-detail")).toContainText("ok for human-sized genomes, memory permitting");
-  await expect(page.locator(".choose-files")).toHaveCSS("text-decoration-line", "underline");
+  await expect(page.locator(".drop-detail")).toHaveText("or click to choose files · FASTA, gzip, and BGZF · ok for human-sized genomes");
   const landingVersion = await page.locator("#landing-version").textContent();
   const progressStyle = await page.locator("#compute-progress svg").evaluate((element) => {
     const style = getComputedStyle(element);

@@ -123,7 +123,6 @@ h1 {
 }
 
 .drop-detail { color: var(--muted); font-size: 14px; }
-.choose-files { text-decoration: underline; text-underline-offset: 2px; }
 .caveat-note, .privacy-note { color: var(--muted); font-size: 12px; }
 .caveat-note { margin-top: 26px; }
 .app-version { color: #969099; font-size: 9px; font-variant-numeric: tabular-nums; }
