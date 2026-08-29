@@ -2,7 +2,8 @@
 
 use moddotplot_core::hash::HashAlgorithm;
 use moddotplot_core::{
-    FastaParser, FrozenAxis, KmerTileRequest, MatrixTile, PackedSequence,
+    CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE, FastaParser,
+    FrozenAxis, KmerTileRequest, MatrixTile, PackedSequence,
     ScientificConfig as CoreScientificConfig, SparseCorrectionPolicy, TileRequest,
     build_axis_range, compute_frozen_tile, compute_frozen_tile_adaptive, compute_kmer_tile,
 };
@@ -203,6 +204,8 @@ pub struct ComputeSession {
     cache_recency: BTreeMap<u64, AxisCacheKey>,
     cache_clock: u64,
     axis_cache_bytes: usize,
+    composition_indices: HashMap<usize, CompositionIndex>,
+    composition_builders: HashMap<usize, CompositionIndexBuilder>,
 }
 
 #[wasm_bindgen]
@@ -223,6 +226,8 @@ impl ComputeSession {
             cache_recency: BTreeMap::new(),
             cache_clock: 0,
             axis_cache_bytes: 0,
+            composition_indices: HashMap::new(),
+            composition_builders: HashMap::new(),
         }
     }
 
@@ -332,6 +337,22 @@ impl ComputeSession {
                     .len()
                     .saturating_mul(std::mem::size_of::<(u64, AxisCacheKey)>()),
             );
+        bytes = bytes.saturating_add(
+            self.composition_indices
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(usize, CompositionIndex)>()),
+        );
+        for index in self.composition_indices.values() {
+            bytes = bytes.saturating_add(index.estimated_heap_bytes());
+        }
+        bytes = bytes.saturating_add(
+            self.composition_builders
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(usize, CompositionIndexBuilder)>()),
+        );
+        for builder in self.composition_builders.values() {
+            bytes = bytes.saturating_add(builder.estimated_heap_bytes());
+        }
         bytes
     }
 
@@ -859,6 +880,122 @@ impl ComputeSession {
         Ok(output)
     }
 
+    /// Starts or resumes an on-demand GC index for one loaded sequence.
+    ///
+    /// Returns true when the index was already complete.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a missing sequence index.
+    pub fn begin_composition_index(&mut self, sequence_index: usize) -> Result<bool, JsError> {
+        if self.composition_indices.contains_key(&sequence_index) {
+            return Ok(true);
+        }
+        let sequence = self
+            .sequences
+            .get(sequence_index)
+            .ok_or_else(|| JsError::new("GC sequence index is out of range"))?;
+        self.composition_builders
+            .entry(sequence_index)
+            .or_insert_with(|| {
+                CompositionIndexBuilder::new(sequence, DEFAULT_COMPOSITION_BLOCK_SIZE)
+            });
+        Ok(false)
+    }
+
+    /// Builds the next GC index chunk and returns completion in `[0, 1]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if indexing was not started or `maximum_blocks` is zero.
+    pub fn prepare_composition_index_chunk(
+        &mut self,
+        sequence_index: usize,
+        maximum_blocks: usize,
+    ) -> Result<f64, JsError> {
+        if maximum_blocks == 0 {
+            return Err(JsError::new("GC preparation chunk size must be positive"));
+        }
+        let sequence = self
+            .sequences
+            .get(sequence_index)
+            .ok_or_else(|| JsError::new("GC sequence index is out of range"))?;
+        let builder = self
+            .composition_builders
+            .get_mut(&sequence_index)
+            .ok_or_else(|| JsError::new("begin_composition_index must be called first"))?;
+        let progress = builder.advance(sequence, maximum_blocks);
+        if builder.is_complete() {
+            let builder = self
+                .composition_builders
+                .remove(&sequence_index)
+                .ok_or_else(|| JsError::new("completed GC builder was not retained"))?;
+            let complete = builder
+                .finish()
+                .ok_or_else(|| JsError::new("GC index completion was inconsistent"))?;
+            self.composition_indices.insert(sequence_index, complete);
+        }
+        Ok(progress)
+    }
+
+    /// Samples exact GC fractions for equal windows in a visible sequence range.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unavailable index, invalid range, or zero bins.
+    pub fn gc_bins(
+        &self,
+        sequence_index: usize,
+        start: u64,
+        end: u64,
+        bins: usize,
+    ) -> Result<Vec<f64>, JsError> {
+        if bins == 0 {
+            return Err(JsError::new("GC bin count must be positive"));
+        }
+        let sequence = self
+            .sequences
+            .get(sequence_index)
+            .ok_or_else(|| JsError::new("GC sequence index is out of range"))?;
+        if start > end || end > sequence.len() {
+            return Err(JsError::new("GC sequence range is out of bounds"));
+        }
+        let index = self
+            .composition_indices
+            .get(&sequence_index)
+            .ok_or_else(|| JsError::new("GC index is not ready"))?;
+        Ok(index.sample_gc(sequence, start, end, bins))
+    }
+
+    /// Samples `CpG` observed/expected ratios for equal windows in a visible range.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unavailable index, invalid range, or zero bins.
+    pub fn cpg_observed_expected_bins(
+        &self,
+        sequence_index: usize,
+        start: u64,
+        end: u64,
+        bins: usize,
+    ) -> Result<Vec<f64>, JsError> {
+        if bins == 0 {
+            return Err(JsError::new("CpG bin count must be positive"));
+        }
+        let sequence = self
+            .sequences
+            .get(sequence_index)
+            .ok_or_else(|| JsError::new("CpG sequence index is out of range"))?;
+        if start > end || end > sequence.len() {
+            return Err(JsError::new("CpG sequence range is out of bounds"));
+        }
+        let index = self
+            .composition_indices
+            .get(&sequence_index)
+            .ok_or_else(|| JsError::new("composition index is not ready"))?;
+        Ok(index.sample_cpg_observed_expected(sequence, start, end, bins))
+    }
+
     /// Releases all sequence and comparison memory.
     pub fn clear(&mut self) {
         self.parser = None;
@@ -868,6 +1005,8 @@ impl ComputeSession {
         self.clear_pending_preparation_tiles();
         self.sequences.clear();
         self.clear_axis_cache();
+        self.composition_indices.clear();
+        self.composition_builders.clear();
     }
 
     fn append_records(&mut self, records: Vec<PackedSequence>) -> Result<JsValue, JsError> {
@@ -1463,6 +1602,26 @@ mod tests {
         assert_eq!((selected.x(), selected.y()), (3, 0));
         session.prepare_comparison_chunk(3).unwrap();
         assert!(session.take_preparation_tile().is_none());
+    }
+
+    #[test]
+    fn gc_index_builds_incrementally_and_is_reused() {
+        let sequence = b"ACGT".repeat(600);
+        let mut session = ComputeSession::new();
+        session
+            .sequences
+            .push(PackedSequence::from_ascii("gc", &sequence));
+
+        assert!(!session.begin_composition_index(0).unwrap());
+        assert!(session.prepare_composition_index_chunk(0, 1).unwrap() < 1.0);
+        while session.prepare_composition_index_chunk(0, 1).unwrap() < 1.0 {}
+        assert!(session.begin_composition_index(0).unwrap());
+        let values = session.gc_bins(0, 0, 2_400, 4).unwrap();
+        assert!(
+            values
+                .iter()
+                .all(|value| (value - 0.5).abs() < f64::EPSILON)
+        );
     }
 
     #[test]

@@ -42,6 +42,7 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
 * Switch between containment-derived ANI and support-aware orientation coloring.
 * Reach an exact k-mer dotplot at terminal zoom.
 * Recolor cached results with an 80% to 100% three-anchor transfer function.
+* Stack local GC% and CpG tracks or imported plain/gzip BED/GFF/GTF annotations along either axis.
 * Report computation progress, estimated application memory, and method provenance.
 
 See the [user guide](docs/USER_GUIDE.md) for operation and interpretation.

@@ -81,28 +81,16 @@ export class AxisOverlay {
     const range = this.#visibleRange(axis);
     if (axis === "x") {
       context.beginPath();
-      context.moveTo(0, 0.5);
-      context.lineTo(width, 0.5);
+      context.moveTo(0, height - 0.5);
+      context.lineTo(width, height - 0.5);
       context.stroke();
-      drawTicksX(context, range.start, range.end, width);
-      context.fillStyle = "#454149";
-      context.font = "12px ui-sans-serif, system-ui, sans-serif";
-      context.textAlign = "center";
-      context.fillText(ellipsize(this.#metadata.xName, 70), width / 2, height - 12);
+      drawTicksX(context, range.start, range.end, width, height);
     } else {
       context.beginPath();
       context.moveTo(width - 0.5, 0);
       context.lineTo(width - 0.5, height);
       context.stroke();
       drawTicksY(context, range.start, range.end, width, height);
-      context.save();
-      context.translate(12, height / 2);
-      context.rotate(-Math.PI / 2);
-      context.fillStyle = "#454149";
-      context.font = "12px ui-sans-serif, system-ui, sans-serif";
-      context.textAlign = "center";
-      context.fillText(ellipsize(this.#metadata.yName, 70), 0, 0);
-      context.restore();
     }
   }
 
@@ -125,40 +113,48 @@ export function niceTickStep(span: number, targetTicks = 5): number {
   return Math.max(1, unit * magnitude);
 }
 
-function drawTicksX(context: CanvasRenderingContext2D, start: number, end: number, width: number): void {
+function drawTicksX(
+  context: CanvasRenderingContext2D,
+  start: number,
+  end: number,
+  width: number,
+  height: number,
+): void {
   const step = niceTickStep(end - start);
   context.textAlign = "center";
-  context.textBaseline = "top";
+  context.textBaseline = "bottom";
   for (let value = Math.ceil(start / step) * step; value <= end; value += step) {
     const x = map(value, start, end, 0, width);
     context.beginPath();
-    context.moveTo(x, 0);
-    context.lineTo(x, 6);
+    context.moveTo(x, height);
+    context.lineTo(x, height - 6);
     context.stroke();
     context.textAlign = x < 38 ? "left" : x > width - 38 ? "right" : "center";
-    context.fillText(formatAxisCoordinate(value), x, 8);
+    context.fillText(formatAxisCoordinate(value), x, height - 8);
   }
 }
 
 function drawTicksY(context: CanvasRenderingContext2D, start: number, end: number, width: number, height: number): void {
   const step = niceTickStep(end - start);
-  context.textAlign = "right";
-  context.textBaseline = "middle";
+  context.textAlign = "center";
+  context.textBaseline = "bottom";
   for (let value = Math.ceil(start / step) * step; value <= end; value += step) {
     const y = map(value, start, end, height, 0);
-    const labelY = Math.max(7, Math.min(height - 7, y));
+    const label = formatAxisCoordinate(value);
+    const halfLabel = Math.min(height / 2 - 2, context.measureText(label).width / 2);
+    const labelY = Math.max(halfLabel + 2, Math.min(height - halfLabel - 2, y));
     context.beginPath();
     context.moveTo(width - 6, y);
     context.lineTo(width, y);
     context.stroke();
-    context.fillText(formatAxisCoordinate(value), width - 9, labelY);
+    context.save();
+    context.translate(width - 9, labelY);
+    context.rotate(-Math.PI / 2);
+    context.fillText(label, 0, 0);
+    context.restore();
   }
 }
 
 function map(value: number, start: number, end: number, outputStart: number, outputEnd: number): number {
   return outputStart + (value - start) / Math.max(1e-12, end - start) * (outputEnd - outputStart);
-}
-
-function ellipsize(value: string, length: number): string {
-  return value.length <= length ? value : `${value.slice(0, length - 1)}…`;
 }

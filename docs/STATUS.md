@@ -7,7 +7,8 @@ by the named evidence; it does not imply broad research validation.
 
 ## Working and verified
 
-* Transactional, cancellable multi-file FASTA loading with generation filtering.
+* Transactional, cancellable multi-file FASTA loading with generation filtering,
+  annotation-file preflight rejection, and modal parse-error reporting.
 * `U/u` to `T/t` normalization tested through direct packing, streaming FASTA,
   canonical k-mers, and the exact-containment oracle.
 * Independent X/Y sequence selection and initially exact short-sequence dispatch.
@@ -29,13 +30,24 @@ by the named evidence; it does not imply broad research validation.
   before output allocation and return typed errors through the Wasm boundary.
 * Consuming Wasm tile channels with no redundant JavaScript `.slice()`.
 * WebGL2 context restoration and keyboard pan/zoom/reset.
+* Stackable GC% and CpG observed/expected axis tracks with incremental composition
+  indexing, one unsmoothed bar per sampled display column or row, overscanned pan
+  caches, immediate stale-track blanking, and value mouseovers.
+* Worker-streamed plain-text and gzip BED3–12, GFF3, and GTF annotation import with
+  validation reporting,
+  conservative confirmed chromosome aliases, sequence-aware automatic axis assignment,
+  sequence-associated axis eligibility, UCSC colors, category-colored grouped gene
+  models with distinct CDS geometry, one-to-ten-row deterministic lane packing,
+  synchronous pan, feature mouseovers, direct strip reordering, pointer-following drag
+  previews, and first-release drag-away disabling.
 * Actionable compute-worker recovery that rebuilds the engine and reloads the user's
   retained browser `File` objects after a worker crash.
 * Atomic clean build, pinned toolchains and CI actions, CycloneDX SBOM, dependency
   license bundle, and crate-local MIT-0 files.
 * Real-Wasm tests in Chromium, Firefox, WebKit, and installed Google Chrome for
   rapid-load cancellation, clear, exact entry, privacy, context loss, keyboard
-  navigation, progressive detail paint, pairwise operation, and worker recovery.
+  navigation, progressive detail paint, pairwise operation, worker recovery, annotation
+  importing, sequence association, UCSC colors, track reordering, and disabling.
 
 The automated counts are recorded from each clean release validation rather than
 hard-coded here. The CI commands in the README are the release contract.

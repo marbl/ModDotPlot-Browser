@@ -105,7 +105,7 @@ export function heatmapGradient(
 }
 
 function clamp(value: number): number {
-  return Math.max(80, Math.min(100, value));
+  return Math.round(Math.max(80, Math.min(100, value)) * 10) / 10;
 }
 
 function rangePosition(identity: number): number {

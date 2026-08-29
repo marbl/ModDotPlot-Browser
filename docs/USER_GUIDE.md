@@ -20,7 +20,8 @@ workers and WebAssembly on `file://` pages.
 1. Drop one or more FASTA or gzip-compressed FASTA files on the input area, or use the
    file chooser.
 2. Wait for the sequence records to appear. The status line reports loading,
-   signature construction, tile drawing, and refinement progress.
+   signature construction, tile drawing, and refinement progress. A rotating helix is
+   shown in the plot while it is empty and active work is underway.
 3. Choose a sequence for the X axis and one for the Y axis. Selecting the same record
    on both axes creates a self-dotplot.
 4. Explore immediately when the quick view appears. A higher-accuracy view replaces
@@ -33,6 +34,10 @@ very-large-record support remains limited by browser memory in the v0.2 beta.
 Upper- and lowercase `U` are accepted and normalized to `T`; they are indistinguishable
 after loading. IUPAC ambiguity and gap characters retain their coordinates but prevent
 every overlapping k-mer from contributing. Other sequence symbols are rejected.
+
+Annotation files dropped on the initial FASTA target are refused. If any selected file
+cannot be parsed as FASTA, no partial sequence set is published; the application
+returns to the input screen and reports the problem in a dialog.
 
 ## Read the plot
 
@@ -50,10 +55,10 @@ falling slightly out of register with the matrix grid.
 The default heatmap uses the plot background below 85% identity and follows the
 selected palette through 100%. Values above the selected maximum retain the palette's
 top color. The three compact handles map the palette's low, natural midpoint, and high
-colors to the selected identity values. Moving them recolors cached tiles immediately
-and does not rerun the sequence calculation. The palette menu includes the original
-ModDotPlot Spectral scheme, and the plot background can be switched between white and
-black.
+colors to the selected identity values. Moving them in 0.1 percentage-point increments
+recolors cached tiles immediately and does not rerun the sequence calculation. The
+palette menu includes the original ModDotPlot Spectral scheme, and the plot background
+can be switched between white and black.
 
 In **Orientation** mode, forward and reverse matches have distinct colors. Direction
 comes from the canonical orientations of verified matching k-mers in both containment
@@ -62,6 +67,9 @@ without weakening the underlying match intensity.
 
 Hover over the plot to see the identity estimate and exact X/Y coordinate intervals.
 Areas outside a shorter selected record are blank.
+
+When available horizontal space exceeds the plot's required width, the complete plot
+assembly is centered rather than anchored to the control panel.
 
 ## Navigate
 
@@ -89,7 +97,8 @@ genome-browser palette: A green, C blue, G orange, and T red.
 | Similarity / Orientation | Switch coloring without recomputing tiles |
 | Palette | Select the similarity heatmap colors, including ModDotPlot Spectral |
 | Identity range | Map the palette's low, midpoint, and high colors from 80% to 100% |
-| Black plot background | Use black instead of white for missing and below-minimum cells |
+| White / Black background | Choose the color used for the plot and below-minimum cells |
+| Feature tracks | Enable sequence-derived tracks or import BED/GFF/GTF annotations, optionally gzip compressed |
 | Reset view | Return to the full comparison and redraw the overview |
 | Clear | Remove loaded sequences and cached results |
 
@@ -120,14 +129,78 @@ The compact methods line below these controls reports ntHash2, the estimator, re
 tiers, HLL precision, and the scientific configuration digest. Hover it for the full
 parameter set.
 
+### Sequence feature tracks
+
+Open **Feature tracks** to enable GC% or CpG observed/expected independently on either
+axis. **Both** switches the corresponding X and Y tracks together. Each enabled track
+adds one thin row above the plot or one thin column to its left. Horizontal bars extend
+upward and vertical bars extend leftward, away from the plot. Multiple tracks stack
+outward while the square dotplot resizes to keep the page inside the browser window.
+
+Each bar is calculated from the genomic window represented by that display column or
+row; the values are not smoothed. GC% excludes ambiguous bases from its denominator.
+CpG observed/expected uses `CpG × N / (C × G)` for canonical bases in the window and is
+displayed on a 0–2 scale, with larger values clipped to the full track height.
+
+Track data is computed locally on demand. The browser retains an overscanned region so
+bars move immediately with ordinary panning. If a pan or zoom leaves that cache, the
+track becomes blank immediately and is repainted only after a matching region has been
+calculated, preventing an old track from appearing beside a new plot position.
+
+Hover over a GC% or CpG bar to see its value and genomic window.
+
+#### Imported annotations
+
+Drop a BED, GFF3, or GTF file on the X or Y coordinate axis, or use **Add track** at
+the bottom of the Feature tracks panel. Plain-text and `.gz` versions are accepted. An
+axis is highlighted while it is a valid drop target. File drops elsewhere in the
+application are intercepted and reported instead of opening the file in the browser.
+
+For a self-comparison, **Add track** associates the file with that sequence. For a
+pairwise comparison, the browser scans sequence identifiers first. A unique match is
+assigned automatically; if both displayed sequences match, a dialog asks which axis to
+use. Parsing then occurs locally in a separate browser worker. Successful imports appear
+immediately without a confirmation dialog. Import failures open a dialog with validation
+and representative parsing errors. Exact sequence identifiers are preferred. A
+conservative chromosome alias such as `1` and `chr1` must be confirmed. Records for other
+identifiers in a multi-sequence file are ignored for that displayed track.
+
+Imported tracks are associated with the FASTA sequence selected at import time. In a
+pairwise comparison, the checkbox for an axis showing another sequence is disabled. In
+a self-comparison, the same track can be enabled independently on both axes. Changing
+the X/Y selection makes the track follow its associated sequence.
+
+BED3–12 is supported, including UCSC `itemRgb`, thick regions, and BED12 blocks. GFF3
+and GTF parent relationships are grouped into transcript models: exons are boxes,
+CDS intervals are slightly taller boxes, introns are connecting sticks, and strand
+direction is marked along the model. Protein-coding models are dark blue, pseudogenes
+medium blue, RNA models green, and unclassified models dark gray. Hover a feature for
+its name, type, coordinates, strand, and source details. Labels are not drawn
+permanently so tracks remain thin.
+
+Each imported track starts with one display row. Use its **− / +** control to select up
+to ten deterministic packing rows; overlaps beyond the selected count share the last
+row. Click and hold a visible track, then drag it over another track to reorder them. A
+floating preview follows the pointer and the cursor changes from an open to a closed
+hand. Dragging it outside the track strip, including over the dotplot, crosshatches the
+entire preview; releasing disables that axis copy without deleting the parsed data.
+Re-enable it with its X/Y checkbox. **Delete** in the control panel removes that track's
+parsed data.
+
+Y-axis coordinate labels are rotated to conserve horizontal space. Vertical feature
+track labels are oriented with the bottom of the text toward the plot and placed at the
+lower-coordinate end, matching the horizontal-track label convention.
+
 ## Progress and memory
 
-The small donut beside the status text shows progress for the current foreground work.
+The status and its small progress donut appear at the top of the control panel and show
+progress for the current foreground work, including on-demand feature indexing.
 The quick viewport is always completed and painted before detailed construction begins.
 Detailed tiles then replace quick tiles individually as compatible detailed axis blocks
 finish; the application does not wait for the complete detailed matrix.
 
-The compact memory value estimates packed sequence storage, Wasm structures, tile
+The compact memory value at the bottom of the control panel estimates packed sequence
+storage, Wasm structures, tile
 arrays, and graphics textures. It does not include every byte owned by the browser or
 graphics driver. Caches have bounded least-recently-used policies, but the current
 overview and visible fallback tiles are protected and can temporarily exceed their
@@ -140,7 +213,7 @@ browser session.
 
 ## Privacy and persistence
 
-moddotplot-rs does not intentionally transmit loaded sequence bytes,
+moddotplot-rs does not intentionally transmit loaded sequence or feature-file bytes,
 and it contains no analytics or application server API. The static hosting provider
 can still observe ordinary page and asset requests, and browser extensions operate
 outside the application's control. See [Privacy and local data handling](PRIVACY.md).
@@ -150,7 +223,7 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.2.0-beta.2 is a functional preview and has not completed the full scientific
+* v0.2.0-beta.3 is a functional preview and has not completed the full scientific
   release-validation plan.
 * Very large records are limited by available browser memory; sharding and disk spill
   are planned before claiming robust 1 Gb operation.
@@ -183,6 +256,7 @@ linear-memory high-water allocation.
 
 ### The plot is empty
 
-Confirm that both axis records are selected, then reset the view. An honestly blank
-plot can also mean that the sequences have no detectable k-mer containment above the
-current heatmap minimum.
+The rotating helix means plot work is still underway. If it disappears and the plot
+remains blank, confirm that both axis records are selected, then reset the view. An
+honestly blank plot can also mean that the sequences have no detectable k-mer
+containment above the current heatmap minimum.

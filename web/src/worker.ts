@@ -3,6 +3,7 @@
 import init, { ComputeSession, ScientificConfig } from "./wasm/moddotplot_wasm.js";
 import type {
   ComparisonParameters,
+  FeatureTrackRequest,
   MainToWorkerMessage,
   ScientificConfigMetadata,
   SequenceMetadata,
@@ -20,6 +21,7 @@ let session: ComputeSession;
 let wasmMemory: WebAssembly.Memory;
 let activeGeneration = 0;
 let activeTileRequestId = -1;
+let activeFeatureTrackRequestId = -1;
 let activeParameters: ComparisonParameters | null = null;
 let loadedSequences: SequenceMetadata[] = [];
 const scientificConfigs = new Map<number, ScientificConfig>();
@@ -66,6 +68,25 @@ context.onmessage = (event: MessageEvent<MainToWorkerMessage>): void => {
     }
     return;
   }
+  if (message.type === "cancel-feature-tracks") {
+    if (message.generation === activeGeneration) activeFeatureTrackRequestId = message.requestId;
+    return;
+  }
+  if (message.type === "request-feature-tracks") {
+    activeFeatureTrackRequestId = message.requestId;
+    const ticket = operationEpoch;
+    messageQueue = messageQueue.then(async () => {
+      if (ticket !== operationEpoch) return;
+      executingEpoch = ticket;
+      await engineReady;
+      await computeFeatureTracks(message.generation, message.requestId, message.tracks);
+    }).catch((error: unknown) => {
+      if (ticket !== operationEpoch || message.requestId !== activeFeatureTrackRequestId) return;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      post({ type: "error", message: errorMessage });
+    });
+    return;
+  }
   const ticket = ++operationEpoch;
   messageQueue = messageQueue.then(async () => {
     executingEpoch = ticket;
@@ -83,6 +104,7 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     case "load":
       activeGeneration = message.generation;
       activeTileRequestId = -1;
+      activeFeatureTrackRequestId = -1;
       activeParameters = null;
       publishedTiles.clear();
       refinementPriority.clear();
@@ -120,6 +142,8 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     case "cancel-tiles":
     case "preview-presented":
     case "evict-tiles":
+    case "cancel-feature-tracks":
+    case "request-feature-tracks":
       break;
     case "request-tiles":
       if (message.generation !== activeGeneration || !activeParameters) return;
@@ -136,6 +160,7 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     case "clear":
       activeGeneration = message.generation;
       activeTileRequestId = -1;
+      activeFeatureTrackRequestId = -1;
       activeParameters = null;
       loadedSequences = [];
       publishedTiles.clear();
@@ -145,6 +170,72 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
       session.clear();
       break;
   }
+}
+
+async function computeFeatureTracks(
+  generation: number,
+  requestId: number,
+  tracks: FeatureTrackRequest[],
+): Promise<void> {
+  if (!isCurrentFeatureTrackRequest(generation, requestId) || tracks.length === 0) return;
+  const sequenceIndexes = [...new Set(tracks.map((track) => track.sequenceIndex))];
+  const totalBases = Math.max(1, sequenceIndexes.reduce((total, sequenceIndex) =>
+    total + (loadedSequences.find((sequence) => sequence.index === sequenceIndex)?.length ?? 0), 0));
+  let completedBases = 0;
+
+  for (const sequenceIndex of sequenceIndexes) {
+    if (!isCurrentFeatureTrackRequest(generation, requestId)) return;
+    const metadata = loadedSequences.find((sequence) => sequence.index === sequenceIndex);
+    if (!metadata) throw new Error("A selected feature-track sequence is no longer loaded.");
+    let ready = session.begin_composition_index(sequenceIndex);
+    let progress = ready ? 1 : 0;
+    while (!ready) {
+      if (!isCurrentFeatureTrackRequest(generation, requestId)) return;
+      progress = session.prepare_composition_index_chunk(sequenceIndex, 2_048);
+      ready = progress >= 1;
+      post({
+        type: "feature-track-status",
+        generation,
+        requestId,
+        text: `Computing sequence tracks · ${metadata.name}`,
+        progress: (completedBases + progress * metadata.length) / totalBases,
+      });
+      await yieldToMessages();
+    }
+    completedBases += metadata.length;
+  }
+
+  if (!isCurrentFeatureTrackRequest(generation, requestId)) return;
+  const payloads = tracks.map((track) => ({
+    kind: track.kind,
+    axis: track.axis,
+    start: Math.floor(track.start),
+    end: Math.ceil(track.end),
+    values: track.kind === "gc"
+      ? session.gc_bins(
+          track.sequenceIndex,
+          BigInt(Math.floor(track.start)),
+          BigInt(Math.ceil(track.end)),
+          track.bins,
+        )
+      : session.cpg_observed_expected_bins(
+          track.sequenceIndex,
+          BigInt(Math.floor(track.start)),
+          BigInt(Math.ceil(track.end)),
+          track.bins,
+        ),
+  }));
+  if (!isCurrentFeatureTrackRequest(generation, requestId)) return;
+  context.postMessage(
+    {
+      type: "feature-tracks",
+      generation,
+      requestId,
+      tracks: payloads,
+      estimatedBytes: allocatedWorkerBytes(),
+    },
+    payloads.map((payload) => payload.values.buffer),
+  );
 }
 
 async function loadFiles(files: File[], generation: number): Promise<void> {
@@ -889,6 +980,12 @@ function isCurrentTileRequest(generation: number, requestId: number): boolean {
   return operationIsCurrent()
     && generation === activeGeneration
     && requestId === activeTileRequestId;
+}
+
+function isCurrentFeatureTrackRequest(generation: number, requestId: number): boolean {
+  return operationIsCurrent()
+    && generation === activeGeneration
+    && requestId === activeFeatureTrackRequestId;
 }
 
 function operationIsCurrent(): boolean {

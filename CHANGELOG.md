@@ -7,6 +7,52 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.2.0-beta.3] - 2026-08-29
+
+### Changed
+
+* Removed the confirmation dialog after successful track imports; validation errors and
+  required axis or alias choices still use dialogs.
+* Replaced the simple SVG plot-loading mark with a depth-sorted, rotating B-DNA canvas
+  animation.
+* Moved X coordinates and horizontal tracks above the plot and the X sequence
+  identifier below it, with bars extending upward away from the plot. Status,
+  progress, and memory reporting now live in the control panel so the plot pane can
+  use the full browser height.
+* Made sequence-derived tracks pan immediately from an overscanned cache and clear on
+  the same frame whenever cached coverage is insufficient.
+* Replaced per-axis import buttons with one sequence-aware **Add track** action. A
+  unique sequence match is assigned automatically; ambiguous pairwise matches ask the
+  user to choose an axis.
+* Made imported-track reordering complete on the first pointer release, added a
+  pointer-following drag preview, and made a drop outside the track strip disable the
+  corresponding axis copy.
+* Compacted the Y axis by rotating coordinate labels and aligned vertical track labels
+  with the lower-coordinate end of their tracks.
+* Replaced the plot-background checkbox with adjacent White/Black buttons, refined
+  control-description spacing, and restored grab/grabbing track cursors.
+* Replaced the small drag-away removal icon with prominent diagonal hatching over the
+  complete track.
+* Centered the plot assembly when the browser has surplus horizontal space and added a
+  small rotating double-helix shadow while an empty plot is being calculated.
+* Increased heatmap-slider precision to 0.1 percentage point and added a **Both**
+  shortcut to each GC% and CpG track control.
+
+### Added
+
+* Stackable GC% and CpG observed/expected tracks for both plot axes, computed locally
+  on demand with one unsmoothed bar per sampled display column or row and hover values.
+* Local BED3–12, GFF3, and GTF imports, either plain text or gzip compressed, from
+  highlighted axis drop targets or a control-panel file chooser, including validation
+  reports, exact/conservative sequence mapping, UCSC `itemRgb`, BED blocks, and grouped
+  transcript/exon/CDS/intron models with category-aware GFF colors.
+* Sequence-associated imported tracks with one to ten packing rows, direct hold-drag
+  reordering, drag-away disabling, control-panel enable/delete operations, and feature
+  mouseovers. File drops elsewhere in the application are intercepted and reported
+  instead of allowing browser navigation.
+* Preflight rejection of annotation files in the FASTA landing target and modal error
+  reporting for malformed FASTA input, without publishing a partial workspace.
+
 ## [0.2.0-beta.2] - 2026-08-29
 
 ### Changed
@@ -107,7 +153,8 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.2...HEAD
+[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.3...HEAD
+[0.2.0-beta.3]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.2...v0.2.0-beta.3
 [0.2.0-beta.2]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.1...v0.2.0-beta.2
 [0.2.0-beta.1]: https://github.com/marbl/moddotplot-rs/compare/v0.1.0...v0.2.0-beta.1
 [0.1.0]: https://github.com/marbl/moddotplot-rs/releases/tag/v0.1.0

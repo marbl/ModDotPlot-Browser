@@ -41,11 +41,38 @@ export interface CachedTileCoordinate extends TileCoordinate {
   resolution: number;
 }
 
+export type FeatureTrackAxis = "x" | "y";
+export type FeatureTrackKind = "gc" | "cpg";
+
+export interface FeatureTrackRequest {
+  kind: FeatureTrackKind;
+  axis: FeatureTrackAxis;
+  sequenceIndex: number;
+  start: number;
+  end: number;
+  bins: number;
+}
+
+export interface FeatureTrackPayload {
+  kind: FeatureTrackKind;
+  axis: FeatureTrackAxis;
+  start: number;
+  end: number;
+  values: Float64Array;
+}
+
 export type MainToWorkerMessage =
   | { type: "load"; generation: number; files: File[] }
   | { type: "prepare"; generation: number; requestId: number; parameters: ComparisonParameters }
   | { type: "cancel-tiles"; generation: number; requestId: number }
   | { type: "preview-presented"; generation: number; requestId: number }
+  | { type: "cancel-feature-tracks"; generation: number; requestId: number }
+  | {
+      type: "request-feature-tracks";
+      generation: number;
+      requestId: number;
+      tracks: FeatureTrackRequest[];
+    }
   | {
       type: "evict-tiles";
       generation: number;
@@ -88,6 +115,20 @@ export type WorkerToMainMessage =
       configurations: ScientificConfigMetadata[];
     }
   | { type: "preview-complete"; generation: number; requestId: number }
+  | {
+      type: "feature-track-status";
+      generation: number;
+      requestId: number;
+      text: string;
+      progress: number;
+    }
+  | {
+      type: "feature-tracks";
+      generation: number;
+      requestId: number;
+      tracks: FeatureTrackPayload[];
+      estimatedBytes: number;
+    }
   | ({ type: "tile" } & MatrixTilePayload)
   | { type: "complete"; generation: number; elapsedMs: number; estimatedBytes: number }
   | { type: "memory"; estimatedBytes: number }

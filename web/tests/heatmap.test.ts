@@ -14,6 +14,8 @@ describe("heatmap controls", () => {
       .toEqual({ minimum: 80, midpoint: 80, maximum: 80 });
     expect(normalizeHeatmapRange({ minimum: 0, midpoint: 40, maximum: 120 }, "midpoint"))
       .toEqual({ minimum: 80, midpoint: 80, maximum: 100 });
+    expect(normalizeHeatmapRange({ minimum: 85.14, midpoint: 92.26, maximum: 99.94 }, "midpoint"))
+      .toEqual({ minimum: 85.1, midpoint: 92.3, maximum: 99.9 });
   });
 
   it("ignores missing values and bins fixed-point identity", () => {

@@ -1,0 +1,162 @@
+import type { FeatureTrackAxis } from "./protocol";
+
+export type ImportedTrackFormat = "bed" | "gff3" | "gtf";
+
+export interface ImportedFeature {
+  id: string;
+  name: string;
+  type: string;
+  start: number;
+  end: number;
+  strand: "+" | "-" | ".";
+  color: string;
+  /** Alternating zero-based half-open block starts and ends. */
+  blocks: number[];
+  thickStart?: number;
+  thickEnd?: number;
+  lane: number;
+  details: string[];
+}
+
+export interface ImportedLogicalTrack {
+  name: string;
+  features: ImportedFeature[];
+  maximumLane: number;
+}
+
+export interface ImportIssue {
+  line: number;
+  message: string;
+}
+
+export interface TrackImportReport {
+  fileName: string;
+  format: ImportedTrackFormat;
+  sequenceName: string;
+  matchedIdentifier: string;
+  matchKind: "exact" | "alias";
+  validRecords: number;
+  skippedRecords: number;
+  clippedRecords: number;
+  ignoredSequenceRecords: number;
+  identifiers: string[];
+  issues: ImportIssue[];
+  tracks: ImportedLogicalTrack[];
+}
+
+export interface TrackSequenceCandidate {
+  axis: FeatureTrackAxis;
+  index: number;
+  name: string;
+  length: number;
+}
+
+export type TrackParserRequest =
+  | {
+      type: "parse";
+      requestId: number;
+      file: File;
+      targetSequence: { index: number; name: string; length: number };
+    }
+  | {
+      type: "inspect";
+      requestId: number;
+      file: File;
+      candidates: TrackSequenceCandidate[];
+    };
+
+export type TrackParserMessage =
+  | { type: "progress"; requestId: number; progress: number; text: string }
+  | {
+      type: "inspection-complete";
+      requestId: number;
+      identifiers: string[];
+      matches: Array<TrackSequenceCandidate & { identifier: string; matchKind: "exact" | "alias" }>;
+    }
+  | { type: "complete"; requestId: number; report: TrackImportReport }
+  | { type: "error"; requestId: number; message: string; issues: ImportIssue[] };
+
+export function inferFeatureFormat(fileName: string, firstDataLine = ""): ImportedTrackFormat | null {
+  const lower = fileName.toLowerCase().replace(/\.gz$/, "");
+  if (/\.(bed)(?:\.txt)?$/.test(lower)) return "bed";
+  if (/\.(gff|gff3)(?:\.txt)?$/.test(lower)) return "gff3";
+  if (/\.(gtf|gff2)(?:\.txt)?$/.test(lower)) return "gtf";
+  const fields = firstDataLine.split("\t");
+  if (fields.length >= 9 && /^[+-\.]$/.test(fields[6] ?? "")) {
+    return (fields[8] ?? "").includes("=") ? "gff3" : "gtf";
+  }
+  if (fields.length >= 3 && /^\d+$/.test(fields[1] ?? "") && /^\d+$/.test(fields[2] ?? "")) {
+    return "bed";
+  }
+  return null;
+}
+
+/** Conservative chromosome aliases only; arbitrary fuzzy matching is intentionally excluded. */
+export function normalizedSequenceIdentifier(identifier: string): string {
+  const token = identifier.trim().split(/\s+/, 1)[0] ?? "";
+  const withoutPrefix = token.replace(/^chr/i, "");
+  return /^(m|mt)$/i.test(withoutPrefix) ? "MT" : withoutPrefix.toUpperCase();
+}
+
+export function sequenceIdentifierMatch(
+  recordIdentifier: string,
+  sequenceName: string,
+): "exact" | "alias" | null {
+  const sequenceIdentifier = sequenceName.trim().split(/\s+/, 1)[0] ?? sequenceName;
+  if (recordIdentifier === sequenceIdentifier || recordIdentifier === sequenceName) return "exact";
+  return normalizedSequenceIdentifier(recordIdentifier) === normalizedSequenceIdentifier(sequenceIdentifier)
+    ? "alias"
+    : null;
+}
+
+export function parseItemRgb(value: string | undefined): string | null {
+  if (!value || value === "0") return null;
+  const channels = value.split(",").map(Number);
+  if (channels.length !== 3 || channels.some((channel) => !Number.isInteger(channel) || channel < 0 || channel > 255)) {
+    return null;
+  }
+  return `rgb(${channels.join(", ")})`;
+}
+
+export function gffFeatureColor(type: string, attributes: Record<string, string>): string {
+  const category = [
+    type,
+    attributes.gene_biotype,
+    attributes.gene_type,
+    attributes.biotype,
+    attributes.transcript_biotype,
+    attributes.transcript_type,
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (category.includes("pseudogene") || category.includes("pseudogenic")) return "#4f78a8";
+  if (category.includes("protein_coding") || category.includes("protein coding") || type.toLowerCase() === "mrna") {
+    return "#173f73";
+  }
+  if (category.includes("rna")) return "#397a4c";
+  return "#45464a";
+}
+
+export function trackAxisEligible(
+  associatedSequenceIndex: number,
+  axis: FeatureTrackAxis,
+  xIndex: number,
+  yIndex: number,
+): boolean {
+  return associatedSequenceIndex === (axis === "x" ? xIndex : yIndex);
+}
+
+/** Assigns deterministic, unbounded greedy lanes. Display code folds excess lanes into its final row. */
+export function assignFeatureLanes(features: ImportedFeature[]): number {
+  const laneEnds: number[] = [];
+  features.sort((left, right) => left.start - right.start || left.end - right.end || left.id.localeCompare(right.id));
+  for (const feature of features) {
+    let lane = laneEnds.findIndex((end) => end <= feature.start);
+    if (lane < 0) {
+      lane = laneEnds.length;
+      laneEnds.push(feature.end);
+    } else {
+      laneEnds[lane] = feature.end;
+    }
+    feature.lane = lane;
+  }
+  return Math.max(0, laneEnds.length - 1);
+}

@@ -8,13 +8,14 @@ moddotplot-rs is designed to process genomic data locally in the user's browser.
 
 The v0.2 beta application:
 
-* reads FASTA and gzip FASTA files through browser file APIs;
+* reads FASTA, BED, GFF3, and GTF files, including gzip-compressed versions, through
+  browser file APIs;
 * parses and sketches sequences in a dedicated Web Worker and WebAssembly instance;
 * renders numeric results through WebGL2;
 * makes no application API calls;
 * includes no analytics, advertising, telemetry, CDN assets, or runtime package
   downloads; and
-* does not intentionally upload sequence, sketch, or plot data.
+* does not intentionally upload sequence, annotation, sketch, or plot data.
 
 The built application is a set of static files. It still requires HTTP or HTTPS
 hosting because browsers restrict module workers and WebAssembly on `file://` pages.

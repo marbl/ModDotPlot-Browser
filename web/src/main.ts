@@ -1,7 +1,14 @@
 import "./styles.css";
 import { AxisOverlay } from "./axes";
 import { selectDetailResolution, selectTiles } from "./detail";
+import { DnaLoader } from "./dna-loader";
 import { formatBases, formatBytes, formatInterval } from "./format";
+import {
+  FeatureTrackOverlay,
+  featureTrackRequests,
+  type FeatureTrackMetadata,
+  type FeatureTrackSelection,
+} from "./feature-track";
 import {
   DEFAULT_HEATMAP_PALETTE,
   HEATMAP_PALETTES,
@@ -11,6 +18,7 @@ import {
   type HeatmapPalette,
   type HeatmapRange,
 } from "./heatmap";
+import { ImportedTrackManager } from "./imported-track";
 import { DotplotRenderer, type HoverDatum, type ViewChange } from "./renderer";
 import type {
   ComparisonParameters,
@@ -40,15 +48,69 @@ const memoryUsage = element<HTMLElement>("memory-usage");
 const hoverCard = element<HTMLElement>("hover-card");
 const plotSummary = element<HTMLElement>("plot-summary");
 const plotFrame = element<HTMLElement>("plot-frame");
+const plotLoading = element<HTMLElement>("plot-loading");
+const dnaLoader = new DnaLoader();
+plotLoading.append(dnaLoader.canvas);
+const plotColumn = element<HTMLElement>("plot-column");
 const canvas = element<HTMLCanvasElement>("plot-canvas");
 const xAxisCanvas = element<HTMLCanvasElement>("x-axis-overlay");
 const yAxisCanvas = element<HTMLCanvasElement>("y-axis-overlay");
+const xSequenceLabel = element<HTMLElement>("x-sequence-label");
+const ySequenceLabel = element<HTMLElement>("y-sequence-label");
+const featureTrackInputs = {
+  gc: {
+    x: element<HTMLInputElement>("gc-track-x"),
+    y: element<HTMLInputElement>("gc-track-y"),
+  },
+  cpg: {
+    x: element<HTMLInputElement>("cpg-track-x"),
+    y: element<HTMLInputElement>("cpg-track-y"),
+  },
+};
+const featureTrackBothInputs = {
+  gc: element<HTMLInputElement>("gc-track-both"),
+  cpg: element<HTMLInputElement>("cpg-track-both"),
+};
+const featureTrackPanels = {
+  gc: {
+    x: element<HTMLElement>("gc-track-x-panel"),
+    y: element<HTMLElement>("gc-track-y-panel"),
+  },
+  cpg: {
+    x: element<HTMLElement>("cpg-track-x-panel"),
+    y: element<HTMLElement>("cpg-track-y-panel"),
+  },
+};
+const xFeatureTrackStack = element<HTMLElement>("x-feature-track-stack");
+const yFeatureTrackStack = element<HTMLElement>("y-feature-track-stack");
+const xAxisPanel = element<HTMLElement>("x-axis-panel");
+const yAxisPanel = element<HTMLElement>("y-axis-panel");
+const importedTrackList = element<HTMLElement>("imported-track-list");
+const importedTrackEmpty = element<HTMLElement>("imported-track-empty");
+const addTrackButton = element<HTMLButtonElement>("add-track");
+const trackFileInput = element<HTMLInputElement>("track-file-input");
+const trackImportDialog = element<HTMLDialogElement>("track-import-dialog");
+const trackImportTitle = element<HTMLElement>("track-import-title");
+const trackImportSummary = element<HTMLElement>("track-import-summary");
+const trackImportDetails = element<HTMLElement>("track-import-details");
+const trackImportConfirm = element<HTMLButtonElement>("track-import-confirm");
+const trackImportSecondary = element<HTMLButtonElement>("track-import-secondary");
+const trackImportClose = element<HTMLButtonElement>("track-import-close");
+const sequenceLoadDialog = element<HTMLDialogElement>("sequence-load-dialog");
+const sequenceLoadSummary = element<HTMLElement>("sequence-load-summary");
+const sequenceLoadDetails = element<HTMLElement>("sequence-load-details");
+const sequenceLoadClose = element<HTMLButtonElement>("sequence-load-close");
+const trackHoverCard = element<HTMLElement>("track-hover-card");
+const xGcCanvas = element<HTMLCanvasElement>("gc-track-x-canvas");
+const yGcCanvas = element<HTMLCanvasElement>("gc-track-y-canvas");
+const xCpgCanvas = element<HTMLCanvasElement>("cpg-track-x-canvas");
+const yCpgCanvas = element<HTMLCanvasElement>("cpg-track-y-canvas");
 const progressOverlay = element<HTMLElement>("compute-progress");
 const progressRing = element<SVGCircleElement>("progress-ring");
 const progressValue = element<HTMLElement>("progress-value");
 const histogramCanvas = element<HTMLCanvasElement>("identity-histogram");
 const heatmapPaletteSelect = element<HTMLSelectElement>("heatmap-palette");
-const darkBackgroundInput = element<HTMLInputElement>("dark-background");
+const backgroundButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-background-mode]")];
 const heatmapGradientElement = element<HTMLElement>("heatmap-gradient");
 const heatmapInputs = {
   minimum: element<HTMLInputElement>("heatmap-min"),
@@ -63,6 +125,45 @@ const heatmapOutputs = {
 
 const renderer = createRenderer(canvas);
 const axes = new AxisOverlay(xAxisCanvas, yAxisCanvas);
+const featureTracks = new FeatureTrackOverlay([
+  { kind: "gc", axis: "x", canvas: xGcCanvas, maximum: 1 },
+  { kind: "gc", axis: "y", canvas: yGcCanvas, maximum: 1 },
+  { kind: "cpg", axis: "x", canvas: xCpgCanvas, maximum: 2 },
+  { kind: "cpg", axis: "y", canvas: yCpgCanvas, maximum: 2 },
+]);
+const importedTracks = new ImportedTrackManager({
+  xStack: xFeatureTrackStack,
+  yStack: yFeatureTrackStack,
+  xDropTargets: [xAxisPanel, xFeatureTrackStack],
+  yDropTargets: [yAxisPanel, yFeatureTrackStack],
+  list: importedTrackList,
+  emptyMessage: importedTrackEmpty,
+  addButton: addTrackButton,
+  input: trackFileInput,
+  dialog: trackImportDialog,
+  dialogTitle: trackImportTitle,
+  dialogSummary: trackImportSummary,
+  dialogDetails: trackImportDetails,
+  dialogConfirm: trackImportConfirm,
+  dialogSecondary: trackImportSecondary,
+  dialogClose: trackImportClose,
+  tooltip: trackHoverCard,
+  getSequence: (axis) => sequences.find(
+    (sequence) => sequence.index === Number(axis === "x" ? xSelect.value : ySelect.value),
+  ) ?? null,
+  onLayoutChange: updateFeatureTrackLayout,
+  onStatus: showTrackImportStatus,
+  onIdle: restoreStatusAfterTrackImport,
+});
+for (const kind of ["gc", "cpg"] as const) {
+  for (const axis of ["x", "y"] as const) {
+    importedTracks.registerComputedPanel(featureTrackPanels[kind][axis], axis, () => {
+      featureTrackInputs[kind][axis].checked = false;
+      updateFeatureTrackSelection();
+    });
+  }
+}
+featureTracks.onHover((hover, event) => importedTracks.showQuantitativeHover(hover, event));
 let worker: Worker;
 let sequences: SequenceMetadata[] = [];
 let lastFiles: File[] = [];
@@ -71,13 +172,19 @@ let workerFailed = false;
 let generation = 0;
 let prepareTimer = 0;
 let detailTimer = 0;
+let featureTrackTimer = 0;
 let tileRequestId = 0;
+let featureTrackRequestId = 0;
 let comparisonReady = false;
 let activeParameters: ComparisonParameters | null = null;
+let activeFeatureTrackMetadata: FeatureTrackMetadata | null = null;
 let activeDomainLength = 1;
 let pendingView: ViewChange | null = null;
 let currentMeasurement: "sketch" | "kmer" = "sketch";
 let overviewReadyText = "Ready";
+let plotStatusText = "Ready";
+let featureTrackBusy = false;
+let sequenceLoadPending = false;
 let wasmBytes = 0;
 let heatmapRange: HeatmapRange = { minimum: 85, midpoint: 92, maximum: 100 };
 let histogramBins = new Uint32Array(101);
@@ -92,12 +199,14 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
         recoveryFiles = null;
         loadFiles(files, false);
       } else if (!status.classList.contains("error")) {
+        plotStatusText = "Ready";
         status.textContent = "Ready";
         hideProgress();
       }
       break;
     case "status":
       if (status.classList.contains("error")) break;
+      plotStatusText = message.text;
       status.textContent = message.text;
       if (message.busy) showProgress(message.text, message.progress);
       else hideProgress();
@@ -106,9 +215,10 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (message.generation !== generation) return;
       sequences = message.sequences;
       if (sequences.length === 0) {
-        showError("No sequence records were found.");
+        rejectSequenceLoad("No sequence records were found.");
         return;
       }
+      sequenceLoadPending = false;
       populateSelectors();
       queueComparison(0);
       break;
@@ -116,10 +226,12 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (message.generation !== generation) return;
       comparisonReady = true;
       updateScientificProvenance(message.configurations, message.parameters.k);
+      plotStatusText = "Drawing quick overview";
       status.textContent = "Drawing quick overview";
       if (pendingView && requestedResolution(pendingView) > message.parameters.resolution) {
         cancelAndQueueVisibleDetail(0);
       }
+      queueFeatureTracks(180);
       break;
     case "preview-complete":
       if (message.generation !== generation || message.requestId !== tileRequestId) return;
@@ -135,6 +247,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
     case "tile":
       if (message.generation !== generation) return;
       renderer.addTile(message);
+      setPlotLoading(false);
       collectHistogram(message);
       updateMemory();
       break;
@@ -142,9 +255,30 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (message.generation !== generation) return;
       wasmBytes = message.estimatedBytes;
       overviewReadyText = `Ready · ${(message.elapsedMs / 1000).toFixed(1)} s`;
+      plotStatusText = overviewReadyText;
       if (currentMeasurement === "sketch" && !status.classList.contains("error")) {
         status.textContent = overviewReadyText;
       }
+      setPlotLoading(false);
+      hideProgress();
+      updateMemory();
+      break;
+    case "feature-track-status":
+      if (message.generation !== generation || message.requestId !== featureTrackRequestId) return;
+      featureTrackBusy = true;
+      if (!status.classList.contains("error")) {
+        status.textContent = message.text;
+        showProgress(message.text, message.progress);
+      }
+      break;
+    case "feature-tracks":
+      if (message.generation !== generation || message.requestId !== featureTrackRequestId) return;
+      for (const track of message.tracks) {
+        if (featureTrackInputs[track.kind][track.axis].checked) featureTracks.setData(track);
+      }
+      featureTrackBusy = false;
+      wasmBytes = message.estimatedBytes;
+      if (!status.classList.contains("error")) status.textContent = plotStatusText;
       hideProgress();
       updateMemory();
       break;
@@ -153,16 +287,26 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       updateMemory();
       break;
     case "error":
-      showError(message.message);
+      featureTrackBusy = false;
+      if (sequenceLoadPending) rejectSequenceLoad(message.message);
+      else {
+        setPlotLoading(false);
+        showError(message.message);
+      }
       break;
   }
 }
 
 startWorker();
+sequenceLoadClose.addEventListener("click", () => sequenceLoadDialog.close());
 
 dropZone.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => {
-  if (fileInput.files?.length) loadFiles([...fileInput.files]);
+  const files = [...(fileInput.files ?? [])];
+  // Release the chooser immediately so a second selection, including the same file,
+  // always produces a fresh change event while an earlier load is being cancelled.
+  fileInput.value = "";
+  if (files.length) loadFiles(files);
 });
 for (const eventName of ["dragenter", "dragover"]) {
   dropZone.addEventListener(eventName, (event) => {
@@ -199,7 +343,23 @@ for (const [name, input] of Object.entries(heatmapInputs) as Array<[keyof Heatma
   input.addEventListener("input", () => updateHeatmap(name));
 }
 heatmapPaletteSelect.addEventListener("change", updateHeatmapAppearance);
-darkBackgroundInput.addEventListener("change", updateHeatmapAppearance);
+for (const button of backgroundButtons) {
+  button.addEventListener("click", () => {
+    for (const peer of backgroundButtons) peer.setAttribute("aria-pressed", String(peer === button));
+    updateHeatmapAppearance();
+  });
+}
+for (const kind of ["gc", "cpg"] as const) {
+  featureTrackInputs[kind].x.addEventListener("change", () => updateFeatureTrackSelection());
+  featureTrackInputs[kind].y.addEventListener("change", () => updateFeatureTrackSelection());
+  featureTrackBothInputs[kind].addEventListener("change", () => {
+    const checked = featureTrackBothInputs[kind].checked;
+    featureTrackInputs[kind].x.checked = checked;
+    featureTrackInputs[kind].y.checked = checked;
+    featureTrackBothInputs[kind].indeterminate = false;
+    updateFeatureTrackSelection();
+  });
+}
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-color-mode]")) {
   button.addEventListener("click", () => {
     const mode = button.dataset.colorMode;
@@ -217,7 +377,12 @@ renderer.onHover(showHover);
 renderer.onViewChange((change) => {
   pendingView = change;
   axes.setView(change);
-  if (comparisonReady) cancelAndQueueVisibleDetail(120);
+  if (activeFeatureTrackMetadata) featureTracks.setView(activeFeatureTrackMetadata, change);
+  if (activeFeatureTrackMetadata) importedTracks.setView(activeFeatureTrackMetadata, change);
+  if (comparisonReady) {
+    queueFeatureTracks(40);
+    cancelAndQueueVisibleDetail(240);
+  }
 });
 renderer.onTileEvict((tile) => {
   post({ type: "evict-tiles", generation, tiles: [tile] });
@@ -227,15 +392,45 @@ drawHistogram();
 updateParameterNotes();
 
 function loadFiles(files: File[], remember = true): void {
+  const annotations = files.filter((file) => isAnnotationFileName(file.name));
+  if (annotations.length > 0) {
+    showSequenceLoadDialog(
+      `${fileList(annotations)} ${annotations.length === 1 ? "is an annotation file" : "are annotation files"}, not FASTA sequence input.`,
+      [
+        "Load one or more FASTA or FASTA.gz files first.",
+        "After the dotplot opens, add BED, GFF, or GTF annotations from Feature tracks or by dropping them on an axis.",
+      ],
+    );
+    return;
+  }
   if (remember) lastFiles = [...files];
+  window.clearTimeout(prepareTimer);
+  window.clearTimeout(detailTimer);
+  window.clearTimeout(featureTrackTimer);
   generation += 1;
   tileRequestId += 1;
+  featureTrackRequestId += 1;
+  sequences = [];
   comparisonReady = false;
+  activeParameters = null;
+  activeFeatureTrackMetadata = null;
+  pendingView = null;
+  featureTrackBusy = false;
+  sequenceLoadPending = true;
+  xSelect.replaceChildren();
+  ySelect.replaceChildren();
+  xSequenceLabel.textContent = "";
+  ySequenceLabel.textContent = "";
+  renderer.clearTiles();
+  featureTracks.clear();
+  importedTracks.clear();
+  setPlotLoading(true);
   landing.hidden = true;
   workspace.hidden = false;
   clearButton.hidden = false;
   retryEngineButton.hidden = true;
   status.classList.remove("error");
+  plotStatusText = "Reading sequence";
   status.textContent = "Reading sequence";
   showProgress("Reading sequence");
   post({ type: "load", generation, files });
@@ -279,14 +474,27 @@ function prepareComparison(): void {
   };
   generation += 1;
   tileRequestId += 1;
+  featureTrackRequestId += 1;
   comparisonReady = false;
+  featureTrackBusy = false;
   currentMeasurement = "sketch";
   overviewReadyText = "Ready";
   activeParameters = parameters;
+  activeFeatureTrackMetadata = {
+    baseResolution: parameters.resolution,
+    domainLength: activeDomainLength,
+    xIndex,
+    yIndex,
+    xLength: x.length,
+    yLength: y.length,
+  };
+  importedTracks.updateSequenceContext(activeFeatureTrackMetadata);
   pendingView = null;
   histogramBins = new Uint32Array(101);
   histogramTiles.clear();
+  if (!preserveViewport) featureTracks.clear();
   drawHistogram();
+  setPlotLoading(true);
   renderer.setComparison({
     resolution: parameters.resolution,
     domainLength: activeDomainLength,
@@ -301,7 +509,12 @@ function prepareComparison(): void {
     xLength: x.length,
     yLength: y.length,
   });
+  xSequenceLabel.textContent = x.name;
+  xSequenceLabel.title = `${x.name} · ${formatBases(x.length)}`;
+  ySequenceLabel.textContent = y.name;
+  ySequenceLabel.title = `${y.name} · ${formatBases(y.length)}`;
   status.classList.remove("error");
+  plotStatusText = "Building overview signatures";
   status.textContent = "Building overview signatures";
   showProgress("Building overview signatures", 0);
   post({ type: "prepare", generation, requestId: tileRequestId, parameters });
@@ -325,6 +538,10 @@ function requestVisibleDetail(): void {
   const parameters = activeParameters;
   const change = pendingView;
   if (!comparisonReady || !parameters || !change) return;
+  if (featureTrackBusy) {
+    queueVisibleDetail(120);
+    return;
+  }
   const resolution = requestedResolution(change);
   const exactKmerLevel = resolution === Math.floor(activeDomainLength);
   currentMeasurement = exactKmerLevel ? "kmer" : "sketch";
@@ -335,7 +552,8 @@ function requestVisibleDetail(): void {
     : resolution === parameters.resolution
       ? "Restoring overview"
       : "Drawing quick detail";
-  status.textContent = `${computeLabel} · 0%`;
+  plotStatusText = `${computeLabel} · 0%`;
+  status.textContent = plotStatusText;
   showProgress(computeLabel, 0);
   post({
     type: "request-tiles",
@@ -356,6 +574,79 @@ function requestedResolution(change: ViewChange): number {
     change.pixelWidth,
     change.pixelHeight,
   );
+}
+
+function updateFeatureTrackSelection(): void {
+  for (const kind of ["gc", "cpg"] as const) syncBothTrackInput(kind);
+  const selection = currentFeatureTrackSelection();
+  for (const axis of ["x", "y"] as const) {
+    for (const kind of ["gc", "cpg"] as const) {
+      const selected = selection[kind][axis];
+      featureTrackPanels[kind][axis].hidden = !selected;
+      if (!selected) featureTracks.clear(kind, axis);
+    }
+  }
+  updateFeatureTrackLayout();
+  if (activeFeatureTrackMetadata && pendingView) {
+    featureTracks.setView(activeFeatureTrackMetadata, pendingView);
+  }
+  queueFeatureTracks(0);
+  updateMemory();
+}
+
+function updateFeatureTrackLayout(): void {
+  const total = (stack: HTMLElement): number => [...stack.children].reduce((sum, child) => {
+    if (!(child instanceof HTMLElement) || child.hidden) return sum;
+    return sum + Number(child.dataset.trackSize ?? 28);
+  }, 0);
+  plotColumn.style.setProperty("--x-track-height", `${total(xFeatureTrackStack)}px`);
+  plotColumn.style.setProperty("--y-track-width", `${total(yFeatureTrackStack)}px`);
+}
+
+function currentFeatureTrackSelection(): FeatureTrackSelection {
+  return {
+    gc: { x: featureTrackInputs.gc.x.checked, y: featureTrackInputs.gc.y.checked },
+    cpg: { x: featureTrackInputs.cpg.x.checked, y: featureTrackInputs.cpg.y.checked },
+  };
+}
+
+function syncBothTrackInput(kind: "gc" | "cpg"): void {
+  const x = featureTrackInputs[kind].x.checked;
+  const y = featureTrackInputs[kind].y.checked;
+  featureTrackBothInputs[kind].checked = x && y;
+  featureTrackBothInputs[kind].indeterminate = x !== y;
+}
+
+function queueFeatureTracks(delay: number): void {
+  window.clearTimeout(featureTrackTimer);
+  featureTrackRequestId += 1;
+  post({ type: "cancel-feature-tracks", generation, requestId: featureTrackRequestId });
+  if (featureTrackBusy) {
+    featureTrackBusy = false;
+    if (!status.classList.contains("error")) status.textContent = plotStatusText;
+    hideProgress();
+  }
+  const selection = currentFeatureTrackSelection();
+  const anySelected = Object.values(selection).some((axes) => axes.x || axes.y);
+  if (
+    !comparisonReady
+    || !activeFeatureTrackMetadata
+    || !pendingView
+    || !anySelected
+  ) return;
+  featureTrackTimer = window.setTimeout(requestFeatureTracks, delay);
+}
+
+function requestFeatureTracks(): void {
+  if (!comparisonReady || !activeFeatureTrackMetadata || !pendingView) return;
+  const tracks = featureTrackRequests(
+    activeFeatureTrackMetadata,
+    pendingView,
+    currentFeatureTrackSelection(),
+  );
+  if (tracks.length === 0) return;
+  featureTrackRequestId += 1;
+  post({ type: "request-feature-tracks", generation, requestId: featureTrackRequestId, tracks });
 }
 
 function showHover(datum: HoverDatum | null, event: PointerEvent): void {
@@ -390,7 +681,7 @@ function updateHeatmap(changed: keyof HeatmapRange): void {
   );
   for (const name of Object.keys(heatmapInputs) as Array<keyof HeatmapRange>) {
     heatmapInputs[name].value = String(heatmapRange[name]);
-    heatmapOutputs[name].value = `${heatmapRange[name]}%`;
+    heatmapOutputs[name].value = `${heatmapRange[name].toFixed(1)}%`;
   }
   renderer.setHeatmapRange(heatmapRange.minimum, heatmapRange.midpoint, heatmapRange.maximum);
   updateHeatmapAppearance();
@@ -398,7 +689,9 @@ function updateHeatmap(changed: keyof HeatmapRange): void {
 
 function updateHeatmapAppearance(): void {
   const palette = selectedHeatmapPalette();
-  const darkBackground = darkBackgroundInput.checked;
+  const darkBackground = backgroundButtons.some(
+    (button) => button.dataset.backgroundMode === "black" && button.getAttribute("aria-pressed") === "true",
+  );
   renderer.setHeatmapPalette(palette);
   renderer.setDarkBackground(darkBackground);
   plotFrame.classList.toggle("dark-background", darkBackground);
@@ -497,27 +790,41 @@ function hideProgress(): void {
   progressOverlay.classList.remove("is-indeterminate");
 }
 
+function setPlotLoading(loading: boolean): void {
+  plotLoading.hidden = !loading;
+  if (loading) dnaLoader.start();
+  else dnaLoader.stop();
+}
+
 function updateMemory(): void {
-  const total = wasmBytes + renderer.estimatedBytes();
+  const total = wasmBytes + renderer.estimatedBytes() + featureTracks.estimatedBytes() + importedTracks.estimatedBytes();
   memoryUsage.textContent = total > 0 ? `Memory ~${formatBytes(total)}` : "Memory —";
 }
 
 function clearSession(): void {
   window.clearTimeout(prepareTimer);
   window.clearTimeout(detailTimer);
+  window.clearTimeout(featureTrackTimer);
   generation += 1;
   tileRequestId += 1;
+  featureTrackRequestId += 1;
   sequences = [];
   lastFiles = [];
   recoveryFiles = null;
   comparisonReady = false;
   currentMeasurement = "sketch";
   activeParameters = null;
+  activeFeatureTrackMetadata = null;
   pendingView = null;
+  featureTrackBusy = false;
+  sequenceLoadPending = false;
   wasmBytes = 0;
   histogramBins = new Uint32Array(101);
   histogramTiles.clear();
   renderer.clearTiles();
+  featureTracks.clear();
+  importedTracks.clear();
+  setPlotLoading(false);
   if (workerFailed) startWorker();
   post({ type: "clear", generation });
   fileInput.value = "";
@@ -531,9 +838,52 @@ function clearSession(): void {
 }
 
 function showError(message: string): void {
+  featureTrackBusy = false;
   status.textContent = message;
   status.classList.add("error");
   hideProgress();
+}
+
+function rejectSequenceLoad(message: string): void {
+  const attemptedFiles = [...lastFiles];
+  clearSession();
+  showSequenceLoadDialog(
+    `${fileList(attemptedFiles)} could not be parsed as FASTA. No sequence data was loaded.`,
+    [message, "Check that every sequence record begins with a > header line, then try again."],
+  );
+}
+
+function showSequenceLoadDialog(summary: string, details: string[]): void {
+  sequenceLoadSummary.textContent = summary;
+  sequenceLoadDetails.replaceChildren(...details.map((detail) => {
+    const item = document.createElement("li");
+    item.textContent = detail;
+    return item;
+  }));
+  if (!sequenceLoadDialog.open) sequenceLoadDialog.showModal();
+}
+
+function isAnnotationFileName(name: string): boolean {
+  return /\.(?:bed|gff3?|gff2|gtf)(?:\.txt)?(?:\.gz)?$/i.test(name);
+}
+
+function fileList(files: File[]): string {
+  if (files.length === 0) return "The selected input";
+  const shown = files.slice(0, 3).map((file) => file.name).join(", ");
+  return files.length > 3 ? `${shown}, and ${files.length - 3} more files` : shown;
+}
+
+function showTrackImportStatus(text: string, progress?: number): void {
+  if (status.classList.contains("error")) return;
+  status.textContent = text;
+  showProgress(text, progress);
+}
+
+function restoreStatusAfterTrackImport(): void {
+  if (status.classList.contains("error")) return;
+  status.textContent = plotStatusText;
+  hideProgress();
+  updateMemory();
 }
 
 function startWorker(): void {
@@ -553,7 +903,9 @@ function handleWorkerFailure(message: string): void {
   if (workerFailed) return;
   workerFailed = true;
   comparisonReady = false;
+  featureTrackBusy = false;
   worker.terminate();
+  setPlotLoading(false);
   showError(`${message} Restart the compute engine to reload the selected FASTA files.`);
   retryEngineButton.hidden = false;
 }
@@ -563,11 +915,17 @@ function restartEngine(): void {
   recoveryFiles = lastFiles.length > 0 ? [...lastFiles] : null;
   comparisonReady = false;
   activeParameters = null;
+  activeFeatureTrackMetadata = null;
+  featureTrackRequestId += 1;
+  featureTrackBusy = false;
   renderer.clearTiles();
+  featureTracks.clear();
+  setPlotLoading(true);
   wasmBytes = 0;
   updateMemory();
   retryEngineButton.hidden = true;
   status.classList.remove("error");
+  plotStatusText = "Restarting compute engine";
   status.textContent = "Restarting compute engine";
   showProgress("Restarting compute engine");
   startWorker();

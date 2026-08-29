@@ -10,6 +10,7 @@ pub mod config;
 pub mod containment;
 pub mod dna;
 pub mod fasta;
+pub mod gc;
 pub mod hash;
 pub mod kmer;
 pub mod matrix;
@@ -34,6 +35,7 @@ pub use containment::{
 };
 pub use dna::{CanonicalKmer, Orientation, PackedSequence};
 pub use fasta::{FastaError, FastaParser, MAX_SEQUENCE_LENGTH};
+pub use gc::{CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE};
 pub use kmer::{KmerTileRequest, compute_kmer_tile};
 pub use matrix::{
     AxisOverview, FrozenAxis, MatrixBuildError, MatrixTile, SparseCoreHashSet,
