@@ -47,10 +47,13 @@ Containment is evaluated in both core-versus-expanded directions and the larger 
 is displayed. The expansion makes the plot less sensitive to two homologous intervals
 falling slightly out of register with the matrix grid.
 
-The default heatmap is white below 85% identity and follows the yellow-red-dark
-gradient through 100%. Values above the selected maximum are black. The three compact
-handles set the minimum, middle, and maximum color anchors; moving them recolors cached
-tiles immediately and does not rerun the sequence calculation.
+The default heatmap uses the plot background below 85% identity and follows the
+selected palette through 100%. Values above the selected maximum retain the palette's
+top color. The three compact handles map the palette's low, natural midpoint, and high
+colors to the selected identity values. Moving them recolors cached tiles immediately
+and does not rerun the sequence calculation. The palette menu includes the original
+ModDotPlot Spectral scheme, and the plot background can be switched between white and
+black.
 
 In **Orientation** mode, forward and reverse matches have distinct colors. Direction
 comes from the canonical orientations of verified matching k-mers in both containment
@@ -69,14 +72,14 @@ Areas outside a shorter selected record are blank.
 
 When entering a new level, the existing lower-resolution image is enlarged immediately.
 Quick tiles then replace it. Tiles near a display decision or with weak support receive
-detailed estimates if the viewport remains current. High-sensitivity mode requests
-detailed estimates for the complete visible tile set.
-Moving elsewhere cancels obsolete detailed work.
+detailed estimates if the viewport remains current. Moving elsewhere cancels obsolete
+detailed work.
 
-At maximum zoom, each plot position represents a k-mer start rather than an approximate
-window sketch. Exact canonical k-mer matches are shown. In similarity mode their color
-identifies the X-axis base using the usual genome-browser palette: A green, C blue,
-G orange, and T red.
+At maximum zoom, each plot position represents a base pair rather than an approximate
+window sketch. Exact canonical k-mer matches extend from each matching start through
+`start + k - 1`, including the corresponding reverse diagonal for reverse-complement
+matches. In similarity mode their color identifies the X-axis base using the usual
+genome-browser palette: A green, C blue, G orange, and T red.
 
 ## Controls
 
@@ -84,7 +87,9 @@ G orange, and T red.
 | --- | --- |
 | X sequence / Y sequence | Select the two FASTA records to compare |
 | Similarity / Orientation | Switch coloring without recomputing tiles |
-| Identity range | Set the white threshold, gradient midpoint, and black threshold from 80% to 100% |
+| Palette | Select the similarity heatmap colors, including ModDotPlot Spectral |
+| Identity range | Map the palette's low, midpoint, and high colors from 80% to 100% |
+| Black plot background | Use black instead of white for missing and below-minimum cells |
 | Reset view | Return to the full comparison and redraw the overview |
 | Clear | Remove loaded sequences and cached results |
 
@@ -97,7 +102,6 @@ Advanced controls are collapsed by default.
 | Plot detail | Full-view matrix dimension: 500, 1,000, 2,000, or 4,000 cells per axis |
 | Quick accuracy | Registers used for the first visible estimate; default 256 |
 | Detailed accuracy | Registers used for background refinement; default 1,024 |
-| High sensitivity near 80% | Optional bounded exact correction for underpowered sparse detailed windows; off by default |
 | K-mer length | Canonical k-mer length used for sketching and terminal exact matching; default 21 |
 
 Plot detail changes the number of independently calculated matrix cells, not the CSS
@@ -110,7 +114,8 @@ exact k-mer sampling percentage because register occupancy varies with sequence 
 complexity, and duplicate k-mers. The quick count cannot exceed the detailed count.
 
 Changing a scientific control invalidates incompatible cached levels and starts a new
-quick view. For routine navigation, the defaults are the recommended starting point.
+quick view without changing the current pan or zoom. For routine navigation, the
+defaults are the recommended starting point.
 The compact methods line below these controls reports ntHash2, the estimator, register
 tiers, HLL precision, and the scientific configuration digest. Hover it for the full
 parameter set.
@@ -145,12 +150,12 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.2.0-beta.1 is a functional preview and has not completed the full scientific
+* v0.2.0-beta.2 is a functional preview and has not completed the full scientific
   release-validation plan.
 * Very large records are limited by available browser memory; sharding and disk spill
   are planned before claiming robust 1 Gb operation.
 * Identity estimates below roughly 80% are not a target operating regime and are shown
-  as white by default.
+  using the plot background by default.
 * Data and high-resolution image export are not implemented yet.
 * Chromium, Firefox, and WebKit integration and WebGL recovery are automated. Stable
   numeric and pixel goldens remain future validation work.

@@ -106,27 +106,30 @@ visual confidence therefore does not alter the scientific match value.
 The default preview uses 256 registers and is explicitly provisional. The default
 detailed tier uses 1,024 registers and HLL precision 10. Detailed tiles are requested
 only when the preview has low winner support or lies near a display decision. Preview
-tiles remain the settled result elsewhere. High-sensitivity mode refines every requested
-tile and enables the bounded sparse policy. Navigation cancels obsolete work.
+tiles remain the settled result elsewhere. Navigation cancels obsolete work. The
+browser UI does not expose the bounded sparse-correction mode.
 
 K-mer survival under independent substitutions is approximately `ANI^k`. At `k=21`,
 80% ANI retains only about 0.92% of exact k-mers, so neither exact k-mer containment
 nor its sketches are reliable nucleotide-identity estimators far below this regime.
-The default palette is white below 85%; the 80% control is retained for advanced
-inspection, not as a promise of uniform sensitivity.
+The default palette uses the selected plot background below 85%; the 80% control is
+retained for advanced inspection, not as a promise of uniform sensitivity.
 
-Optional **High sensitivity near 80%** mode retains a complete canonical-hash set only
+The backend's optional sparse policy retains a complete canonical-hash set only
 while a core has at most 2,048 distinct hashes. If OPH match-detection probability at
 80% ANI is modeled below 99%, the eligible directed containment is rescanned exactly.
-Partial sets are discarded immediately on exceeding the cap. This is an optional
-sparse correction, not the default estimator and not a whole-matrix exact guarantee.
+Partial sets are discarded immediately on exceeding the cap. It remains available for
+validation but is not enabled by the current browser controls, is not the default
+estimator, and is not a whole-matrix exact guarantee.
 
 ## Terminal exact mode
 
-When the view reaches one matrix position per k-mer start, sketches stop. Equal valid
-canonical k-mers match exactly; unequal valid k-mers mismatch; ambiguity-overlapping
-and padded starts are missing. Initial views already at terminal resolution enter this
-mode before drawing their first tile.
+When the view reaches one matrix position per base, sketches stop. Equal valid
+canonical k-mers match exactly and paint their complete k-base footprint. Opposite
+canonical orientations paint the corresponding reverse diagonal. Unequal valid k-mer
+starts mismatch; ambiguity-overlapping and padded starts are missing unless another
+valid exact match covers the position. Initial views already at terminal resolution
+enter this mode before drawing their first tile.
 
 ## Configuration and change control
 

@@ -157,8 +157,7 @@ below it, allowing immediate recoloring down to the advanced 80% limit.
 5. Build the 1,024-register detailed axes in aligned chunks and transfer each selected
    detailed block as soon as compatible X/Y chunks exist.
 6. Refine only tiles whose preview crosses a display decision or has low support, in
-   descending uncertainty order. High-sensitivity mode deliberately streams every
-   detailed tile.
+   descending uncertainty order.
 
 Uncertainty is a display scheduling heuristic based on identity near the reliable
 palette region and low verified direction support. It selects which provisional tiles
@@ -179,7 +178,8 @@ The renderer immediately transforms existing lower-resolution tiles during zoom 
 canvas never flashes white. The main thread selects visible 256-cell tiles plus a
 one-tile halo. A new request id cancels stale detailed work. Quick tiles for the new
 viewport arrive first; detailed refinement begins only after paint acknowledgement.
-Exact terminal tiles replace sketches at one k-mer start per matrix position.
+Exact terminal tiles replace sketches at one base pair per matrix position and extend
+each matching k-mer across its complete footprint.
 
 ## 6. State and cancellation
 
@@ -230,9 +230,10 @@ normally does not shrink; reloading the page resets the instance.
 ## 8. Rendering and recovery
 
 WebGL2 shaders apply the similarity or direction palette without changing numeric
-tiles. Similarity is white below the selected minimum, yellow-red across the two
-gradient segments, and black above the maximum. Direction uses separate forward/reverse
-hues blended toward equal-luminance gray at low support.
+tiles. Similarity uses the selected plot background below the minimum, maps the chosen
+palette linearly across the minimum/midpoint and midpoint/maximum segments, and retains
+the palette's top color above the maximum. Direction uses separate forward/reverse hues
+blended toward equal-luminance gray at low support.
 
 On `webglcontextlost`, rendering pauses and default loss handling is prevented. On
 restore, the program, uniforms, geometry, fallback texture, and every GPU tile texture

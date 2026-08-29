@@ -2,7 +2,15 @@ import "./styles.css";
 import { AxisOverlay } from "./axes";
 import { selectDetailResolution, selectTiles } from "./detail";
 import { formatBases, formatBytes, formatInterval } from "./format";
-import { addIdentitiesToHistogram, normalizeHeatmapRange, type HeatmapRange } from "./heatmap";
+import {
+  DEFAULT_HEATMAP_PALETTE,
+  HEATMAP_PALETTES,
+  addIdentitiesToHistogram,
+  heatmapGradient,
+  normalizeHeatmapRange,
+  type HeatmapPalette,
+  type HeatmapRange,
+} from "./heatmap";
 import { DotplotRenderer, type HoverDatum, type ViewChange } from "./renderer";
 import type {
   ComparisonParameters,
@@ -21,7 +29,6 @@ const ySelect = element<HTMLSelectElement>("y-sequence");
 const resolutionSelect = element<HTMLSelectElement>("resolution");
 const previewRegisterSelect = element<HTMLSelectElement>("preview-register-count");
 const detailedRegisterSelect = element<HTMLSelectElement>("detailed-register-count");
-const sparseCorrectionInput = element<HTMLInputElement>("sparse-correction");
 const kmerInput = element<HTMLInputElement>("kmer-length");
 const plotDetailNote = element<HTMLElement>("plot-detail-note");
 const sketchRetentionNote = element<HTMLElement>("sketch-retention-note");
@@ -32,6 +39,7 @@ const retryEngineButton = element<HTMLButtonElement>("retry-engine");
 const memoryUsage = element<HTMLElement>("memory-usage");
 const hoverCard = element<HTMLElement>("hover-card");
 const plotSummary = element<HTMLElement>("plot-summary");
+const plotFrame = element<HTMLElement>("plot-frame");
 const canvas = element<HTMLCanvasElement>("plot-canvas");
 const xAxisCanvas = element<HTMLCanvasElement>("x-axis-overlay");
 const yAxisCanvas = element<HTMLCanvasElement>("y-axis-overlay");
@@ -39,6 +47,9 @@ const progressOverlay = element<HTMLElement>("compute-progress");
 const progressRing = element<SVGCircleElement>("progress-ring");
 const progressValue = element<HTMLElement>("progress-value");
 const histogramCanvas = element<HTMLCanvasElement>("identity-histogram");
+const heatmapPaletteSelect = element<HTMLSelectElement>("heatmap-palette");
+const darkBackgroundInput = element<HTMLInputElement>("dark-background");
+const heatmapGradientElement = element<HTMLElement>("heatmap-gradient");
 const heatmapInputs = {
   minimum: element<HTMLInputElement>("heatmap-min"),
   midpoint: element<HTMLInputElement>("heatmap-mid"),
@@ -176,7 +187,6 @@ for (const control of [
   resolutionSelect,
   previewRegisterSelect,
   detailedRegisterSelect,
-  sparseCorrectionInput,
   kmerInput,
 ]) {
   control.addEventListener("change", () => {
@@ -188,6 +198,8 @@ for (const control of [
 for (const [name, input] of Object.entries(heatmapInputs) as Array<[keyof HeatmapRange, HTMLInputElement]>) {
   input.addEventListener("input", () => updateHeatmap(name));
 }
+heatmapPaletteSelect.addEventListener("change", updateHeatmapAppearance);
+darkBackgroundInput.addEventListener("change", updateHeatmapAppearance);
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-color-mode]")) {
   button.addEventListener("click", () => {
     const mode = button.dataset.colorMode;
@@ -254,6 +266,7 @@ function prepareComparison(): void {
   const x = sequences.find((sequence) => sequence.index === xIndex);
   const y = sequences.find((sequence) => sequence.index === yIndex);
   if (!x || !y) return;
+  const preserveViewport = activeParameters?.xIndex === xIndex && activeParameters.yIndex === yIndex;
   activeDomainLength = Math.max(x.length, y.length);
   const parameters: ComparisonParameters = {
     xIndex,
@@ -261,7 +274,7 @@ function prepareComparison(): void {
     resolution: Math.min(Number(resolutionSelect.value), Math.max(1, activeDomainLength)),
     previewRegisterCount: Number(previewRegisterSelect.value),
     detailedRegisterCount: Number(detailedRegisterSelect.value),
-    sparseCorrection: sparseCorrectionInput.checked,
+    sparseCorrection: false,
     k: Number(kmerInput.value),
   };
   generation += 1;
@@ -279,7 +292,7 @@ function prepareComparison(): void {
     domainLength: activeDomainLength,
     xLength: x.length,
     yLength: y.length,
-  });
+  }, preserveViewport);
   axes.setMetadata({
     baseResolution: parameters.resolution,
     domainLength: activeDomainLength,
@@ -380,6 +393,27 @@ function updateHeatmap(changed: keyof HeatmapRange): void {
     heatmapOutputs[name].value = `${heatmapRange[name]}%`;
   }
   renderer.setHeatmapRange(heatmapRange.minimum, heatmapRange.midpoint, heatmapRange.maximum);
+  updateHeatmapAppearance();
+}
+
+function updateHeatmapAppearance(): void {
+  const palette = selectedHeatmapPalette();
+  const darkBackground = darkBackgroundInput.checked;
+  renderer.setHeatmapPalette(palette);
+  renderer.setDarkBackground(darkBackground);
+  plotFrame.classList.toggle("dark-background", darkBackground);
+  heatmapGradientElement.style.background = heatmapGradient(
+    palette,
+    heatmapRange,
+    darkBackground,
+  );
+}
+
+function selectedHeatmapPalette(): HeatmapPalette {
+  const selected = heatmapPaletteSelect.value;
+  return selected in HEATMAP_PALETTES
+    ? selected as HeatmapPalette
+    : DEFAULT_HEATMAP_PALETTE;
 }
 
 function collectHistogram(message: Extract<WorkerToMainMessage, { type: "tile" }>): void {

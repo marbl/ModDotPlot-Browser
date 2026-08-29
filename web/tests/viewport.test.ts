@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialViewport, panBy, zoomAt } from "../src/viewport";
+import { initialViewport, panBy, remapViewportDomain, zoomAt } from "../src/viewport";
 
 describe("viewport transforms", () => {
   it("keeps the pointer anchor fixed while zooming", () => {
@@ -22,5 +22,23 @@ describe("viewport transforms", () => {
     }
     expect(view.width).toBeCloseTo(0.000_004);
     expect(view.height).toBeCloseTo(0.000_004);
+  });
+
+  it("preserves the normalized viewport when scientific resolution changes", () => {
+    const view = {
+      ...initialViewport(1000, 0.001),
+      x: 200,
+      y: 350,
+      width: 250,
+      height: 300,
+    };
+    expect(remapViewportDomain(view, 4000, 0.004)).toEqual({
+      x: 800,
+      y: 1400,
+      width: 1000,
+      height: 1200,
+      domain: 4000,
+      minSize: 0.004,
+    });
   });
 });

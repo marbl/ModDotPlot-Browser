@@ -7,6 +7,28 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.2.0-beta.2] - 2026-08-29
+
+### Changed
+
+* Remapped identity sliders to the selected palette's low, midpoint, and high colors;
+  below-minimum cells now use the plot background and above-maximum cells retain the
+  palette's top color.
+* Preserved the current genomic viewport when scientific controls rebuild a comparison.
+* Removed the high-sensitivity checkbox from the browser controls.
+
+### Fixed
+
+* Extended exact canonical k-mer matches across their full forward or reverse-complement
+  footprints, including matches that cross exact-tile boundaries.
+* Increased Y-axis label spacing and constrained the plot plus X-axis label to the
+  browser viewport without page scrollbars.
+
+### Added
+
+* Similarity palette selection, including ModDotPlot Spectral, Viridis, and blue-red.
+* A white/black plot-background control.
+
 ## [0.2.0-beta.1] - 2026-08-29
 
 ### Changed
@@ -85,6 +107,7 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.1...HEAD
+[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.2...HEAD
+[0.2.0-beta.2]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.1...v0.2.0-beta.2
 [0.2.0-beta.1]: https://github.com/marbl/moddotplot-rs/compare/v0.1.0...v0.2.0-beta.1
 [0.1.0]: https://github.com/marbl/moddotplot-rs/releases/tag/v0.1.0

@@ -10,14 +10,15 @@
   --paper: #f8f7f2;
   --panel: #fffefa;
   --accent: #3a5768;
+  --y-axis-width: 112px;
+  --x-axis-height: 58px;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  min-width: 900px;
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at 15% -10%, rgba(119, 160, 166, 0.12), transparent 34rem),
     var(--paper);
@@ -65,7 +66,7 @@ button, select { color: inherit; }
 #app {
   width: min(1800px, calc(100% - 24px));
   margin: 0 auto;
-  padding: 12px 0 28px;
+  padding: 12px 0;
 }
 
 h1 {
@@ -201,7 +202,7 @@ details[open] summary { margin-bottom: 4px; }
   position: relative;
   height: 18px;
   border-radius: 99px;
-  background: linear-gradient(90deg, #fffefa, #f6ec9d 12%, #e85d39 68%, #310e43 96%, #080709);
+  background: linear-gradient(90deg, var(--paper) 0 25%, #f6ec9d 25%, #e85d39 60%, #310e43 100%);
 }
 .triple-slider input[type="range"] {
   position: absolute;
@@ -261,7 +262,7 @@ details[open] summary { margin-bottom: 4px; }
   justify-content: space-between;
   gap: 12px;
   min-height: 27px;
-  padding-left: 80px;
+  padding-left: var(--y-axis-width);
 }
 .status-cluster { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .status {
@@ -284,9 +285,9 @@ details[open] summary { margin-bottom: 4px; }
 
 .plot-shell {
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
-  grid-template-rows: minmax(0, auto) 72px;
-  width: min(100%, calc(100vh - 12px), 1296px);
+  grid-template-columns: var(--y-axis-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, auto) var(--x-axis-height);
+  width: min(100%, calc(100dvh - 24px), 1312px);
   max-width: 100%;
 }
 
@@ -301,6 +302,7 @@ details[open] summary { margin-bottom: 4px; }
   background: #f8f7f2;
   box-shadow: 0 14px 45px rgba(44, 40, 37, 0.08);
 }
+.plot-frame.dark-background { background: #050506; }
 
 #plot-canvas {
   display: block;
@@ -375,6 +377,6 @@ details[open] summary { margin-bottom: 4px; }
 @keyframes spin-progress { to { transform: rotate(360deg); } }
 
 @media (max-height: 780px) {
-  #app { padding-top: 8px; }
+  #app { padding: 8px 0; }
   .controls { gap: 9px; padding: 13px; }
 }

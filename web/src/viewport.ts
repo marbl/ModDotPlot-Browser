@@ -35,6 +35,23 @@ export function panBy(view: ViewportState, deltaX: number, deltaY: number): View
   return clampViewport({ ...view, x: view.x + deltaX, y: view.y + deltaY });
 }
 
+/** Preserves the same normalized genomic region when the overview resolution changes. */
+export function remapViewportDomain(
+  view: ViewportState,
+  domain: number,
+  minSize = 1,
+): ViewportState {
+  const scale = domain / Math.max(Number.EPSILON, view.domain);
+  return clampViewport({
+    x: view.x * scale,
+    y: view.y * scale,
+    width: view.width * scale,
+    height: view.height * scale,
+    domain,
+    minSize,
+  });
+}
+
 export function clampViewport(view: ViewportState): ViewportState {
   const width = Math.max(view.minSize, Math.min(view.domain, view.width));
   const height = Math.max(view.minSize, Math.min(view.domain, view.height));

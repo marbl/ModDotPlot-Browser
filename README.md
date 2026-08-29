@@ -25,9 +25,8 @@ ANI = C^(1/k)
 The default first view uses 256 OPH registers. Completed 256-cell blocks paint while
 the axes are still being prepared. After preview paint, only tiles whose quick result
 is near a display decision or has weak support are refined with 1,024 registers.
-HLL precision is 10. Optional high-sensitivity mode retains bounded exact sparse-core
-sets for underpowered comparisons near 80% ANI. Terminal zoom uses exact canonical
-k-mer equality rather than sketches.
+HLL precision is 10. Terminal zoom uses exact canonical k-mer equality rather than
+sketches and paints each match across its complete k-mer footprint.
 
 Rejected minmer, bottom-s, alternate-hash, densified-OPH, and inverted-kernel
 implementations were removed after the v0.1 baseline was tagged. Their conclusions

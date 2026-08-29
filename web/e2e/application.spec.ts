@@ -136,9 +136,6 @@ test("a crashed compute worker can restart and reload the selected FASTA", async
 test("refined overview tiles paint before detailed preparation completes", async ({ page }) => {
   await page.goto("/");
   await page.locator("#resolution").selectOption("500", { force: true });
-  await page.locator("#sparse-correction").evaluate((input: HTMLInputElement) => {
-    input.checked = true;
-  });
   const earlyRefinedTile = page.waitForFunction(() => {
     const status = document.querySelector("#status")?.textContent ?? "";
     if (!status.includes("Building high-detail signatures")) return false;
@@ -179,6 +176,17 @@ test("pairwise orientation, navigation, and reset remain coherent", async ({ pag
   await canvas.focus();
   await page.keyboard.press("+");
   await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(150);
+  const zoomedXAxis = await page.locator("#x-axis-overlay").evaluate(
+    (axis: HTMLCanvasElement) => axis.toDataURL(),
+  );
+  await page.locator("#preview-register-count").selectOption("128", { force: true });
+  await page.waitForTimeout(300);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  const rebuiltXAxis = await page.locator("#x-axis-overlay").evaluate(
+    (axis: HTMLCanvasElement) => axis.toDataURL(),
+  );
+  expect(rebuiltXAxis).toBe(zoomedXAxis);
   await page.locator("#reset-view").click();
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(canvas).toBeVisible();
@@ -199,27 +207,37 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
   await expect(page.locator("#file-input")).not.toHaveAttribute("accept", /bed|gff|gtf/i);
 });
 
-test("prepared-axis allocation rejection is actionable and recoverable", async ({ page }) => {
+test("heatmap palette and plot background controls update without recomputation", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#resolution").selectOption("2000", { force: true });
-  await page.locator("#detailed-register-count").selectOption("4096", { force: true });
-  await page.locator("#sparse-correction").evaluate((input: HTMLInputElement) => {
-    input.checked = true;
+  await loadFasta(page, "short.fa", shortFasta);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  await expect(page.locator("#sparse-correction")).toHaveCount(0);
+  const layout = await page.evaluate(() => {
+    const xAxis = document.querySelector(".axis-panel-x")!.getBoundingClientRect();
+    const yAxis = document.querySelector(".axis-panel-y")!.getBoundingClientRect();
+    return {
+      xAxisBottom: xAxis.bottom,
+      yAxisWidth: yAxis.width,
+      viewportHeight: window.innerHeight,
+      documentHeight: document.documentElement.scrollHeight,
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+    };
   });
-  const sequence = "ACGTTGCAAGTCCTGA".repeat(3_125);
-  await loadFasta(page, "budget.fa", `>x\n${sequence}\n>y\n${sequence}\n`);
+  expect(layout.xAxisBottom).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.yAxisWidth).toBeGreaterThanOrEqual(110);
+  expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
 
-  await expect(page.locator("#y-sequence option")).toHaveCount(2);
-  await page.locator("#y-sequence").selectOption("1");
-  await expect(page.locator("#status")).toContainText("prepared-axis budget", {
-    timeout: 45_000,
-  });
+  const gradient = page.locator("#heatmap-gradient");
+  const initialGradient = await gradient.evaluate((element) => element.style.backgroundImage);
+  await page.locator("#heatmap-palette").selectOption("spectral");
+  const spectralGradient = await gradient.evaluate((element) => element.style.backgroundImage);
+  expect(spectralGradient).not.toBe(initialGradient);
 
-  await page.locator("details").evaluate((details: HTMLDetailsElement) => {
-    details.open = true;
-  });
-  await page.locator("#detailed-register-count").selectOption("1024");
-  await page.locator("#sparse-correction").uncheck();
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 45_000 });
-  await expect(page.locator("#plot-canvas")).toBeVisible();
+  await page.locator("#dark-background").check();
+  await expect(page.locator("#plot-frame")).toHaveClass(/dark-background/);
+  await expect.poll(() => gradient.evaluate((element) => element.style.backgroundImage))
+    .toContain("rgb(5, 5, 6)");
+  await expect(page.locator("#status")).toContainText("Ready");
 });

@@ -1,5 +1,17 @@
 import type { MatrixTilePayload } from "./protocol";
-import { initialViewport, panBy, zoomAt, type ViewportState } from "./viewport";
+import {
+  DEFAULT_HEATMAP_PALETTE,
+  heatmapPaletteRgb,
+  plotBackgroundRgb,
+  type HeatmapPalette,
+} from "./heatmap";
+import {
+  initialViewport,
+  panBy,
+  remapViewportDomain,
+  zoomAt,
+  type ViewportState,
+} from "./viewport";
 import { selectTileEvictionCandidate } from "./cache";
 
 const MISSING_IDENTITY = 65_535;
@@ -51,6 +63,8 @@ interface Uniforms {
   heatmapMin: WebGLUniformLocation;
   heatmapMid: WebGLUniformLocation;
   heatmapMax: WebGLUniformLocation;
+  palette: WebGLUniformLocation;
+  background: WebGLUniformLocation;
   exact: WebGLUniformLocation;
 }
 
@@ -65,7 +79,9 @@ export class DotplotRenderer {
   #metadata: PlotMetadata = { resolution: 1, domainLength: 1, xLength: 1, yLength: 1 };
   #view: ViewportState = initialViewport(1);
   #mode: "similarity" | "direction" = "similarity";
-  #heatmap = { min: 0.80, midpoint: 0.90, max: 1.00 };
+  #heatmap = { min: 0.85, midpoint: 0.92, max: 1.00 };
+  #palette: HeatmapPalette = DEFAULT_HEATMAP_PALETTE;
+  #darkBackground = false;
   #activeResolution = 1;
   #cachedTileBytes = 0;
   #useCounter = 0;
@@ -99,12 +115,15 @@ export class DotplotRenderer {
     this.#resize();
   }
 
-  setComparison(metadata: PlotMetadata): void {
+  setComparison(metadata: PlotMetadata, preserveViewport = false): void {
+    const previousView = this.#view;
     this.clearTiles();
     this.#metadata = metadata;
     this.#activeResolution = metadata.resolution;
     const oneBase = Math.min(metadata.resolution, metadata.resolution / metadata.domainLength);
-    this.#view = initialViewport(metadata.resolution, oneBase);
+    this.#view = preserveViewport
+      ? remapViewportDomain(previousView, metadata.resolution, oneBase)
+      : initialViewport(metadata.resolution, oneBase);
     this.#requestRender();
     this.#notifyViewChange();
   }
@@ -181,12 +200,22 @@ export class DotplotRenderer {
 
   setHeatmapRange(minimum: number, midpoint: number, maximum: number): void {
     const min = Math.max(0, Math.min(1, minimum / 100));
-    const max = Math.max(min + 0.0001, Math.min(1, maximum / 100));
+    const max = Math.max(min, Math.min(1, maximum / 100));
     this.#heatmap = {
       min,
       midpoint: Math.max(min, Math.min(max, midpoint / 100)),
       max,
     };
+    this.#requestRender();
+  }
+
+  setHeatmapPalette(palette: HeatmapPalette): void {
+    this.#palette = palette;
+    this.#requestRender();
+  }
+
+  setDarkBackground(dark: boolean): void {
+    this.#darkBackground = dark;
     this.#requestRender();
   }
 
@@ -272,6 +301,8 @@ export class DotplotRenderer {
       heatmapMin: requiredUniform(gl, this.#program, "u_heatmap_min"),
       heatmapMid: requiredUniform(gl, this.#program, "u_heatmap_mid"),
       heatmapMax: requiredUniform(gl, this.#program, "u_heatmap_max"),
+      palette: requiredUniform(gl, this.#program, "u_palette[0]"),
+      background: requiredUniform(gl, this.#program, "u_background"),
       exact: requiredUniform(gl, this.#program, "u_exact"),
     };
     this.#fallbackBaseTexture = createIntegerTexture(
@@ -460,7 +491,8 @@ export class DotplotRenderer {
   #render(): void {
     if (this.#contextLost) return;
     const gl = this.#gl;
-    gl.clearColor(0.975, 0.973, 0.965, 1);
+    const background = plotBackgroundRgb(this.#darkBackground);
+    gl.clearColor(background[0], background[1], background[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(this.#program);
     gl.uniform4f(this.#uniforms.view, this.#view.x, this.#view.y, this.#view.width, this.#view.height);
@@ -468,6 +500,8 @@ export class DotplotRenderer {
     gl.uniform1f(this.#uniforms.heatmapMin, this.#heatmap.min);
     gl.uniform1f(this.#uniforms.heatmapMid, this.#heatmap.midpoint);
     gl.uniform1f(this.#uniforms.heatmapMax, this.#heatmap.max);
+    gl.uniform3fv(this.#uniforms.palette, heatmapPaletteRgb(this.#palette));
+    gl.uniform3f(this.#uniforms.background, background[0], background[1], background[2]);
 
     const tiles = [...this.#tiles.values()].sort((left, right) =>
       left.resolution - right.resolution || qualityRank(left.quality) - qualityRank(right.quality)
@@ -684,18 +718,30 @@ uniform int u_exact;
 uniform float u_heatmap_min;
 uniform float u_heatmap_mid;
 uniform float u_heatmap_max;
+uniform vec3 u_palette[11];
+uniform vec3 u_background;
 out vec4 out_color;
 
-vec3 similarity_palette(float value) {
-  vec3 low = vec3(0.965, 0.925, 0.615);
-  vec3 middle = vec3(0.909, 0.365, 0.224);
-  vec3 high = vec3(0.190, 0.055, 0.263);
-  float safe_mid = max(u_heatmap_mid, u_heatmap_min + 0.00001);
-  float safe_max = max(u_heatmap_max, safe_mid + 0.00001);
-  if (value < safe_mid) {
-    return mix(low, middle, smoothstep(u_heatmap_min, safe_mid, value));
+float palette_position(float value) {
+  if (value <= u_heatmap_min) return 0.0;
+  if (value >= u_heatmap_max) return 1.0;
+  if (value <= u_heatmap_mid) {
+    float lower_span = u_heatmap_mid - u_heatmap_min;
+    return lower_span <= 0.00001
+      ? 0.5
+      : 0.5 * (value - u_heatmap_min) / lower_span;
   }
-  return mix(middle, high, smoothstep(safe_mid, safe_max, value));
+  float upper_span = u_heatmap_max - u_heatmap_mid;
+  return upper_span <= 0.00001
+    ? 0.5
+    : 0.5 + 0.5 * (value - u_heatmap_mid) / upper_span;
+}
+
+vec3 similarity_palette(float position) {
+  float scaled = clamp(position, 0.0, 1.0) * 10.0;
+  int lower = min(10, int(floor(scaled)));
+  int upper = min(10, lower + 1);
+  return mix(u_palette[lower], u_palette[upper], fract(scaled));
 }
 
 vec3 base_palette(uint base) {
@@ -709,24 +755,23 @@ vec3 base_palette(uint base) {
 void main() {
   uint encoded = texture(u_identity, v_uv).r;
   if (encoded == 65535u) {
-    out_color = vec4(0.975, 0.973, 0.965, 1.0);
+    out_color = vec4(u_background, 1.0);
     return;
   }
   float identity = float(encoded) / 10000.0;
-  if (u_mode == 0 && identity < u_heatmap_min) {
-    out_color = vec4(0.975, 0.973, 0.965, 1.0);
+  if (identity < u_heatmap_min) {
+    out_color = vec4(u_background, 1.0);
     return;
   }
-  if (u_mode == 0 && identity > u_heatmap_max) {
-    out_color = vec4(0.02, 0.018, 0.022, 1.0);
-    return;
-  }
+  float position = palette_position(identity);
 
   vec3 color;
   if (u_mode == 0) {
-    color = u_exact == 1
-      ? base_palette(texture(u_bases, vec2(v_uv.x, 0.5)).r)
-      : similarity_palette(identity);
+    color = identity > u_heatmap_max
+      ? similarity_palette(1.0)
+      : u_exact == 1
+        ? base_palette(texture(u_bases, vec2(v_uv.x, 0.5)).r)
+        : similarity_palette(position);
   } else {
     uint support = texture(u_support, v_uv).r;
     float direction = float(texture(u_direction, v_uv).r) / 32767.0;
@@ -743,8 +788,7 @@ void main() {
         abs(direction) * support_confidence
       );
     }
-    float safe_max = max(u_heatmap_max, u_heatmap_min + 0.00001);
-    color = mix(vec3(0.975, 0.973, 0.965), color, smoothstep(u_heatmap_min, safe_max, identity));
+    color = mix(u_background, color, position);
   }
   out_color = vec4(color, 1.0);
 }`;

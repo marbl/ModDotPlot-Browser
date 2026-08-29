@@ -21,7 +21,7 @@ by the named evidence; it does not imply broad research validation.
 * Pooled direction evidence and support-dependent chroma without identity attenuation.
 * Quick axis blocks paint as soon as compatible X/Y summaries exist. Detailed blocks
   replace them individually as they finish; post-paint detail is uncertainty-selected,
-  cancellable, and complete only in high-sensitivity mode.
+  and cancellable.
   Coarse visual fallback, zoom tiling, prefetch, and exact terminal tiles are retained.
 * Frozen production axes, 1.5 GiB session admission, prepared-axis and zoom-cache
   budgets, logarithmic recency tracking, and coordinated renderer eviction.
