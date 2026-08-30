@@ -129,6 +129,7 @@ impl BrowserScientificConfig {
 struct SequenceMetadata {
     index: usize,
     name: String,
+    description: String,
     length: u64,
 }
 
@@ -853,6 +854,7 @@ impl ComputeSession {
             .map(|(offset, sequence)| SequenceMetadata {
                 index: start + offset,
                 name: sequence.name().to_owned(),
+                description: sequence.description().to_owned(),
                 length: sequence.len(),
             })
             .collect()

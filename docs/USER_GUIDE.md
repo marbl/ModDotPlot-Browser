@@ -34,6 +34,12 @@ packed records retained together must fit the 3 GiB Wasm session budget. Complet
 diploid human assemblies are retained eagerly so later axis changes never depend on the
 source file remaining unchanged.
 
+The first whitespace-delimited FASTA header field is the sequence identifier. Header
+text after it is the description. Selectors use `SeqID_FileStem · Size` so records such
+as `chr1` from two assemblies remain distinct; a numeric suffix is added only if that
+combination is still duplicated. Axis labels may show both identifier and description.
+BEDPE/CSV sequence fields use only the FASTA identifier.
+
 Sequence input is handed to Wasm in bounded 4 MiB shards. The memory indicator combines
 Wasm, JavaScript tile, GPU texture, annotation, computed-track, and publication
 estimates. If a layer exceeds its budget, the application reports the applicable
@@ -73,6 +79,8 @@ colors to the selected identity values. Moving them in 0.1 percentage-point incr
 recolors cached tiles immediately and does not rerun the sequence calculation. The
 palette menu includes the original ModDotPlot Spectral scheme, and the plot background
 can be switched between white and black.
+While the plot is empty or loading, its unpainted area retains the surrounding paper
+color. The selected background is applied inside plotted tiles only.
 
 In **Orientation** mode, forward and reverse matches have distinct colors. Direction
 comes from the canonical orientations of verified matching k-mers in both containment
@@ -111,9 +119,9 @@ genome-browser palette: A green, C blue, G orange, and T red.
 | --- | --- |
 | X sequence / Y sequence | Select the two FASTA records to compare |
 | Similarity / Orientation | Switch coloring without recomputing tiles |
-| Palette | Select the similarity heatmap colors, including ModDotPlot Spectral |
+| Palette | Select the similarity heatmap colors; Viridis is the default |
 | Identity range | Map the palette's low, midpoint, and high colors from 80% to 100% |
-| White / Black background | Choose the color used for the plot and below-minimum cells |
+| White / Black background | Choose the color used for the plot and below-minimum cells; black is the default |
 | Feature tracks | Enable sequence-derived tracks or import BED/GFF/GTF annotations, optionally gzip compressed |
 | Export data | Save current-view values as BEDPE (default) or CSV |
 | Export image | Save the complete current composition as PNG (default), SVG, or PDF |
@@ -149,20 +157,46 @@ parameter set.
 
 ## Export results
 
-**Export data** opens a Save As dialog. BEDPE is the default and writes one valid
-current-view cell as an interval pair with `ANI_c`, relative direction, support,
-quality, and configuration digest. CSV is available for the complete fixed-point
-renderer channels; missing identity uses `65535` with a blank decimal `ANI_c` field.
+Select **Export data**, then choose BEDPE or CSV in the native Save As dialog. BEDPE is
+the default and writes each nonzero valid current-view cell as an interval pair with
+`ANI_c`, relative direction, and support. Configuration and estimator details are kept
+once in the provenance preamble rather than repeated in every BEDPE row. CSV provides
+a compact nine-column scientific table with sequence IDs, interval pairs, `ANI_c`,
+direction, and direction support. Zero-valued and missing cells are omitted. The exact
+column definitions and formulas are in [Data export formats](EXPORT_FORMATS.md).
+
+Before either data or image output is written, every tile intersecting the current view
+is calculated with the selected **Detailed accuracy** register count. Terminal zoom is
+exact. Export therefore waits when necessary and never writes quick-view estimates.
 
 Numeric construction is limited to two million participating renderer cells so it
 stays within the transient-memory plan. If a full high-detail view exceeds that limit,
 zoom in or choose a lower **Plot detail** setting before exporting.
 
-**Export image** opens a Save As dialog for PNG, SVG, or PDF. All three include the
-heatmap, coordinate axes, sequence labels, and visible computed/imported tracks. PNG
-is a high-resolution raster. SVG and PDF embed the heatmap as a raster but reconstruct
-axes, labels, and tracks as vectors. The result represents the current progressive
-state and may mix preview, refined, and exact tiles.
+Select **Export image**, then choose PNG, SVG, or PDF in the native Save As dialog. All
+three include the heatmap, coordinate axes, sequence labels, visible computed/imported
+tracks, and an `ANI_c` heatmap legend in a separate right margin. PNG is a
+high-resolution raster. SVG and PDF embed the heatmap as a raster but reconstruct axes,
+labels, tracks, and the legend as vectors. The legend scale is linear in `ANI_c`; its
+six evenly spaced ticks divide the displayed range into five intervals. Its colors use
+the same low/midpoint/high mapping shown by the identity slider, but that adjustable
+midpoint is not a special legend tick. The palette name is not repeated beneath the
+scale. A terminal
+exact plot shows a categorical A/C/G/T key in that margin because similarity colors
+identify bases at that level.
+
+Chrome and Edge open the native system save picker, where the suggested filename and
+format remain editable. The application asks the native picker to begin in Downloads,
+although the browser may honor a previously used location instead.
+Browsers without that API use their normal download behavior: the default BEDPE or PNG
+format is written to the configured download location. Default filenames use the same
+source-qualified identifiers shown in the sequence selectors.
+
+Chrome may add security text such as “this site can see edits you make” to its native
+file-system picker. That notice is owned by the browser and cannot be removed or styled
+by moddotplot-rs. After the picker closes, a modal progress dialog blocks interaction
+and reports detailed-tile preparation, image rendering, and file writing until the save
+has completed.
 
 Both files include machine-readable provenance for the software version, method,
 scheduler policy, comparison parameters, complete scientific configurations, palette
@@ -267,15 +301,15 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.6.1 remains a functional preview. Its bounded preregistered validation supports
+* v0.6.2 remains a functional preview. Its bounded preregistered validation supports
   the selected defaults but is not a universal estimator guarantee.
 * Very large records are limited by available browser memory; bounded in-memory
   sharding is implemented, but optional disk spill may still be needed before claiming
   robust 1 Gb operation across ordinary laptops.
 * Identity estimates below roughly 80% are not a target operating regime and are shown
   using the plot background by default.
-* Export captures the current progressive viewport. An explicit all-detailed
-  publication tier is future usability work.
+* Export captures the current viewport after all intersecting tiles reach detailed or
+  terminal exact quality. This can require additional computation before saving.
 
 For implementation evidence and open validation work, see
 [Implementation status](STATUS.md).

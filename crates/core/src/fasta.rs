@@ -255,7 +255,14 @@ impl FastaParser {
         if header.is_empty() {
             return Err(self.error_at("FASTA header is empty", self.byte_offset));
         }
-        self.current = Some(PackedSequence::new(header));
+        let (identifier, description) = header.find(char::is_whitespace).map_or_else(
+            || (header.as_str(), ""),
+            |boundary| (header[..boundary].trim(), header[boundary..].trim()),
+        );
+        if identifier.is_empty() {
+            return Err(self.error_at("FASTA sequence identifier is empty", self.byte_offset));
+        }
+        self.current = Some(PackedSequence::with_description(identifier, description));
         self.header.clear();
         self.mode = Mode::Sequence;
         self.saw_record = true;
@@ -319,10 +326,26 @@ mod tests {
         records.extend(parser.finish().unwrap());
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].name(), "chr1 description");
+        assert_eq!(records[0].name(), "chr1");
+        assert_eq!(records[0].description(), "description");
         assert_eq!(records[0].len(), 5);
         assert_eq!(records[1].name(), "chr2");
+        assert_eq!(records[1].description(), "");
         assert_eq!(records[1].len(), 2);
+    }
+
+    #[test]
+    fn separates_identifier_from_tabbed_and_spaced_descriptions() {
+        let mut parser = FastaParser::new();
+        let records = parser
+            .push_chunk(b">first\tlong description here\nAC\n>second   another description\nGT\n")
+            .unwrap();
+        let mut records = records;
+        records.extend(parser.finish().unwrap());
+        assert_eq!(records[0].name(), "first");
+        assert_eq!(records[0].description(), "long description here");
+        assert_eq!(records[1].name(), "second");
+        assert_eq!(records[1].description(), "another description");
     }
 
     #[test]

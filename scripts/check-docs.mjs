@@ -127,13 +127,63 @@ if (contract) {
   );
   requireText(
     "README.md",
-    "Export current-view data through Save As as BEDPE by default or CSV.",
-    "v0.6.0 data export is missing from the feature summary",
+    "Export nonzero, detailed current-view data as BEDPE by default or CSV",
+    "current data export is missing from the feature summary",
   );
   requireText(
     "README.md",
     "Export the complete visible composition as PNG, SVG, or PDF",
-    "v0.6.0 image export is missing from the feature summary",
+    "current image export is missing from the feature summary",
+  );
+  requireText(
+    "docs/SCIENTIFIC_SPEC.md",
+    "A FASTA header is split at its first whitespace.",
+    "FASTA identifier and description semantics are not documented",
+  );
+  requireText(
+    "docs/USER_GUIDE.md",
+    "Selectors use `SeqID_FileStem · Size`",
+    "collision-safe sequence selector naming is not documented",
+  );
+  requireText(
+    "docs/USER_GUIDE.md",
+    "never writes quick-view estimates",
+    "detailed-only export behavior is not documented",
+  );
+  requireText(
+    "docs/USER_GUIDE.md",
+    "heatmap legend in a separate right margin",
+    "non-occluding export legend is not documented",
+  );
+  requireText(
+    "docs/USER_GUIDE.md",
+    "legend scale is linear in `ANI_c`",
+    "linear export legend semantics are not documented",
+  );
+  requireText(
+    "docs/USER_GUIDE.md",
+    "six evenly spaced ticks",
+    "uniform export legend ticks are not documented",
+  );
+  requireText(
+    "docs/EXPORT_FORMATS.md",
+    "x_seq_id",
+    "compact CSV schema is not documented",
+  );
+  requireText(
+    "docs/EXPORT_FORMATS.md",
+    "direction = (F - R) / (F + R)",
+    "export direction formula is not documented",
+  );
+  requireText(
+    "docs/USER_GUIDE.md",
+    "notice is owned by the browser",
+    "browser-owned native picker warning is not documented",
+  );
+  requireText(
+    "docs/USER_GUIDE.md",
+    "Browsers without that API use their normal download behavior",
+    "native save picker fallback is not documented",
   );
 
   const adr = readFileSync(

@@ -1,4 +1,4 @@
-import type { MatrixTilePayload } from "./protocol";
+import type { MatrixTilePayload, TileCoordinate } from "./protocol";
 import type { NumericTileView } from "./export";
 import {
   DEFAULT_HEATMAP_PALETTE,
@@ -266,10 +266,13 @@ export class DotplotRenderer {
     });
   }
 
-  /** Returns the exact numeric inputs participating in the current rendered viewport. */
-  exportTileViews(): NumericTileView[] {
+  /** Returns numeric inputs for the current viewport, optionally restricted to its final detail level. */
+  exportTileViews(detailedOnly = false): NumericTileView[] {
     return [...this.#tiles.values()]
       .filter((tile) => this.#isRenderableResolution(tile.resolution))
+      .filter((tile) => !detailedOnly || (
+        tile.resolution === this.#activeResolution && tile.quality !== "preview"
+      ))
       .filter((tile) => intersectsView(tileBounds(tile, this.#metadata.resolution), this.#view))
       .map((tile) => ({
         configDigest: tile.configDigest,
@@ -285,31 +288,62 @@ export class DotplotRenderer {
       }));
   }
 
-  /** Renders the current plot into a bounded high-resolution PNG without screen capture. */
+  /** Reports whether every requested tile is already cached at refined or exact quality. */
+  hasDetailedTileCoverage(resolution: number, coordinates: readonly TileCoordinate[]): boolean {
+    const available = new Set(
+      [...this.#tiles.values()]
+        .filter((tile) => tile.resolution === resolution && tile.quality !== "preview")
+        .map((tile) => `${tile.x}:${tile.y}`),
+    );
+    return coordinates.every((coordinate) => available.has(`${coordinate.x}:${coordinate.y}`));
+  }
+
+  /** Renders cached tiles into an offscreen framebuffer without resizing or repainting the UI canvas. */
   async exportPng(scale = 2): Promise<Blob> {
     if (this.#contextLost) throw new Error("The graphics context is unavailable");
     const gl = this.#gl;
-    const previousWidth = this.#canvas.width;
-    const previousHeight = this.#canvas.height;
     const viewportLimit = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
-    let width = Math.max(1, Math.round(previousWidth * Math.max(1, scale)));
-    let height = Math.max(1, Math.round(previousHeight * Math.max(1, scale)));
+    const textureLimit = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    let width = Math.max(1, Math.round(this.#canvas.width * Math.max(1, scale)));
+    let height = Math.max(1, Math.round(this.#canvas.height * Math.max(1, scale)));
     const maximumPixels = 8_000_000;
     const pixelScale = Math.min(1, Math.sqrt(maximumPixels / (width * height)));
-    width = Math.max(1, Math.min(viewportLimit[0] ?? width, Math.floor(width * pixelScale)));
-    height = Math.max(1, Math.min(viewportLimit[1] ?? height, Math.floor(height * pixelScale)));
+    width = Math.max(1, Math.min(viewportLimit[0] ?? width, textureLimit, Math.floor(width * pixelScale)));
+    height = Math.max(1, Math.min(viewportLimit[1] ?? height, textureLimit, Math.floor(height * pixelScale)));
     const pixels = new Uint8Array(width * height * 4);
+    const framebuffer = gl.createFramebuffer();
+    const colorTexture = gl.createTexture();
+    if (!framebuffer || !colorTexture) {
+      if (framebuffer) gl.deleteFramebuffer(framebuffer);
+      if (colorTexture) gl.deleteTexture(colorTexture);
+      throw new Error("The browser cannot allocate an image-export framebuffer");
+    }
     try {
-      this.#canvas.width = width;
-      this.#canvas.height = height;
+      gl.bindTexture(gl.TEXTURE_2D, colorTexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        colorTexture,
+        0,
+      );
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error("The browser cannot create a complete image-export framebuffer");
+      }
       gl.viewport(0, 0, width, height);
       this.#render();
       gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
     } finally {
-      this.#canvas.width = previousWidth;
-      this.#canvas.height = previousHeight;
-      gl.viewport(0, 0, previousWidth, previousHeight);
-      this.#render();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
+      gl.deleteFramebuffer(framebuffer);
+      gl.deleteTexture(colorTexture);
     }
     const output = document.createElement("canvas");
     output.width = width;
@@ -563,7 +597,8 @@ export class DotplotRenderer {
     if (this.#contextLost) return;
     const gl = this.#gl;
     const background = plotBackgroundRgb(this.#darkBackground);
-    gl.clearColor(background[0], background[1], background[2], 1);
+    const emptyBackground = plotBackgroundRgb(false);
+    gl.clearColor(emptyBackground[0], emptyBackground[1], emptyBackground[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(this.#program);
     gl.uniform4f(this.#uniforms.view, this.#view.x, this.#view.y, this.#view.width, this.#view.height);

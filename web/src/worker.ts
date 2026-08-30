@@ -7,8 +7,10 @@ import type {
   FeatureTrackRequest,
   MainToWorkerMessage,
   ScientificConfigMetadata,
+  SequenceMetadata,
   WorkerToMainMessage,
 } from "./protocol";
+import { assignSequenceSelectionIds } from "./sequence-metadata";
 import { transposeTile } from "./tile";
 import {
   refinementKey,
@@ -160,7 +162,11 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
         message.mode,
         message.tiles,
         comparisonJob.parameters,
+        message.forceDetailed ?? false,
       );
+      if (message.forceDetailed && isCurrentTileRequest(message.generation, message.requestId)) {
+        post({ type: "export-ready", generation: message.generation, requestId: message.requestId });
+      }
       break;
     case "clear":
       session.clear();
@@ -236,6 +242,7 @@ async function computeFeatureTracks(
 
 async function loadFiles(files: File[], generation: number): Promise<void> {
   const staging = new ComputeSession();
+  const loadedMetadata: Array<Omit<SequenceMetadata, "selectionId">> = [];
   const totalBytes = files.reduce((total, file) => total + file.size, 0);
   let completedBytes = 0;
   let lastProgressFile = "";
@@ -281,10 +288,27 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
       let fileBytes = 0;
       let batchBytes = 0;
       let batchChunks: Uint8Array[] = [];
+      const appendMetadata = (value: unknown): void => {
+        const records = value as Array<{
+          index: number;
+          name: string;
+          description: string;
+          length: number | bigint;
+        }>;
+        for (const record of records) {
+          loadedMetadata.push({
+            index: record.index,
+            name: record.name,
+            description: record.description,
+            length: Number(record.length),
+            sourceFile: file.name,
+          });
+        }
+      };
       const flushBatch = (): void => {
         if (batchBytes === 0) return;
         if (batchChunks.length === 1) {
-          staging.push_fasta_chunk(batchChunks[0] ?? new Uint8Array());
+          appendMetadata(staging.push_fasta_chunk(batchChunks[0] ?? new Uint8Array()));
         } else {
           const batch = new Uint8Array(batchBytes);
           let offset = 0;
@@ -292,7 +316,7 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
             batch.set(chunk, offset);
             offset += chunk.byteLength;
           }
-          staging.push_fasta_chunk(batch);
+          appendMetadata(staging.push_fasta_chunk(batch));
         }
         batchBytes = 0;
         batchChunks = [];
@@ -317,7 +341,7 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
           for (const range of sequenceShardRanges(result.value.byteLength)) {
             const shard = result.value.subarray(range.start, range.end);
             if (shard.byteLength === SEQUENCE_INGEST_SHARD_BYTES) {
-              staging.push_fasta_chunk(shard);
+              appendMetadata(staging.push_fasta_chunk(shard));
             } else {
               batchChunks.push(shard);
               batchBytes += shard.byteLength;
@@ -326,16 +350,11 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
         }
       }
       flushBatch();
-      staging.finish_fasta();
+      appendMetadata(staging.finish_fasta());
       completedBytes += file.size;
     }
     if (!operationIsCurrent()) return;
-    const raw = staging.sequences() as Array<{ index: number; name: string; length: number | bigint }>;
-    const committed = raw.map((sequence) => ({
-      index: sequence.index,
-      name: sequence.name,
-      length: Number(sequence.length),
-    }));
+    const committed = assignSequenceSelectionIds(loadedMetadata);
     session.free();
     session = staging;
     datasetJob.sequences = committed;
@@ -603,6 +622,7 @@ async function computeRequestedTiles(
   mode: "sketch" | "kmer",
   tiles: Array<{ x: number; y: number }>,
   parameters: ComparisonParameters,
+  forceDetailed = false,
 ): Promise<void> {
   if (tiles.length === 0) return;
   if (mode === "kmer") {
@@ -612,6 +632,33 @@ async function computeRequestedTiles(
       resolution,
       tiles,
       parameters,
+    );
+    return;
+  }
+  if (forceDetailed) {
+    const registerCount = parameters.detailedRegisterCount;
+    if (resolution === parameters.resolution && !session.has_prepared_level(registerCount)) {
+      const prepared = await prepareOverviewLevel(
+        generation,
+        requestId,
+        parameters,
+        registerCount,
+        true,
+        true,
+        "refined",
+        tiles,
+      );
+      if (!prepared) return;
+    }
+    await computeRequestedLevel(
+      generation,
+      requestId,
+      resolution,
+      tiles,
+      registerCount,
+      "refined",
+      parameters.xIndex === parameters.yIndex,
+      true,
     );
     return;
   }
@@ -771,15 +818,18 @@ async function computeRequestedLevel(
   registerLimit: number,
   quality: "preview" | "refined",
   selfComparison: boolean,
+  forceAll = false,
 ): Promise<void> {
   const config = requireScientificConfig(registerLimit);
   let completed = 0;
-  const prioritizedTiles = prioritizeForRefinement(
-    resolution,
-    tiles,
-    quality,
-    requireComparisonJob(),
-  );
+  const prioritizedTiles = forceAll
+    ? tiles
+    : prioritizeForRefinement(
+        resolution,
+        tiles,
+        quality,
+        requireComparisonJob(),
+      );
   for (const coordinate of prioritizedTiles) {
     if (!isCurrentTileRequest(generation, requestId)) return;
     const key = `${resolution}:${coordinate.x}:${coordinate.y}:${quality}`;

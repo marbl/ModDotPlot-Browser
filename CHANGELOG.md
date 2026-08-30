@@ -7,6 +7,37 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-30
+
+### Changed
+
+* FASTA headers are split at the first whitespace: selectors and numeric outputs use
+  the sequence identifier, while axis labels may also show the description.
+* Sequence selectors and default export filenames use collision-safe
+  `SeqID_FileStem` identifiers, with a numeric suffix only for remaining duplicates.
+* BEDPE and CSV omit zero-valued and missing cells. CSV is reduced from renderer
+  diagnostics to nine scientific columns: sequence IDs, interval pairs, `ANI_c`,
+  direction, and direction support. Exact schemas and formulas are now documented.
+* Export uses the native system save picker when available and browser download
+  behavior otherwise. Format selection is confined to the native picker, which is
+  asked to start in Downloads; fallback downloads use BEDPE and PNG defaults.
+* Current-view exports wait for detailed-register tiles (or terminal exact tiles)
+  rather than publishing quick-view estimates. BEDPE no longer repeats tile quality
+  and configuration digest in each row; those details remain in file provenance.
+* SVG heatmaps use an embedded PNG through the Illustrator-compatible XLink form, and
+  rotated PDF text placement now centers Y-axis labels on their tick marks.
+* Viridis on black is now the initial plot style. Image exports add a vector heatmap
+  legend in a dedicated margin outside the data area. Its ANI_c axis is numerically
+  linear with six evenly spaced ticks, while its colors follow the same adjustable
+  three-anchor mapping as the UI; the slider midpoint is not itself a legend tick and
+  the palette name is omitted beneath the scale.
+* Empty and loading plot regions retain the application paper color; the selected
+  black background is now painted only inside rendered tile bounds.
+* Export now keeps a blocking progress dialog open from preparation through file-write
+  completion. Complete cached detailed/exact viewports skip the forced-detail request,
+  and image generation uses an offscreen framebuffer without resizing or repainting the
+  visible plot canvas.
+
 ## [0.6.1] - 2026-08-30
 
 ### Changed

@@ -28,7 +28,7 @@ const provenance: ExportProvenance = {
 };
 
 describe("reproducible export", () => {
-  it("exports exact renderer inputs with machine-readable provenance", async () => {
+  it("exports a compact scientific CSV with machine-readable provenance", async () => {
     const blob = createNumericExport([{
       configDigest: "abc",
       quality: "refined",
@@ -43,8 +43,10 @@ describe("reproducible export", () => {
     }], context, provenance, "csv");
     const text = await blob.text();
     expect(text).toContain(`# provenance=${JSON.stringify(provenance)}`);
-    expect(text).toContain("2,0,0,0,0,0,50,0,50,8501,10000,0.8501,12345,32767,9,refined,abc");
-    expect(text).toContain("65535,10000,,-32767,32767,0");
+    expect(text).toContain("x_seq_id,x_start,x_end,y_seq_id,y_start,y_end,ani_c,direction,direction_support");
+    expect(text).toContain("chr1,0,50,chr2,0,50,0.8501,0.376751,9");
+    expect(text).not.toContain("65535");
+    expect(text).not.toContain("identity_fixed");
   });
 
   it("exports visible non-missing cells as BEDPE by default", async () => {
@@ -62,7 +64,9 @@ describe("reproducible export", () => {
     }], { ...context, viewport: { x: 0, y: 0, width: 1, height: 1 } }, provenance);
     const text = await blob.text();
     expect(text).toContain("#chrom1\tstart1\tend1\tchrom2");
-    expect(text).toContain("chr1\t0\t50\tchr2\t0\t50\tani_c=0.8501;quality=refined\t850\t+\t-\t0.8501");
+    expect(text).toContain("chr1\t0\t50\tchr2\t0\t50\tani_c=0.8501\t850\t+\t-\t0.8501");
+    expect(text).not.toContain("quality\tconfig_digest");
+    expect(text).not.toContain("\trefined\tabc");
     expect(text).not.toContain("65535");
   });
 
@@ -83,10 +87,53 @@ describe("reproducible export", () => {
       baseResolution: 3,
       viewport: { x: 1, y: 0, width: 1, height: 1 },
     }, provenance, "csv");
-    const rows = (await blob.text()).split("\n").filter((row) => /^3,/.test(row));
+    const rows = (await blob.text()).split("\n").filter((row) => /^chr1,/.test(row));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toContain("3,0,0,1,0,");
-    expect(rows[0]).toContain(",9000,10000,0.9000,2,32767,5,exact,abc");
+    expect(rows[0]).toBe("chr1,33,66,chr2,0,33,0.9000,0.000061,5");
+  });
+
+  it("omits zero-valued cells from BEDPE and CSV", async () => {
+    const tile = {
+      configDigest: "abc",
+      quality: "preview" as const,
+      resolution: 2,
+      x: 0,
+      y: 0,
+      width: 2,
+      height: 1,
+      identity: new Uint16Array([0, 9_000]),
+      direction: new Int16Array([0, 1]),
+      directionSupport: new Uint16Array([0, 2]),
+    };
+    for (const format of ["bedpe", "csv"] as const) {
+      const rows = (await createNumericExport([tile], context, provenance, format).text())
+        .split("\n")
+        .filter((row) => row && !row.startsWith("#") && !row.startsWith("x_seq_id,"));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toContain("0.9000");
+    }
+  });
+
+  it("quotes FASTA identifiers when CSV syntax requires it", async () => {
+    const tile = {
+      configDigest: "abc",
+      quality: "refined" as const,
+      resolution: 1,
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      identity: new Uint16Array([9_000]),
+      direction: new Int16Array([0]),
+      directionSupport: new Uint16Array([0]),
+    };
+    const text = await createNumericExport(
+      [tile],
+      { ...context, baseResolution: 1, viewport: { x: 0, y: 0, width: 1, height: 1 }, xName: "chr,1", yName: 'chr"2' },
+      provenance,
+      "csv",
+    ).text();
+    expect(text).toContain('"chr,1",0,100,"chr""2",0,100,0.9000,,0');
   });
 
   it("embeds complete provenance in a PNG iTXt chunk", async () => {

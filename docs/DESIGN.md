@@ -266,18 +266,44 @@ tiles. Similarity uses the selected plot background below the minimum, maps the 
 palette linearly across the minimum/midpoint and midpoint/maximum segments, and retains
 the palette's top color above the maximum. Direction uses separate forward/reverse hues
 blended toward equal-luminance gray at low support.
+The WebGL clear color remains the application paper color. The selected plot background
+is a tile-shader input, so black appears only within published tile bounds and does not
+turn an empty or loading plot surface black.
 
 On `webglcontextlost`, rendering pauses and default loss handling is prevented. On
 restore, the program, uniforms, geometry, fallback texture, and every GPU tile texture
 are reconstructed from retained CPU arrays. Keyboard controls provide arrow-key pan,
 `+/-` zoom, and `Home` reset. The canvas remains focusable and labeled.
 
-Numeric export writes current-view renderer cells as BEDPE by default or complete
-fixed-point CSV. Construction is rejected above two million participating cells.
+Numeric export first checks whether every tile intersecting the current viewport is
+already cached at detailed or exact quality. It requests only missing final-quality
+coverage, then writes nonzero valid cells as BEDPE by default or as a compact
+nine-column scientific CSV. Construction is rejected above two million participating
+cells. Calculation metadata stays in the provenance preamble instead of being repeated
+in every row. Exact schemas and formulas are defined in
+[Data export formats](EXPORT_FORMATS.md).
 Image export includes the heatmap, axes, sequence labels, and visible tracks as PNG,
 SVG, or PDF. SVG/PDF embed the heatmap as raster while keeping the other components
-vectorized. All formats carry complete software, method, scheduler, comparison,
+vectorized. A vector heatmap legend occupies a separate right margin so it cannot cover
+plot data. Its coordinate axis is linear in ANI_c, while colors are sampled through the
+same minimum/midpoint/maximum transfer function as the UI slider and WebGL shader. Six
+evenly spaced ticks divide the range into five intervals; the adjustable color midpoint
+does not receive a special tick, and the palette name is omitted from the legend.
+Terminal exact plots substitute a categorical A/C/G/T key for the heatmap legend. All
+formats carry complete software, method, scheduler, comparison,
 scientific-configuration, display, viewport, and sequence provenance.
+
+After the native picker returns, a non-dismissible modal reports export progress and
+blocks plot interaction through tile preparation, composition, and file writing. Image
+pixels are drawn from cached GPU tiles into an offscreen framebuffer; export neither
+resizes nor repaints the visible WebGL canvas. When all visible final-quality tiles are
+already cached, no forced-detail worker request is sent.
+
+The browser calls the native system save picker when available, requests Downloads as
+its starting directory, and offers format selection inside that picker. Browsers
+without this API use an ordinary BEDPE or PNG download. Suggested filenames use
+source-qualified, load-unique sequence identifiers; numeric file contents retain the
+original FASTA identifiers.
 
 ## 9. Security and privacy
 
@@ -305,11 +331,10 @@ memory without attempting an exact all-pairs oracle.
 
 ### Export
 
-The current export represents the active viewport and its current mix of preview,
-refined, and exact renderer inputs. v0.6.0 adds BEDPE and complete-composition
-PNG/SVG/PDF formats without changing that scientific behavior. A future explicit
-publication tier may request and freeze an all-detailed viewport before export; that
-would be a usability feature, not a change to the current scientific configuration.
+The current export represents the active viewport after every intersecting sketch tile
+has been calculated with the selected detailed register count. Terminal-resolution
+views use exact k-mer tiles. BEDPE/CSV and complete-composition PNG/SVG/PDF therefore
+never publish deliberately provisional quick-view estimates.
 
 ### Persistence and 1 Gb operation
 

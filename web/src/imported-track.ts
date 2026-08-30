@@ -40,8 +40,10 @@ interface FeatureHit {
 }
 
 type PendingImport =
-  | { kind: "parse"; axis: FeatureTrackAxis; sequence: SequenceMetadata }
+  | { kind: "parse"; axis: FeatureTrackAxis; sequence: SequenceTarget }
   | { kind: "inspect"; file: File; candidates: TrackSequenceCandidate[] };
+
+type SequenceTarget = Pick<SequenceMetadata, "index" | "name" | "length">;
 
 export interface ImportedTrackManagerOptions {
   xStack: HTMLElement;
@@ -249,7 +251,7 @@ export class ImportedTrackManager {
     this.#options.onStatus(`Reading ${files[0]?.name ?? "feature track"}`);
   }
 
-  #startParse(file: File, axis: FeatureTrackAxis, sequence: SequenceMetadata): void {
+  #startParse(file: File, axis: FeatureTrackAxis, sequence: SequenceTarget): void {
     const requestId = ++this.#nextRequestId;
     this.#pending.set(requestId, { kind: "parse", axis, sequence });
     const request: TrackParserRequest = { type: "parse", requestId, file, targetSequence: sequence };

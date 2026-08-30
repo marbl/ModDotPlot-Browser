@@ -37,7 +37,7 @@ export const HEATMAP_PALETTES = {
 
 export type HeatmapPalette = keyof typeof HEATMAP_PALETTES;
 
-export const DEFAULT_HEATMAP_PALETTE: HeatmapPalette = "sunset";
+export const DEFAULT_HEATMAP_PALETTE: HeatmapPalette = "viridis";
 export const LIGHT_PLOT_BACKGROUND = "#f8f7f2";
 export const DARK_PLOT_BACKGROUND = "#050506";
 
@@ -96,16 +96,7 @@ export function identityColorRgba(
   if (encodedIdentity === 65_535 || encodedIdentity / 100 < range.minimum) {
     return [...hexToRgbBytes(background), 255];
   }
-  const identity = encodedIdentity / 100;
-  const position = identity >= range.maximum
-    ? 1
-    : identity <= range.midpoint
-      ? range.midpoint - range.minimum <= 0.001
-        ? 0.5
-        : 0.5 * (identity - range.minimum) / (range.midpoint - range.minimum)
-      : range.maximum - range.midpoint <= 0.001
-        ? 0.5
-        : 0.5 + 0.5 * (identity - range.midpoint) / (range.maximum - range.midpoint);
+  const position = heatmapPalettePosition(encodedIdentity / 100, range);
   const colors = HEATMAP_PALETTES[palette].colors;
   const scaled = Math.max(0, Math.min(1, position)) * (colors.length - 1);
   const lower = Math.min(colors.length - 1, Math.floor(scaled));
@@ -119,6 +110,25 @@ export function identityColorRgba(
     Math.round(low[2] + (high[2] - low[2]) * fraction),
     255,
   ];
+}
+
+/** Maps an ANI_c percentage through the same adjustable three-anchor transfer function as WebGL. */
+export function heatmapPalettePosition(identity: number, range: HeatmapRange): number {
+  if (identity <= range.minimum) return 0;
+  if (identity >= range.maximum) return 1;
+  if (identity <= range.midpoint) {
+    const lowerSpan = range.midpoint - range.minimum;
+    return lowerSpan <= 0.001 ? 0.5 : 0.5 * (identity - range.minimum) / lowerSpan;
+  }
+  const upperSpan = range.maximum - range.midpoint;
+  return upperSpan <= 0.001 ? 0.5 : 0.5 + 0.5 * (identity - range.midpoint) / upperSpan;
+}
+
+/** Places a value on a numerically linear minimum-to-maximum legend axis. */
+export function linearRangePosition(value: number, range: Pick<HeatmapRange, "minimum" | "maximum">): number {
+  const span = range.maximum - range.minimum;
+  if (span <= 0.001) return 0.5;
+  return Math.max(0, Math.min(1, (value - range.minimum) / span));
 }
 
 /** Builds the slider preview with the same piecewise-linear anchor mapping as WebGL. */

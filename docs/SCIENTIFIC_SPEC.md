@@ -10,6 +10,12 @@ architecture decision records, not in the current scientific contract.
 Core coordinates are zero-based and half-open. The UI alone converts them to one-based
 inclusive labels. Sequence positions are never removed during normalization.
 
+A FASTA header is split at its first whitespace. The first field is the sequence
+identifier used by scientific objects and numeric outputs; the trimmed remainder is
+presentation-only description text. Source filenames and load-order suffixes may
+disambiguate selectors and output filenames but never change the biological sequence
+identifier or numeric result.
+
 | Input | Packed behavior | K-mer behavior |
 | --- | --- | --- |
 | `A C G T` in either case | Valid DNA base | Included |
@@ -124,8 +130,9 @@ unaltered-base fraction `q` is approximately `q^k`. This is the only biological
 quantity against which `ANI_c` is intended to be compared, following Figure 4 of the
 ModDotPlot paper. At `k=21`, `q=0.80` retains only about 0.92% of exact k-mers, so
 containment evidence becomes sparse in this regime.
-The default palette uses the selected plot background below 85%; the 80% control is
-retained for advanced inspection, not as a promise of uniform sensitivity.
+The default display uses Viridis on a black plot background, with the background shown
+below 85%; the 80% control is retained for advanced inspection, not as a promise of
+uniform sensitivity.
 
 The non-default Rust `validation` feature preserves the rejected sparse-correction
 experiment solely for controlled estimator comparisons. It may retain a complete

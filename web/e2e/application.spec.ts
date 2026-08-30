@@ -4,6 +4,14 @@ import { gzipSync } from "node:zlib";
 
 const shortFasta = ">chrShort\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
 
+function deterministicDna(length: number, seed = 17): string {
+  let state = seed;
+  return Array.from({ length }, () => {
+    state = (Math.imul(state, 1_103_515_245) + 12_345) & 0x7fff_ffff;
+    return "ACGT"[(state >>> 16) & 3];
+  }).join("");
+}
+
 async function loadFasta(page: Page, name: string, contents: string): Promise<void> {
   await page.locator("#file-input").setInputFiles({
     name,
@@ -78,7 +86,7 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await loadFasta(page, "short.fa", shortFasta);
 
   await expect(page.locator("#workspace")).toBeVisible();
-  await expect(page.locator("#x-sequence option")).toHaveText("chrShort · 32 bp");
+  await expect(page.locator("#x-sequence option")).toHaveText("chrShort_short · 32 bp");
   await expect(page.locator("#scientific-provenance")).toContainText("Exact canonical 21-mer mode");
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#plot-canvas")).toBeVisible();
@@ -89,41 +97,117 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
 
 test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "download payload inspection runs on the Chromium channels");
+  await page.addInitScript(() => {
+    type SaveHarness = Window & {
+      __saveFormat?: string;
+      __saveOptions?: { startIn?: string; types?: unknown[] };
+      __forcedDetailRequests?: number;
+      showSaveFilePicker?: (options: {
+        suggestedName: string;
+        startIn?: string;
+        types?: unknown[];
+      }) => Promise<unknown>;
+    };
+    const harness = window as SaveHarness;
+    harness.__forcedDetailRequests = 0;
+    const originalPostMessage = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function(message: unknown, transfer?: Transferable[]): void {
+      if (typeof message === "object" && message !== null
+        && (message as { type?: string }).type === "request-tiles"
+        && (message as { forceDetailed?: boolean }).forceDetailed === true) {
+        harness.__forcedDetailRequests = (harness.__forcedDetailRequests ?? 0) + 1;
+      }
+      if (transfer === undefined) originalPostMessage.call(this, message);
+      else originalPostMessage.call(this, message, transfer);
+    } as typeof Worker.prototype.postMessage;
+    harness.showSaveFilePicker = async (options) => {
+      harness.__saveOptions = { startIn: options.startIn, types: options.types };
+      const requested = harness.__saveFormat;
+      const name = requested
+        ? options.suggestedName.replace(/\.[a-z0-9]+$/i, `.${requested}`)
+        : options.suggestedName;
+      return {
+        name,
+        createWritable: async () => ({
+          write: async (blob: Blob) => {
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = name;
+            anchor.click();
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+          },
+          close: async () => undefined,
+        }),
+      };
+    };
+  });
   await page.goto("/");
-  await loadFasta(page, "short.fa", shortFasta);
+  await page.locator("#resolution").selectOption("500", { force: true });
+  await page.locator("#kmer-length").fill("5", { force: true });
+  await loadFasta(page, "short.fa", `>chrShort\n${deterministicDna(6_000)}\n`);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  await expect(page.locator("#export-data-format")).toHaveCount(0);
+  await expect(page.locator("#export-image-format")).toHaveCount(0);
+  await expect(page.locator("#heatmap-palette")).toHaveValue("viridis");
+  await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "true");
 
-  await page.locator("#export-data").click();
-  await expect(page.locator("#export-save-dialog")).toBeVisible();
-  await expect(page.locator("#export-format")).toHaveValue("bedpe");
-  await expect(page.locator("#export-file-name")).toHaveValue("moddotplot-chrShort-vs-chrShort.bedpe");
   const dataDownload = page.waitForEvent("download");
-  await page.locator("#export-save-confirm").click();
+  await page.locator("#export-data").click();
   const data = await dataDownload;
-  expect(data.suggestedFilename()).toBe("moddotplot-chrShort-vs-chrShort.bedpe");
+  expect(data.suggestedFilename()).toBe("moddotplot-chrShort_short-vs-chrShort_short.bedpe");
   const dataPath = await data.path();
   if (!dataPath) throw new Error("numeric export has no temporary path");
   const bedpe = await readFile(dataPath, "utf8");
   expect(bedpe).toContain("# provenance=");
   expect(bedpe).toContain("exact complete distinct canonical k-mer-set containment");
   expect(bedpe).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
+  expect(bedpe).not.toContain("quality\tconfig_digest");
+  const saveOptions = await page.evaluate(() =>
+    (window as unknown as { __saveOptions?: { startIn?: string; types?: unknown[] } }).__saveOptions);
+  expect(saveOptions?.startIn).toBe("downloads");
+  expect(saveOptions?.types).toHaveLength(2);
+  await expect(page.locator("#export-progress-dialog")).toBeHidden();
 
   await page.locator(".feature-track-controls summary").click();
   await page.locator("#gc-track-x").check();
   await page.locator("#cpg-track-y").check();
   await expect(page.locator("#gc-track-x-panel")).toBeVisible();
   await expect(page.locator("#cpg-track-y-panel")).toBeVisible();
+  for (const [id, value] of [["heatmap-min", "90.2"], ["heatmap-mid", "97.1"]] as const) {
+    await page.locator(`#${id}`).evaluate((input, nextValue) => {
+      (input as HTMLInputElement).value = nextValue;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }, value);
+  }
+  await expect(page.locator("#heatmap-min-value")).toHaveText("90.2%");
+  await expect(page.locator("#heatmap-mid-value")).toHaveText("97.1%");
 
   const backingSize = await page.locator("#plot-canvas").evaluate((canvas) => ({
     width: (canvas as HTMLCanvasElement).width,
     height: (canvas as HTMLCanvasElement).height,
   }));
-  await page.locator("#export-image").click();
-  await expect(page.locator("#export-format")).toHaveValue("png");
+  const forcedRequestsBeforeImage = await page.evaluate(() =>
+    (window as unknown as { __forcedDetailRequests?: number }).__forcedDetailRequests ?? 0);
+  await page.locator("#plot-canvas").evaluate((canvas) => {
+    const state = { backingStoreMutations: 0 };
+    (window as unknown as { __imageRenderState?: typeof state }).__imageRenderState = state;
+    new MutationObserver((records) => {
+      state.backingStoreMutations += records.length;
+    }).observe(canvas, { attributes: true, attributeFilter: ["width", "height"] });
+  });
   const imageDownload = page.waitForEvent("download");
-  await page.locator("#export-save-confirm").click();
+  await page.locator("#export-image").click();
   const image = await imageDownload;
-  expect(image.suggestedFilename()).toBe("moddotplot-chrShort-vs-chrShort.png");
+  await expect(page.locator("#export-progress-dialog")).toBeHidden();
+  expect(await page.evaluate(() =>
+    (window as unknown as { __forcedDetailRequests?: number }).__forcedDetailRequests ?? 0))
+    .toBe(forcedRequestsBeforeImage);
+  expect(await page.evaluate(() =>
+    (window as unknown as { __imageRenderState?: { backingStoreMutations: number } })
+      .__imageRenderState?.backingStoreMutations ?? -1)).toBe(0);
+  if (process.env.MODDOTPLOT_PNG_QA) await image.saveAs(process.env.MODDOTPLOT_PNG_QA);
+  expect(image.suggestedFilename()).toBe("moddotplot-chrShort_short-vs-chrShort_short.png");
   const imagePath = await image.path();
   if (!imagePath) throw new Error("image export has no temporary path");
   const png = await readFile(imagePath);
@@ -136,30 +220,188 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   expect(png.includes(Buffer.from("exact complete distinct canonical k-mer-set containment"))).toBe(true);
 
   for (const format of ["svg", "pdf"] as const) {
-    await page.locator("#export-image").click();
-    await page.locator("#export-format").selectOption(format);
-    await expect(page.locator("#export-file-name")).toHaveValue(`moddotplot-chrShort-vs-chrShort.${format}`);
+    await page.evaluate((selected) => {
+      (window as unknown as { __saveFormat?: string }).__saveFormat = selected;
+    }, format);
     const download = page.waitForEvent("download");
-    await page.locator("#export-save-confirm").click();
+    await page.locator("#export-image").click();
     const result = await download;
+    const qaPath = format === "svg"
+      ? process.env.MODDOTPLOT_SVG_QA
+      : process.env.MODDOTPLOT_PDF_QA;
+    if (qaPath) await result.saveAs(qaPath);
     const resultPath = await result.path();
     if (!resultPath) throw new Error(`${format} export has no temporary path`);
     const bytes = await readFile(resultPath);
     if (format === "svg") {
       const svg = bytes.toString("utf8");
       expect(svg).toContain("<image");
+      expect(svg).toContain('xmlns:xlink="http://www.w3.org/1999/xlink"');
+      expect(svg).toContain('xlink:href="data:image/png;base64,');
       expect(svg).toContain("<text");
       expect(svg).toContain("chrShort");
       expect(svg).toContain("GC%");
       expect(svg).toContain("CpG O/E");
+      expect(svg).toContain("ANI_c");
+      expect(svg).not.toContain(">Viridis</text>");
+      const svgInspection = await page.evaluate(async (source) => {
+        const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+        const plotImage = parsed.querySelector("image");
+        const embedded = plotImage?.getAttributeNS(
+          "http://www.w3.org/1999/xlink",
+          "href",
+        ) ?? "";
+        const legendText = [...parsed.querySelectorAll("text")]
+          .find((element) => element.textContent === "ANI_c");
+        const plotRight = Number(plotImage?.getAttribute("x") ?? 0)
+          + Number(plotImage?.getAttribute("width") ?? 0);
+        const legendOutsidePlot = Number(legendText?.getAttribute("x") ?? 0) > plotRight;
+        const percentTicks = [...parsed.querySelectorAll("text")]
+          .filter((element) => /^\d+\.\d%$/.test(element.textContent ?? ""))
+          .map((element) => ({
+            label: element.textContent ?? "",
+            y: Number(element.getAttribute("y") ?? Number.NaN),
+          }))
+          .sort((left, right) => left.y - right.y);
+        const image = new Image();
+        image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        context?.drawImage(image, 0, 0);
+        const pixels = context?.getImageData(0, 0, canvas.width, canvas.height).data;
+        const hasColoredRasterPixel = pixels
+          ? pixels.some((_, index) => index % 4 === 0
+            && Math.max(pixels[index]!, pixels[index + 1]!, pixels[index + 2]!)
+              - Math.min(pixels[index]!, pixels[index + 1]!, pixels[index + 2]!) > 40
+            && pixels[index + 3]! > 0)
+          : false;
+        return {
+          parseErrors: parsed.querySelectorAll("parsererror").length,
+          embedded,
+          hasColoredRasterPixel,
+          legendOutsidePlot,
+          percentTicks,
+        };
+      }, svg);
+      expect(svgInspection.parseErrors).toBe(0);
+      expect(svgInspection.embedded).toMatch(/^data:image\/png;base64,/);
+      expect(svgInspection.hasColoredRasterPixel).toBe(true);
+      expect(svgInspection.legendOutsidePlot).toBe(true);
+      expect(svgInspection.percentTicks.map((tick) => tick.label)).toEqual([
+        "100.0%", "98.0%", "96.1%", "94.1%", "92.2%", "90.2%",
+      ]);
+      expect(svgInspection.percentTicks.map((tick) => tick.y)).toEqual([
+        expect.any(Number), expect.any(Number), expect.any(Number), expect.any(Number), expect.any(Number),
+        expect.any(Number),
+      ]);
+      const tickGaps = svgInspection.percentTicks.slice(1).map((tick, index) =>
+        tick.y - svgInspection.percentTicks[index]!.y);
+      for (const gap of tickGaps.slice(1)) expect(gap).toBeCloseTo(tickGaps[0]!, 5);
+      expect(svgInspection.percentTicks.some((tick) => tick.label === "97.1%")).toBe(false);
     } else {
       expect(bytes.subarray(0, 8).toString("latin1")).toBe("%PDF-1.7");
       expect(bytes.includes(Buffer.from("/Subtype /Image"))).toBe(true);
       expect(bytes.includes(Buffer.from("chrShort"))).toBe(true);
       expect(bytes.includes(Buffer.from("GC%"))).toBe(true);
       expect(bytes.includes(Buffer.from("CpG O/E"))).toBe(true);
+      expect(bytes.includes(Buffer.from("ANI_c"))).toBe(true);
+      expect(bytes.includes(Buffer.from("Viridis"))).toBe(false);
     }
   }
+});
+
+test("exports wait for detailed visible tiles behind a blocking progress dialog", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "export payload inspection runs on the Chromium channel");
+  await page.addInitScript(() => {
+    const state = { contents: "", closed: false };
+    (window as unknown as { __detailedSave: typeof state }).__detailedSave = state;
+    (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
+      .showSaveFilePicker = async (options) => ({
+        name: options.suggestedName.replace(/\.bedpe$/i, ".csv"),
+        createWritable: async () => ({
+          write: async (blob: Blob) => {
+            state.contents = await blob.text();
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          },
+          close: async () => { state.closed = true; },
+        }),
+      });
+  });
+  await page.goto("/");
+  await page.locator("#resolution").selectOption("500", { force: true });
+  await page.locator("#kmer-length").fill("5", { force: true });
+  const sequence = deterministicDna(6_000);
+  await loadFasta(page, "detailed.fa", `>detailed\n${sequence}\n`);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await page.locator("#export-data").click();
+  await expect(page.locator("#export-progress-dialog")).toBeVisible();
+  expect(await page.locator("#export-progress-dialog").evaluate((dialog) => dialog.matches(":modal"))).toBe(true);
+  await page.waitForFunction(() =>
+    (window as unknown as { __detailedSave?: { closed: boolean } }).__detailedSave?.closed === true,
+  { timeout: 30_000 });
+  await expect(page.locator("#export-progress-dialog")).toBeHidden();
+  const contents = await page.evaluate(() =>
+    (window as unknown as { __detailedSave: { contents: string } }).__detailedSave.contents);
+  expect(contents).toContain("x_seq_id,x_start,x_end,y_seq_id,y_start,y_end,ani_c,direction,direction_support");
+  const rows = contents.split("\n").filter((row) => /^detailed,/.test(row));
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.every((row) => row.split(",").length === 9)).toBe(true);
+  expect(contents).not.toContain("identity_fixed");
+  expect(contents).not.toContain("config_digest");
+});
+
+test("FASTA descriptions stay on axes while source-qualified IDs disambiguate selections and saves", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { suggestedName: "", contents: "", closed: false };
+    (window as unknown as { __nativeSave: typeof state }).__nativeSave = state;
+    (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
+      .showSaveFilePicker = async (options) => {
+        state.suggestedName = options.suggestedName;
+        return {
+          name: options.suggestedName,
+          createWritable: async () => ({
+            write: async (blob: Blob) => { state.contents = await blob.text(); },
+            close: async () => { state.closed = true; },
+          }),
+        };
+      };
+  });
+  await page.goto("/");
+  await page.locator("#file-input").setInputFiles([
+    {
+      name: "human.fa",
+      mimeType: "text/plain",
+      buffer: Buffer.from(">chr1 human chromosome one\nACGTACGTACGTACGTACGTACGT\n"),
+    },
+    {
+      name: "gorilla.fa",
+      mimeType: "text/plain",
+      buffer: Buffer.from(">chr1 gorilla chromosome one\nACGTACGTACGTACGTACGTACGT\n"),
+    },
+  ]);
+  await expect(page.locator("#x-sequence option")).toHaveText([
+    "chr1_human · 24 bp",
+    "chr1_gorilla · 24 bp",
+  ]);
+  await expect(page.locator("#x-sequence-label")).toHaveText("chr1 human chromosome one");
+  await page.locator("#y-sequence").selectOption("1");
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  await expect(page.locator("#y-sequence-label")).toHaveText("chr1 gorilla chromosome one");
+
+  await page.locator("#export-data").click();
+  await page.waitForFunction(() =>
+    (window as unknown as { __nativeSave?: { closed: boolean } }).__nativeSave?.closed === true);
+  const saved = await page.evaluate(() =>
+    (window as unknown as { __nativeSave: { suggestedName: string; contents: string } }).__nativeSave);
+  expect(saved.suggestedName).toBe("moddotplot-chr1_human-vs-chr1_gorilla.bedpe");
+  const dataRows = saved.contents.split("\n").filter((row) => row && !row.startsWith("#"));
+  expect(dataRows.length).toBeGreaterThan(0);
+  expect(dataRows.every((row) => row.startsWith("chr1\t"))).toBe(true);
+  expect(saved.contents).not.toContain("human chromosome one\t");
+  expect(saved.contents).not.toContain("gorilla chromosome one\t");
 });
 
 test("a newer load transaction wins over compressed input and clear rejects stale publication", async ({ page }) => {
@@ -170,11 +412,29 @@ test("a newer load transaction wins over compressed input and clear rejects stal
     mimeType: "application/gzip",
     buffer: gzipSync(Buffer.from(large)),
   });
-  await expect(page.locator("#plot-loading")).toBeVisible();
-  await expect(page.locator("#plot-loading canvas.dna-loader")).toBeVisible();
+  const loadingAppearance = await page.evaluate(() => {
+    const frame = document.querySelector<HTMLElement>("#plot-frame")!;
+    const loading = document.querySelector<HTMLElement>("#plot-loading")!;
+    const loader = document.querySelector<HTMLElement>("#plot-loading canvas.dna-loader")!;
+    const canvas = document.querySelector<HTMLElement>("#plot-canvas")!;
+    return {
+      loading: !loading.hidden,
+      loaderDisplay: getComputedStyle(loader).display,
+      frameBackground: getComputedStyle(frame).backgroundColor,
+      frameLoading: frame.classList.contains("is-loading"),
+      canvasVisibility: getComputedStyle(canvas).visibility,
+    };
+  });
+  expect(loadingAppearance).toEqual({
+    loading: true,
+    loaderDisplay: "block",
+    frameBackground: "rgb(248, 247, 242)",
+    frameLoading: true,
+    canvasVisibility: "hidden",
+  });
   await loadFasta(page, "current.fa", ">current\nACGTACGTACGTACGTACGTACGT\n");
 
-  await expect(page.locator("#x-sequence option")).toHaveText("current · 24 bp", {
+  await expect(page.locator("#x-sequence option")).toHaveText("current_current · 24 bp", {
     timeout: 20_000,
   });
   await expect(page.locator("#x-sequence option")).toHaveCount(1);
@@ -249,7 +509,7 @@ test("a crashed compute worker can restart and reload the selected FASTA", async
   await expect(page.locator("#status")).toContainText("Injected worker crash");
   await expect(page.locator("#retry-engine")).toBeVisible();
   await page.locator("#retry-engine").click();
-  await expect(page.locator("#x-sequence option")).toHaveText("chrShort · 32 bp", {
+  await expect(page.locator("#x-sequence option")).toHaveText("chrShort_recover · 32 bp", {
     timeout: 15_000,
   });
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
@@ -346,7 +606,7 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
     buffer: gzipSync(Buffer.from(fasta)),
   });
 
-  await expect(page.locator("#x-sequence option")).toHaveText("ambiguous · 33 bp");
+  await expect(page.locator("#x-sequence option")).toHaveText("ambiguous_ambiguous · 33 bp");
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#scientific-provenance")).toContainText("Exact canonical 21-mer mode");
   await expect(page.locator("#file-input")).not.toHaveAttribute("accept", /bed|gff|gtf/i);
@@ -366,8 +626,8 @@ test("BGZF multi-FASTA members load as one ordered sequence stream", async ({ pa
   });
 
   await expect(page.locator("#x-sequence option")).toHaveText([
-    "chrA · 12 bp",
-    "chrB · 8 bp",
+    "chrA_two-records · 12 bp",
+    "chrB_two-records · 8 bp",
   ]);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#sequence-load-dialog")).toBeHidden();
@@ -745,13 +1005,13 @@ test("heatmap palette and plot background controls update without recomputation"
   });
   await expect(page.locator("#heatmap-min-value")).toHaveText("85.1%");
 
-  await expect(page.locator('[data-background-mode="white"]')).toHaveAttribute("aria-pressed", "true");
-  await page.locator('[data-background-mode="black"]').click();
   await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#plot-frame")).toHaveClass(/dark-background/);
   await expect.poll(() => gradient.evaluate((element) => element.style.backgroundImage))
     .toContain("rgb(5, 5, 6)");
   await page.locator('[data-background-mode="white"]').click();
   await expect(page.locator("#plot-frame")).not.toHaveClass(/dark-background/);
+  await page.locator('[data-background-mode="black"]').click();
+  await expect(page.locator("#plot-frame")).toHaveClass(/dark-background/);
   await expect(page.locator("#status")).toContainText("Ready");
 });

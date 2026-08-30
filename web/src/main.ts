@@ -23,6 +23,7 @@ import {
 import { ImportedTrackManager } from "./imported-track";
 import { DotplotRenderer, type HoverDatum, type ViewChange } from "./renderer";
 import { REFINEMENT_POLICY_VERSION } from "./refinement";
+import { sequenceAxisLabel } from "./sequence-metadata";
 import {
   decideResourceAdmission,
   totalResourceBytes,
@@ -56,13 +57,6 @@ const scientificProvenance = element<HTMLOutputElement>("scientific-provenance")
 const resetViewButton = element<HTMLButtonElement>("reset-view");
 const exportDataButton = element<HTMLButtonElement>("export-data");
 const exportImageButton = element<HTMLButtonElement>("export-image");
-const exportSaveDialog = element<HTMLDialogElement>("export-save-dialog");
-const exportSaveForm = element<HTMLFormElement>("export-save-form");
-const exportSaveTitle = element<HTMLElement>("export-save-title");
-const exportFileName = element<HTMLInputElement>("export-file-name");
-const exportFormat = element<HTMLSelectElement>("export-format");
-const exportSaveCancel = element<HTMLButtonElement>("export-save-cancel");
-const exportSaveConfirm = element<HTMLButtonElement>("export-save-confirm");
 const status = element<HTMLElement>("status");
 const retryEngineButton = element<HTMLButtonElement>("retry-engine");
 const memoryUsage = element<HTMLElement>("memory-usage");
@@ -125,6 +119,9 @@ const sequenceLoadDialog = element<HTMLDialogElement>("sequence-load-dialog");
 const sequenceLoadSummary = element<HTMLElement>("sequence-load-summary");
 const sequenceLoadDetails = element<HTMLElement>("sequence-load-details");
 const sequenceLoadClose = element<HTMLButtonElement>("sequence-load-close");
+const exportProgressDialog = element<HTMLDialogElement>("export-progress-dialog");
+const exportProgressMessage = element<HTMLElement>("export-progress-message");
+const exportProgressBar = element<HTMLProgressElement>("export-progress-bar");
 const trackHoverCard = element<HTMLElement>("track-hover-card");
 const xGcCanvas = element<HTMLCanvasElement>("gc-track-x-canvas");
 const yGcCanvas = element<HTMLCanvasElement>("gc-track-y-canvas");
@@ -215,6 +212,14 @@ let wasmBytes = 0;
 let heatmapRange: HeatmapRange = { minimum: 85, midpoint: 92, maximum: 100 };
 let histogramBins = new Uint32Array(101);
 const histogramTiles = new Set<string>();
+let pendingDetailedExport: {
+  generation: number;
+  requestId: number;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  onProgress: (message: string, progress?: number) => void;
+} | null = null;
 
 function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
   const message = event.data;
@@ -234,6 +239,9 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (status.classList.contains("error")) break;
       plotStatusText = message.text;
       status.textContent = message.text;
+      if (pendingDetailedExport && message.busy) {
+        pendingDetailedExport.onProgress(message.text, message.progress);
+      }
       if (message.busy) showProgress(message.text, message.progress);
       else hideProgress();
       break;
@@ -273,6 +281,16 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
         });
       });
       break;
+    case "export-ready": {
+      const pending = pendingDetailedExport;
+      if (!pending || message.generation !== pending.generation || message.requestId !== pending.requestId) return;
+      pendingDetailedExport = null;
+      plotStatusText = "Ready · detailed export prepared";
+      status.textContent = plotStatusText;
+      hideProgress();
+      pending.resolve();
+      break;
+    }
     case "tile":
       if (message.generation !== generation) return;
       renderer.addTile(message);
@@ -320,6 +338,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       updateMemory();
       break;
     case "error":
+      cancelPendingDetailedExport(new Error(message.message));
       featureTrackBusy = false;
       if (sequenceLoadPending) rejectSequenceLoad(message.message);
       else {
@@ -407,13 +426,6 @@ resetViewButton.addEventListener("click", () => renderer.resetView());
 new ExportController({
   dataButton: exportDataButton,
   imageButton: exportImageButton,
-  dialog: exportSaveDialog,
-  form: exportSaveForm,
-  title: exportSaveTitle,
-  fileName: exportFileName,
-  format: exportFormat,
-  cancel: exportSaveCancel,
-  confirm: exportSaveConfirm,
   shell: plotShell,
   plotFrame,
   renderer,
@@ -421,6 +433,10 @@ new ExportController({
   baseName: currentExportBaseName,
   provenance: currentExportProvenance,
   numericContext: currentNumericExportContext,
+  prepareDetailedExport,
+  progressDialog: exportProgressDialog,
+  progressMessage: exportProgressMessage,
+  progressBar: exportProgressBar,
   onError: showError,
   canExport: () => comparisonReady && renderer.exportTileViews().length > 0,
 });
@@ -428,6 +444,7 @@ clearButton.addEventListener("click", clearSession);
 retryEngineButton.addEventListener("click", restartEngine);
 renderer.onHover(showHover);
 renderer.onViewChange((change) => {
+  cancelPendingDetailedExport(new Error("Export cancelled because the plot view changed."));
   pendingView = change;
   axes.setView(change);
   if (activeFeatureTrackMetadata) featureTracks.setView(activeFeatureTrackMetadata, change);
@@ -445,6 +462,7 @@ drawHistogram();
 updateParameterNotes();
 
 function loadFiles(files: File[], remember = true): void {
+  cancelPendingDetailedExport(new Error("Export cancelled because new files are loading."));
   const annotations = files.filter((file) => isAnnotationFileName(file.name));
   if (annotations.length > 0) {
     showSequenceLoadDialog(
@@ -496,7 +514,8 @@ function populateSelectors(): void {
   const options = sequences.map((sequence) => {
     const option = document.createElement("option");
     option.value = String(sequence.index);
-    option.textContent = `${sequence.name} · ${formatBases(sequence.length)}`;
+    option.textContent = `${sequence.selectionId} · ${formatBases(sequence.length)}`;
+    option.title = `${sequenceAxisLabel(sequence)} · ${sequence.sourceFile}`;
     return option;
   });
   xSelect.replaceChildren(...options.map((option) => option.cloneNode(true)));
@@ -512,6 +531,7 @@ function queueComparison(delay: number): void {
 }
 
 function prepareComparison(): void {
+  cancelPendingDetailedExport(new Error("Export cancelled because the comparison changed."));
   const xIndex = Number(xSelect.value);
   const yIndex = Number(ySelect.value);
   const x = sequences.find((sequence) => sequence.index === xIndex);
@@ -559,18 +579,20 @@ function prepareComparison(): void {
     xLength: x.length,
     yLength: y.length,
   }, preserveViewport);
+  const xAxisName = sequenceAxisLabel(x);
+  const yAxisName = sequenceAxisLabel(y);
   axes.setMetadata({
     baseResolution: parameters.resolution,
     domainLength: activeDomainLength,
-    xName: x.name,
-    yName: y.name,
+    xName: xAxisName,
+    yName: yAxisName,
     xLength: x.length,
     yLength: y.length,
   });
-  xSequenceLabel.textContent = x.name;
-  xSequenceLabel.title = `${x.name} · ${formatBases(x.length)}`;
-  ySequenceLabel.textContent = y.name;
-  ySequenceLabel.title = `${y.name} · ${formatBases(y.length)}`;
+  xSequenceLabel.textContent = xAxisName;
+  xSequenceLabel.title = `${x.selectionId} · ${formatBases(x.length)} · ${x.sourceFile}`;
+  ySequenceLabel.textContent = yAxisName;
+  ySequenceLabel.title = `${y.selectionId} · ${formatBases(y.length)} · ${y.sourceFile}`;
   status.classList.remove("error");
   plotStatusText = "Building overview signatures";
   status.textContent = "Building overview signatures";
@@ -779,6 +801,11 @@ function selectedHeatmapPalette(): HeatmapPalette {
     : DEFAULT_HEATMAP_PALETTE;
 }
 
+function selectedColorMode(): "similarity" | "direction" {
+  return document.querySelector<HTMLButtonElement>('[data-color-mode][aria-pressed="true"]')
+    ?.dataset.colorMode === "direction" ? "direction" : "similarity";
+}
+
 function collectHistogram(message: Extract<WorkerToMainMessage, { type: "tile" }>): void {
   if (!activeParameters || message.resolution !== activeParameters.resolution) return;
   const finalQuality = "refined";
@@ -862,6 +889,7 @@ function hideProgress(): void {
 
 function setPlotLoading(loading: boolean): void {
   plotLoading.hidden = !loading;
+  plotFrame.classList.toggle("is-loading", loading);
   if (loading) dnaLoader.start();
   else dnaLoader.stop();
 }
@@ -896,6 +924,7 @@ function updateMemory(): void {
 }
 
 function clearSession(): void {
+  cancelPendingDetailedExport(new Error("Export cancelled because the session was cleared."));
   window.clearTimeout(prepareTimer);
   window.clearTimeout(detailTimer);
   window.clearTimeout(featureTrackTimer);
@@ -1002,6 +1031,7 @@ function startWorker(): void {
 function handleWorkerFailure(message: string): void {
   if (workerFailed) return;
   workerFailed = true;
+  cancelPendingDetailedExport(new Error(message));
   comparisonReady = false;
   exportDataButton.disabled = true;
   exportImageButton.disabled = true;
@@ -1013,6 +1043,7 @@ function handleWorkerFailure(message: string): void {
 }
 
 function restartEngine(): void {
+  cancelPendingDetailedExport(new Error("Export cancelled while the compute engine restarts."));
   if (!workerFailed) worker.terminate();
   recoveryFiles = lastFiles.length > 0 ? [...lastFiles] : null;
   comparisonReady = false;
@@ -1040,9 +1071,65 @@ function post(message: MainToWorkerMessage): void {
   worker.postMessage(message);
 }
 
+function prepareDetailedExport(
+  onProgress: (message: string, progress?: number) => void,
+): Promise<void> {
+  if (pendingDetailedExport) return pendingDetailedExport.promise;
+  const parameters = activeParameters;
+  const change = pendingView;
+  if (!comparisonReady || !parameters || !change) {
+    return Promise.reject(new Error("The current plot is not ready to export."));
+  }
+  window.clearTimeout(detailTimer);
+  const resolution = requestedResolution(change);
+  const exactKmerLevel = resolution === Math.floor(activeDomainLength);
+  currentMeasurement = exactKmerLevel ? "kmer" : "sketch";
+  renderer.setActiveResolution(resolution);
+  const tiles = selectTiles(resolution, parameters.resolution, change.view, 256, 0);
+  if (renderer.hasDetailedTileCoverage(resolution, tiles)) return Promise.resolve();
+  tileRequestId += 1;
+  const requestId = tileRequestId;
+  const requestGeneration = generation;
+  post({ type: "cancel-tiles", generation: requestGeneration, requestId });
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((accept, decline) => {
+    resolve = accept;
+    reject = decline;
+  });
+  pendingDetailedExport = {
+    generation: requestGeneration,
+    requestId,
+    promise,
+    resolve,
+    reject,
+    onProgress,
+  };
+  plotStatusText = "Preparing detailed export";
+  status.textContent = plotStatusText;
+  showProgress(plotStatusText, 0);
+  onProgress(plotStatusText, 0);
+  post({
+    type: "request-tiles",
+    generation: requestGeneration,
+    requestId,
+    resolution,
+    mode: exactKmerLevel ? "kmer" : "sketch",
+    tiles,
+    forceDetailed: true,
+  });
+  return promise;
+}
+
+function cancelPendingDetailedExport(error: Error): void {
+  const pending = pendingDetailedExport;
+  pendingDetailedExport = null;
+  pending?.reject(error);
+}
+
 function currentExportBaseName(): string {
-  const x = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "x";
-  const y = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "y";
+  const x = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.selectionId ?? "x";
+  const y = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.selectionId ?? "y";
   return exportBaseName(x, y);
 }
 
@@ -1084,6 +1171,7 @@ function currentExportProvenance(): ExportProvenance {
         : [],
     display: {
       measurement: currentMeasurement,
+      colorMode: selectedColorMode(),
       palette: selectedHeatmapPalette(),
       heatmapRange,
       background: darkBackground ? "black" : "white",

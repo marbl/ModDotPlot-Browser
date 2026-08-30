@@ -59,12 +59,12 @@ export function createNumericExport(
     ? [
         "# moddotplot-rs current-view BEDPE export\n",
         `# provenance=${JSON.stringify(provenance)}\n`,
-        "#chrom1\tstart1\tend1\tchrom2\tstart2\tend2\tname\tscore\tstrand1\tstrand2\tani_c\tdirection\tdirection_support\tquality\tconfig_digest\n",
+        "#chrom1\tstart1\tend1\tchrom2\tstart2\tend2\tname\tscore\tstrand1\tstrand2\tani_c\tdirection\tdirection_support\n",
       ]
     : [
         "# moddotplot-rs current-view numeric export\n",
         `# provenance=${JSON.stringify(provenance)}\n`,
-        "resolution,tile_x,tile_y,cell_x,cell_y,x_start,x_end,y_start,y_end,identity_fixed,identity_scale,ani_c,direction_fixed,direction_scale,direction_support,quality,config_digest\n",
+        "x_seq_id,x_start,x_end,y_seq_id,y_start,y_end,ani_c,direction,direction_support\n",
       ];
   let buffer = "";
   for (const { tile, bounds } of visibleTiles) {
@@ -74,11 +74,11 @@ export function createNumericExport(
         const cellX = tile.x + column;
         const cellY = tile.y + row;
         const identity = tile.identity[offset]!;
-        const aniC = identity === 0xffff ? "" : (identity / 10_000).toFixed(4);
+        if (identity === 0 || identity === 0xffff) continue;
+        const aniC = (identity / 10_000).toFixed(4);
         const direction = tile.direction[offset]!;
         const support = tile.directionSupport[offset]!;
         if (format === "bedpe") {
-          if (identity === 0xffff) continue;
           buffer += [
             sanitizeBedName(context.xName),
             coordinate(cellX, tile.resolution, context.domainLength),
@@ -86,35 +86,25 @@ export function createNumericExport(
             sanitizeBedName(context.yName),
             coordinate(cellY, tile.resolution, context.domainLength),
             coordinate(cellY + 1, tile.resolution, context.domainLength),
-            `ani_c=${aniC};quality=${tile.quality}`,
+            `ani_c=${aniC}`,
             Math.round(identity / 10),
             support > 0 ? "+" : ".",
             support > 0 ? (direction < 0 ? "-" : "+") : ".",
             aniC,
             support > 0 ? (direction / 32_767).toFixed(6) : ".",
             support,
-            tile.quality,
-            tile.configDigest,
           ].join("\t") + "\n";
         } else {
           buffer += [
-            tile.resolution,
-            tile.x,
-            tile.y,
-            cellX,
-            cellY,
+            escapeCsv(context.xName),
             coordinate(cellX, tile.resolution, context.domainLength),
             coordinate(cellX + 1, tile.resolution, context.domainLength),
+            escapeCsv(context.yName),
             coordinate(cellY, tile.resolution, context.domainLength),
             coordinate(cellY + 1, tile.resolution, context.domainLength),
-            identity,
-            10_000,
             aniC,
-            direction,
-            32_767,
+            support > 0 ? (direction / 32_767).toFixed(6) : "",
             support,
-            tile.quality,
-            tile.configDigest,
           ].join(",") + "\n";
         }
         if (buffer.length >= 1_048_576) {
@@ -186,6 +176,10 @@ function visibleCellBounds(
 
 function sanitizeBedName(value: string): string {
   return value.replace(/[\t\r\n]+/g, "_") || "sequence";
+}
+
+function escapeCsv(value: string): string {
+  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
 function findIend(bytes: Uint8Array): number {

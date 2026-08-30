@@ -54,7 +54,7 @@ binary_root="$staging_directory/moddotplot-rs-$release_version-web"
 mkdir -p "$binary_root/docs"
 cp -R web/dist/. "$binary_root/"
 cp LICENSE CITATION.cff SBOM.cdx.json THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.txt "$binary_root/"
-cp docs/USER_GUIDE.md docs/PRIVACY.md docs/SCIENTIFIC_SPEC.md docs/CURRENT_PARAMETERS.md docs/CITATIONS.md docs/PROVENANCE.md "$binary_root/docs/"
+cp docs/USER_GUIDE.md docs/PRIVACY.md docs/SCIENTIFIC_SPEC.md docs/CURRENT_PARAMETERS.md docs/CITATIONS.md docs/PROVENANCE.md docs/EXPORT_FORMATS.md "$binary_root/docs/"
 cp "$release_notes" "$binary_root/docs/"
 find "$binary_root" -exec touch -t 198001010000 {} +
 (

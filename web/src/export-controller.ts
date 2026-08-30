@@ -15,13 +15,6 @@ type ExportKind = "data" | "image";
 interface ExportControllerOptions {
   dataButton: HTMLButtonElement;
   imageButton: HTMLButtonElement;
-  dialog: HTMLDialogElement;
-  form: HTMLFormElement;
-  title: HTMLElement;
-  fileName: HTMLInputElement;
-  format: HTMLSelectElement;
-  cancel: HTMLButtonElement;
-  confirm: HTMLButtonElement;
   shell: HTMLElement;
   plotFrame: HTMLElement;
   renderer: DotplotRenderer;
@@ -29,71 +22,103 @@ interface ExportControllerOptions {
   baseName: () => string;
   provenance: () => ExportProvenance;
   numericContext: () => NumericExportContext | null;
+  prepareDetailedExport: (onProgress: (message: string, progress?: number) => void) => Promise<void>;
+  progressDialog: HTMLDialogElement;
+  progressMessage: HTMLElement;
+  progressBar: HTMLProgressElement;
   onError: (message: string) => void;
   canExport: () => boolean;
 }
 
-const FORMAT_OPTIONS: Record<ExportKind, Array<{ value: string; label: string }>> = {
+interface FormatOption {
+  value: DataExportFormat | ImageExportFormat;
+  label: string;
+  mime: string;
+}
+
+const FORMAT_OPTIONS: Record<ExportKind, FormatOption[]> = {
   data: [
-    { value: "bedpe", label: "BEDPE (.bedpe)" },
-    { value: "csv", label: "CSV (.csv)" },
+    { value: "bedpe", label: "BEDPE", mime: "text/tab-separated-values" },
+    { value: "csv", label: "CSV", mime: "text/csv" },
   ],
   image: [
-    { value: "png", label: "PNG (.png)" },
-    { value: "svg", label: "SVG (.svg)" },
-    { value: "pdf", label: "PDF (.pdf)" },
+    { value: "png", label: "PNG", mime: "image/png" },
+    { value: "svg", label: "SVG", mime: "image/svg+xml" },
+    { value: "pdf", label: "PDF", mime: "application/pdf" },
   ],
 };
 
+interface NativeWritable {
+  write(data: Blob): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface NativeFileHandle {
+  name: string;
+  createWritable(): Promise<NativeWritable>;
+}
+
+type NativeSavePicker = (options: {
+  suggestedName: string;
+  startIn: "downloads";
+  excludeAcceptAllOption: boolean;
+  types: Array<{ description: string; accept: Record<string, string[]> }>;
+}) => Promise<NativeFileHandle>;
+
 export class ExportController {
   readonly #options: ExportControllerOptions;
-  #kind: ExportKind = "data";
 
   constructor(options: ExportControllerOptions) {
     this.#options = options;
-    options.dataButton.addEventListener("click", () => this.#open("data"));
-    options.imageButton.addEventListener("click", () => this.#open("image"));
-    options.cancel.addEventListener("click", () => options.dialog.close());
-    options.format.addEventListener("change", () => this.#updateExtension());
-    options.form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void this.#save();
-    });
+    options.progressDialog.addEventListener("cancel", (event) => event.preventDefault());
+    options.dataButton.addEventListener("click", () => void this.#save("data"));
+    options.imageButton.addEventListener("click", () => void this.#save("image"));
   }
 
-  #open(kind: ExportKind): void {
+  async #save(kind: ExportKind): Promise<void> {
     if (!this.#options.canExport()) return;
-    this.#kind = kind;
-    this.#options.title.textContent = kind === "data" ? "Save plot data" : "Save plot image";
-    this.#options.format.replaceChildren(...FORMAT_OPTIONS[kind].map(({ value, label }) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      return option;
-    }));
-    const defaultFormat = kind === "data" ? "bedpe" : "png";
-    this.#options.format.value = defaultFormat;
-    this.#options.fileName.value = `${this.#options.baseName()}.${defaultFormat}`;
-    this.#options.dialog.showModal();
-    this.#options.fileName.select();
-  }
-
-  async #save(): Promise<void> {
-    const button = this.#kind === "data" ? this.#options.dataButton : this.#options.imageButton;
-    this.#options.confirm.disabled = true;
+    const button = kind === "data" ? this.#options.dataButton : this.#options.imageButton;
+    let format: string = kind === "data" ? "bedpe" : "png";
+    let handle: NativeFileHandle | null = null;
+    const picker = (window as unknown as { showSaveFilePicker?: NativeSavePicker }).showSaveFilePicker;
+    if (picker) {
+      try {
+        handle = await picker.call(window, {
+          suggestedName: withExtension(this.#options.baseName(), format),
+          startIn: "downloads",
+          excludeAcceptAllOption: true,
+          types: FORMAT_OPTIONS[kind].map((option) => ({
+            description: `${option.label} (.${option.value})`,
+            accept: { [option.mime]: [`.${option.value}`] },
+          })),
+        });
+        format = formatFromFileName(handle.name, FORMAT_OPTIONS[kind].map((option) => option.value), format);
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        handle = null;
+      }
+    }
     button.disabled = true;
+    const reportProgress = (message: string, progress?: number): void => {
+      this.#options.progressMessage.textContent = message;
+      if (progress === undefined) this.#options.progressBar.removeAttribute("value");
+      else this.#options.progressBar.value = Math.max(0, Math.min(1, progress));
+      if (!this.#options.progressDialog.open) this.#options.progressDialog.showModal();
+    };
     try {
-      const format = this.#options.format.value;
-      const fileName = withExtension(this.#options.fileName.value, format, this.#options.baseName());
+      reportProgress("Checking detailed tiles");
+      await this.#options.prepareDetailedExport(reportProgress);
+      const fileName = withExtension(this.#options.baseName(), format);
       const provenance = this.#options.provenance();
       let output: Blob;
-      if (this.#kind === "data") {
+      if (kind === "data") {
+        reportProgress("Building data export");
         const context = this.#options.numericContext();
-        const tiles = this.#options.renderer.exportTileViews();
+        const tiles = this.#options.renderer.exportTileViews(true);
         if (!context || tiles.length === 0) throw new Error("No rendered plot data is available to export yet.");
         output = createNumericExport(tiles, context, provenance, format as DataExportFormat);
       } else {
-        await this.#options.renderer.present();
+        reportProgress("Rendering image");
         const plot = await this.#options.renderer.exportPng(2);
         const scene = await createCompositeExportScene(
           this.#options.shell,
@@ -105,26 +130,33 @@ export class ExportController {
         output = await renderCompositeExport(scene, format as ImageExportFormat);
         if (format === "png") output = await embedPngProvenance(output, provenance);
       }
-      downloadBlob(output, fileName);
-      this.#options.dialog.close();
+      reportProgress("Saving file", 1);
+      if (handle) {
+        const writable = await handle.createWritable();
+        await writable.write(output);
+        await writable.close();
+      } else {
+        downloadBlob(output, fileName);
+      }
     } catch (error: unknown) {
       this.#options.onError(error instanceof Error ? error.message : String(error));
     } finally {
-      this.#options.confirm.disabled = false;
+      if (this.#options.progressDialog.open) this.#options.progressDialog.close();
       button.disabled = !this.#options.canExport();
     }
   }
-
-  #updateExtension(): void {
-    this.#options.fileName.value = withExtension(
-      this.#options.fileName.value,
-      this.#options.format.value,
-      this.#options.baseName(),
-    );
-  }
 }
 
-function withExtension(value: string, extension: string, fallback: string): string {
-  const trimmed = value.trim().replace(/\.(bedpe|csv|png|svg|pdf)$/i, "") || fallback;
+export function formatFromFileName(
+  fileName: string,
+  allowed: readonly string[],
+  fallback: string,
+): string {
+  const extension = /\.([a-z0-9]+)$/i.exec(fileName)?.[1]?.toLowerCase();
+  return extension && allowed.includes(extension) ? extension : fallback;
+}
+
+function withExtension(value: string, extension: string): string {
+  const trimmed = value.trim().replace(/\.(bedpe|csv|png|svg|pdf)$/i, "") || "moddotplot";
   return `${trimmed}.${extension}`;
 }

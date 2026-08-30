@@ -1,6 +1,13 @@
 import { formatAxisCoordinate } from "./format";
 import type { AxisExportGeometry, AxisExportRange } from "./axes";
 import type { ExportProvenance } from "./export";
+import {
+  HEATMAP_PALETTES,
+  heatmapPalettePosition,
+  linearRangePosition,
+  type HeatmapPalette,
+  type HeatmapRange,
+} from "./heatmap";
 
 export type ImageExportFormat = "png" | "svg" | "pdf";
 
@@ -22,7 +29,7 @@ interface SceneLine {
   width: number;
 }
 
-interface SceneText {
+export interface SceneText {
   x: number;
   y: number;
   value: string;
@@ -53,11 +60,13 @@ export async function createCompositeExportScene(
 ): Promise<CompositeExportScene> {
   const shellBounds = shell.getBoundingClientRect();
   const plotBounds = relativeBounds(plotFrame, shellBounds);
+  const legend = exportLegend(provenance);
+  const legendMargin = legend ? 120 : 0;
   const scene: CompositeExportScene = {
-    width: Math.max(1, Math.round(shellBounds.width)),
+    width: Math.max(1, Math.round(shellBounds.width + legendMargin)),
     height: Math.max(1, Math.round(shellBounds.height)),
     plot: { ...plotBounds, png: plotPng, dataUrl: await blobDataUrl(plotPng) },
-    rects: [{ x: 0, y: 0, width: shellBounds.width, height: shellBounds.height, fill: "#f8f7f2" }],
+    rects: [{ x: 0, y: 0, width: shellBounds.width + legendMargin, height: shellBounds.height, fill: "#f8f7f2" }],
     lines: [],
     texts: [],
     provenance,
@@ -71,7 +80,199 @@ export async function createCompositeExportScene(
   for (const panel of shell.querySelectorAll<HTMLElement>(".feature-track-panel:not([hidden])")) {
     addTrack(scene, panel, shellBounds);
   }
+  if (legend) addHeatmapLegend(scene, shellBounds.width, plotBounds, legend);
   return scene;
+}
+
+interface HeatmapExportLegend {
+  kind: "heatmap";
+  palette: HeatmapPalette;
+  range: HeatmapRange;
+}
+
+interface ExactBaseExportLegend {
+  kind: "exact-bases";
+}
+
+interface DirectionExportLegend {
+  kind: "direction";
+  range: HeatmapRange;
+  background: string;
+}
+
+type ExportLegend = HeatmapExportLegend | ExactBaseExportLegend | DirectionExportLegend;
+
+function exportLegend(provenance: ExportProvenance): ExportLegend | null {
+  const display = provenance.display as {
+    measurement?: string;
+    colorMode?: string;
+    background?: string;
+    palette?: string;
+    heatmapRange?: Partial<HeatmapRange>;
+  } | null;
+  if (display?.measurement === "kmer" && display.colorMode !== "direction") {
+    return { kind: "exact-bases" };
+  }
+  if (!display || !display.palette || !(display.palette in HEATMAP_PALETTES)) return null;
+  const range = display.heatmapRange;
+  if (
+    typeof range?.minimum !== "number"
+    || typeof range.midpoint !== "number"
+    || typeof range.maximum !== "number"
+  ) return null;
+  if (display.colorMode === "direction") {
+    return {
+      kind: "direction",
+      range: range as HeatmapRange,
+      background: display.background === "black" ? "#050506" : "#f8f7f2",
+    };
+  }
+  return { kind: "heatmap", palette: display.palette as HeatmapPalette, range: range as HeatmapRange };
+}
+
+function addHeatmapLegend(
+  scene: CompositeExportScene,
+  contentWidth: number,
+  plotBounds: SceneRect,
+  legend: ExportLegend,
+): void {
+  const barX = contentWidth + 24;
+  if (legend.kind === "exact-bases") {
+    addExactBaseLegend(scene, barX, Math.max(42, plotBounds.y));
+    return;
+  }
+  if (legend.kind === "direction") {
+    addDirectionLegend(scene, barX, Math.max(42, plotBounds.y), legend);
+    return;
+  }
+  const barWidth = 18;
+  const barTop = Math.max(42, plotBounds.y);
+  const availableHeight = Math.max(80, scene.height - barTop - 42);
+  const barHeight = Math.min(240, availableHeight);
+  const steps = 80;
+  for (let index = 0; index < steps; index += 1) {
+    const identity = legend.range.maximum
+      - index / Math.max(1, steps - 1) * (legend.range.maximum - legend.range.minimum);
+    const position = heatmapPalettePosition(identity, legend.range);
+    const y = barTop + index * barHeight / steps;
+    scene.rects.push({
+      x: barX,
+      y,
+      width: barWidth,
+      height: barHeight / steps + 0.25,
+      fill: interpolatedPaletteColor(legend.palette, position),
+    });
+  }
+  scene.lines.push(...borderLines({ x: barX, y: barTop, width: barWidth, height: barHeight }));
+  scene.texts.push({
+    x: barX,
+    y: barTop - 17,
+    value: "ANI_c",
+    fill: "#242227",
+    size: 11,
+    weight: "bold",
+  });
+  const ticks = evenlySpacedLegendTicks(legend.range);
+  for (const value of uniqueValues(ticks)) {
+    const y = barTop + (1 - linearRangePosition(value, legend.range)) * barHeight;
+    scene.lines.push({ x1: barX + barWidth, y1: y, x2: barX + barWidth + 5, y2: y, stroke: "#454149", width: 1 });
+    scene.texts.push({
+      x: barX + barWidth + 9,
+      y,
+      value: `${value.toFixed(1)}%`,
+      fill: "#454149",
+      size: 10,
+    });
+  }
+}
+
+function addDirectionLegend(
+  scene: CompositeExportScene,
+  x: number,
+  y: number,
+  legend: DirectionExportLegend,
+): void {
+  scene.texts.push({ x, y: y - 17, value: "Orientation", fill: "#242227", size: 11, weight: "bold" });
+  const directions = [
+    ["Forward", "#0e749f"],
+    ["Reverse", "#cb3959"],
+    ["Neutral", "#78737a"],
+  ] as const;
+  directions.forEach(([label, fill], index) => {
+    const top = y + index * 24;
+    scene.rects.push({ x, y: top, width: 16, height: 15, fill });
+    scene.lines.push(...borderLines({ x, y: top, width: 16, height: 15 }));
+    scene.texts.push({ x: x + 23, y: top + 7.5, value: label, fill: "#454149", size: 9 });
+  });
+  const barTop = y + 94;
+  const barHeight = 120;
+  const barWidth = 18;
+  scene.texts.push({ x, y: barTop - 14, value: "ANI_c", fill: "#242227", size: 10, weight: "bold" });
+  for (let index = 0; index < 50; index += 1) {
+    const identity = legend.range.maximum
+      - index / 49 * (legend.range.maximum - legend.range.minimum);
+    const position = heatmapPalettePosition(identity, legend.range);
+    scene.rects.push({
+      x,
+      y: barTop + index * barHeight / 50,
+      width: barWidth,
+      height: barHeight / 50 + 0.25,
+      fill: interpolateHex(legend.background, "#78737a", position),
+    });
+  }
+  scene.lines.push(...borderLines({ x, y: barTop, width: barWidth, height: barHeight }));
+  const ticks = evenlySpacedLegendTicks(legend.range);
+  for (const value of uniqueValues(ticks)) {
+    const tickY = barTop + (1 - linearRangePosition(value, legend.range)) * barHeight;
+    scene.lines.push({ x1: x + barWidth, y1: tickY, x2: x + barWidth + 5, y2: tickY, stroke: "#454149", width: 1 });
+    scene.texts.push({ x: x + barWidth + 8, y: tickY, value: `${value.toFixed(1)}%`, fill: "#454149", size: 9 });
+  }
+}
+
+export function evenlySpacedLegendTicks(range: HeatmapRange): number[] {
+  const span = range.maximum - range.minimum;
+  return Array.from({ length: 6 }, (_, index) => range.maximum - span * index / 5);
+}
+
+function uniqueValues(values: readonly number[]): number[] {
+  return values.filter((value, index) => values.findIndex((candidate) => Math.abs(candidate - value) < 0.0001) === index);
+}
+
+function addExactBaseLegend(scene: CompositeExportScene, x: number, y: number): void {
+  scene.texts.push({ x, y: y - 17, value: "Exact base", fill: "#242227", size: 11, weight: "bold" });
+  const bases = [
+    ["A", "#33ad3d"],
+    ["C", "#1f73e0"],
+    ["G", "#f5a31f"],
+    ["T", "#e03330"],
+  ] as const;
+  bases.forEach(([label, fill], index) => {
+    const top = y + index * 25;
+    scene.rects.push({ x, y: top, width: 16, height: 16, fill });
+    scene.lines.push(...borderLines({ x, y: top, width: 16, height: 16 }));
+    scene.texts.push({ x: x + 25, y: top + 8, value: label, fill: "#454149", size: 10 });
+  });
+}
+
+function interpolatedPaletteColor(palette: HeatmapPalette, position: number): string {
+  const colors = HEATMAP_PALETTES[palette].colors;
+  const scaled = Math.max(0, Math.min(1, position)) * (colors.length - 1);
+  const lower = Math.min(colors.length - 1, Math.floor(scaled));
+  const upper = Math.min(colors.length - 1, lower + 1);
+  const fraction = scaled - lower;
+  return interpolateHex(colors[lower]!, colors[upper]!, fraction);
+}
+
+function interpolateHex(lowColor: string, highColor: string, fraction: number): string {
+  const low = hexBytes(lowColor);
+  const high = hexBytes(highColor);
+  const channels = low.map((value, index) => Math.round(value + (high[index]! - value) * fraction));
+  return `#${channels.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hexBytes(color: string): [number, number, number] {
+  const value = Number.parseInt(color.slice(1), 16);
+  return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
 }
 
 export async function renderCompositeExport(
@@ -203,12 +404,12 @@ function canvasVectorRuns(canvas: HTMLCanvasElement, bounds: SceneRect): SceneRe
 function renderSvg(scene: CompositeExportScene): Blob {
   const parts = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${round(scene.width)}" height="${round(scene.height)}" viewBox="0 0 ${round(scene.width)} ${round(scene.height)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${round(scene.width)}" height="${round(scene.height)}" viewBox="0 0 ${round(scene.width)} ${round(scene.height)}">`,
     `<metadata>${escapeXml(JSON.stringify(scene.provenance))}</metadata>`,
   ];
   for (const rect of scene.rects) parts.push(`<rect x="${round(rect.x)}" y="${round(rect.y)}" width="${round(rect.width)}" height="${round(rect.height)}" fill="${rect.fill}"${rect.opacity === undefined ? "" : ` fill-opacity="${round(rect.opacity)}"`}/>`);
   const plot = scene.plot;
-  parts.push(`<image x="${round(plot.x)}" y="${round(plot.y)}" width="${round(plot.width)}" height="${round(plot.height)}" preserveAspectRatio="none" href="${plot.dataUrl}"/>`);
+  parts.push(`<image x="${round(plot.x)}" y="${round(plot.y)}" width="${round(plot.width)}" height="${round(plot.height)}" preserveAspectRatio="none" href="${plot.dataUrl}" xlink:href="${plot.dataUrl}"/>`);
   for (const line of scene.lines) parts.push(`<line x1="${round(line.x1)}" y1="${round(line.y1)}" x2="${round(line.x2)}" y2="${round(line.y2)}" stroke="${line.stroke}" stroke-width="${round(line.width)}"/>`);
   for (const item of scene.texts) {
     const transform = item.rotation ? ` transform="rotate(${item.rotation} ${round(item.x)} ${round(item.y)})"` : "";
@@ -308,14 +509,40 @@ function assemblePdf(objects: Uint8Array[]): Uint8Array {
 
 function pdfTextCommand(item: SceneText, pageHeight: number): string {
   const [r, g, b] = rgb(item.fill);
+  const placement = pdfTextPlacement(item, pageHeight);
+  return `${round(r)} ${round(g)} ${round(b)} rg BT /F1 ${round(item.size)} Tf ${round(placement.a)} ${round(placement.b)} ${round(placement.c)} ${round(placement.d)} ${round(placement.x)} ${round(placement.y)} Tm (${pdfEscape(item.value)}) Tj ET`;
+}
+
+export function pdfTextPlacement(item: SceneText, pageHeight: number): {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  x: number;
+  y: number;
+  anchorOffset: number;
+  baselineOffset: number;
+} {
   const estimatedWidth = item.value.length * item.size * 0.52;
-  const offset = item.anchor === "middle" ? estimatedWidth / 2 : item.anchor === "end" ? estimatedWidth : 0;
+  const anchorOffset = item.anchor === "middle" ? estimatedWidth / 2 : item.anchor === "end" ? estimatedWidth : 0;
+  const baselineOffset = item.size * 0.34;
   const angle = (item.rotation ?? 0) * Math.PI / 180;
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  const x = item.x - offset * cosine;
-  const y = pageHeight - item.y - offset * sine - item.size * 0.34;
-  return `${round(r)} ${round(g)} ${round(b)} rg BT /F1 ${round(item.size)} Tf ${round(cosine)} ${round(-sine)} ${round(sine)} ${round(cosine)} ${round(x)} ${round(y)} Tm (${pdfEscape(item.value)}) Tj ET`;
+  const a = Math.cos(angle);
+  const b = -Math.sin(angle);
+  const c = Math.sin(angle);
+  const d = Math.cos(angle);
+  const anchorX = item.x;
+  const anchorY = pageHeight - item.y;
+  return {
+    a,
+    b,
+    c,
+    d,
+    x: anchorX - anchorOffset * a - baselineOffset * c,
+    y: anchorY - anchorOffset * b - baselineOffset * d,
+    anchorOffset,
+    baselineOffset,
+  };
 }
 
 function drawRect(context: CanvasRenderingContext2D, rect: SceneRect): void {

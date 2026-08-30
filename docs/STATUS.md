@@ -44,9 +44,13 @@ by the named evidence; it does not imply broad research validation.
   before output allocation and return typed errors through the Wasm boundary.
 * Consuming Wasm tile channels with no redundant JavaScript `.slice()`.
 * WebGL2 context restoration and keyboard pan/zoom/reset.
-* Save As export of current-view renderer inputs as BEDPE by default or CSV, plus
-  complete-composition PNG/SVG/PDF. SVG/PDF retain vector axes, labels, and tracks and
-  embed only the heatmap as raster; all formats carry method/configuration provenance.
+* Native-save-picker export, with browser-download fallback, of nonzero detailed
+  current-view scientific values as BEDPE by default or compact nine-column CSV, plus complete-composition
+  PNG/SVG/PDF. SVG/PDF retain vector axes, labels, tracks, and an outside heatmap
+  legend and embed only the heatmap as raster; all formats carry method/configuration
+  provenance. A blocking progress dialog covers preparation through write completion,
+  complete detailed/exact cache coverage bypasses worker requests, and image pixels are
+  rendered offscreen without resizing the visible canvas.
 * Stackable GC% and CpG observed/expected axis tracks with incremental composition
   indexing, one unsmoothed bar per sampled display column or row, overscanned pan
   caches, immediate stale-track blanking, and value mouseovers.

@@ -1,7 +1,12 @@
 export interface SequenceMetadata {
   index: number;
+  /** FASTA identifier ending at the first header whitespace. */
   name: string;
+  description: string;
   length: number;
+  sourceFile: string;
+  /** Source-qualified, load-unique identifier used by selectors and filenames. */
+  selectionId: string;
 }
 
 export interface ComparisonParameters {
@@ -82,6 +87,7 @@ export type MainToWorkerMessage =
       resolution: number;
       mode: "sketch" | "kmer";
       tiles: TileCoordinate[];
+      forceDetailed?: boolean;
     }
   | { type: "clear"; generation: number };
 
@@ -112,6 +118,7 @@ export type WorkerToMainMessage =
       configurations: ScientificConfigMetadata[];
     }
   | { type: "preview-complete"; generation: number; requestId: number }
+  | { type: "export-ready"; generation: number; requestId: number }
   | {
       type: "feature-track-status";
       generation: number;

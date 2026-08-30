@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   addIdentitiesToHistogram,
   heatmapGradient,
+  heatmapPalettePosition,
   heatmapPaletteRgb,
   identityColorRgba,
+  linearRangePosition,
   normalizeHeatmapRange,
 } from "../src/heatmap";
 
@@ -43,6 +45,14 @@ describe("heatmap controls", () => {
     expect(gradient).toContain("#050506 25%");
     expect(gradient).toContain("#e85d39 60%");
     expect(gradient).toContain("#310e43 100%");
+  });
+
+  it("keeps the legend axis linear while matching the adjustable palette midpoint", () => {
+    const range = { minimum: 90.2, midpoint: 97.1, maximum: 100 };
+    expect(linearRangePosition(range.midpoint, range)).toBeCloseTo(0.7040816);
+    expect(heatmapPalettePosition(range.minimum, range)).toBe(0);
+    expect(heatmapPalettePosition(range.midpoint, range)).toBe(0.5);
+    expect(heatmapPalettePosition(range.maximum, range)).toBe(1);
   });
 
   it("matches the stable schema-1 similarity pixel golden", () => {

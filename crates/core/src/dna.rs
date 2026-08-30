@@ -126,6 +126,7 @@ impl SequenceIdentity {
 #[derive(Clone, Eq, PartialEq)]
 pub struct PackedSequence {
     name: String,
+    description: String,
     len: u64,
     bases: Vec<u8>,
     invalid: SparseBitVector,
@@ -137,6 +138,7 @@ impl Default for PackedSequence {
     fn default() -> Self {
         Self {
             name: String::new(),
+            description: String::new(),
             len: 0,
             bases: Vec::new(),
             invalid: SparseBitVector::default(),
@@ -151,16 +153,26 @@ impl fmt::Debug for PackedSequence {
         formatter
             .debug_struct("PackedSequence")
             .field("name", &self.name)
+            .field("description", &self.description)
             .field("len", &self.len)
             .finish_non_exhaustive()
     }
 }
 
 impl PackedSequence {
-    /// Creates an empty record with the supplied FASTA header.
+    /// Creates an empty record with the supplied sequence identifier.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Creates an empty record with separate FASTA identifier and description fields.
+    pub fn with_description(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
             ..Self::default()
         }
     }
@@ -174,9 +186,14 @@ impl PackedSequence {
         packed
     }
 
-    /// Returns the source FASTA header.
+    /// Returns the FASTA sequence identifier, ending at the first header whitespace.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the optional FASTA description following the identifier.
+    pub fn description(&self) -> &str {
+        &self.description
     }
 
     /// Returns the sequence length in bases.
@@ -333,6 +350,7 @@ impl PackedSequence {
     pub fn estimated_heap_bytes(&self) -> usize {
         self.name
             .capacity()
+            .saturating_add(self.description.capacity())
             .saturating_add(self.bases.capacity())
             .saturating_add(self.invalid.estimated_heap_bytes())
     }
@@ -340,6 +358,7 @@ impl PackedSequence {
     /// Releases geometric growth slack after a streamed FASTA record is complete.
     pub(crate) fn compact_storage(&mut self) {
         self.name.shrink_to_fit();
+        self.description.shrink_to_fit();
         self.bases.shrink_to_fit();
         self.invalid.shrink_to_fit();
     }
