@@ -7,6 +7,15 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+### Documentation
+
+* Amended the v0.1 review response and ADR 0004 for the final v0.2.0 memory budget,
+  feature-track support, browser-exposed modes, estimator-report schema, and completed
+  validation gates.
+* Extended generated documentation checks to derive memory budgets, annotation formats,
+  sparse-correction exposure, and validation columns from the maintained implementation
+  and release evidence.
+
 ## [0.2.0] - 2026-08-29
 
 ### Changed

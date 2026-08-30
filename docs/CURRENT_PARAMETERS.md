@@ -17,12 +17,15 @@
 | Detailed registers | 1024 |
 | Default preview config digest | `58e084b7190f4d93` |
 | Default detailed config digest | `bc5c5131ad1c9a20` |
-| High-sensitivity detailed config digest | `16ed6e4e3c2306c8` |
+| Validation-only sparse-correction config digest | `16ed6e4e3c2306c8` |
 | Initial overview cells per axis | 1000 |
-| Sparse exact cap when enabled | 2048 distinct hashes |
+| Validation-only sparse exact cap | 2048 distinct hashes |
 | Sparse policy ANI floor | 80% |
 | Sparse match-detection target | 99% |
 | Heatmap minimum / midpoint / maximum | 85% / 92% / 100% |
+| Browser sparse correction | Disabled; no browser control (`sparseCorrection: false`) |
+| Imported annotation formats | BED3–12, GFF3, and GTF; plain text, gzip, and BGZF |
+| Estimator validation schema | 26 columns, checked against release TSV |
 | Zoom-axis cache budget | 192 MiB |
 | Prepared-axis budget | 384 MiB |
 | Wasm session budget | 3072 MiB |

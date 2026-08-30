@@ -1,12 +1,17 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  currentDocumentationContract,
+  formatMib,
+} from "./current-documentation-contract.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const config = readFileSync(join(root, "crates/core/src/config.rs"), "utf8");
 const adaptive = readFileSync(join(root, "crates/core/src/adaptive.rs"), "utf8");
 const wasm = readFileSync(join(root, "crates/wasm/src/lib.rs"), "utf8");
 const html = readFileSync(join(root, "web/index.html"), "utf8");
+const documentationContract = currentDocumentationContract(root);
 
 function rustConstant(source, name) {
   const match = source.match(new RegExp(`pub const ${name}: [^=]+ = ([^;]+);`));
@@ -25,19 +30,6 @@ function inputValue(id) {
   const value = html.match(new RegExp(`<input id="${id}"[^>]*value="([^"]+)"`))?.[1];
   if (!value) throw new Error(`missing input value for ${id}`);
   return value;
-}
-
-function byteBudget(name) {
-  const expression = wasm.match(new RegExp(`const ${name}: usize = ([^;]+);`))?.[1];
-  if (!expression) throw new Error(`missing byte budget ${name}`);
-  return expression
-    .split("*")
-    .map((item) => Number(item.trim().replaceAll("_", "")))
-    .reduce((product, factor) => product * factor, 1);
-}
-
-function mib(bytes) {
-  return `${bytes / 1024 / 1024} MiB`;
 }
 
 function configDigest(registerCount, sparseCoreCap) {
@@ -106,15 +98,18 @@ const lines = [
   `| Detailed registers | ${detailedRegisters} |`,
   `| Default preview config digest | \`${configDigest(previewRegisters, 0)}\` |`,
   `| Default detailed config digest | \`${configDigest(detailedRegisters, 0)}\` |`,
-  `| High-sensitivity detailed config digest | \`${configDigest(detailedRegisters, sparseCap)}\` |`,
+  `| Validation-only sparse-correction config digest | \`${configDigest(detailedRegisters, sparseCap)}\` |`,
   `| Initial overview cells per axis | ${selectedOption("resolution")} |`,
-  `| Sparse exact cap when enabled | ${sparseCap} distinct hashes |`,
+  `| Validation-only sparse exact cap | ${sparseCap} distinct hashes |`,
   `| Sparse policy ANI floor | ${Number(rustConstant(adaptive, "DEFAULT_ANI_FLOOR")) * 100}% |`,
   `| Sparse match-detection target | ${Number(rustConstant(adaptive, "DEFAULT_MATCH_DETECTION_PROBABILITY")) * 100}% |`,
   `| Heatmap minimum / midpoint / maximum | ${inputValue("heatmap-min")}% / ${inputValue("heatmap-mid")}% / ${inputValue("heatmap-max")}% |`,
-  `| Zoom-axis cache budget | ${mib(byteBudget("MAX_CACHED_AXIS_BYTES"))} |`,
-  `| Prepared-axis budget | ${mib(byteBudget("MAX_PREPARED_AXIS_BYTES"))} |`,
-  `| Wasm session budget | ${mib(byteBudget("MAX_WASM_SESSION_BYTES"))} |`,
+  `| Browser sparse correction | ${documentationContract.browserSparseCorrectionSummary} |`,
+  `| Imported annotation formats | ${documentationContract.importedAnnotationSummary} |`,
+  `| Estimator validation schema | ${documentationContract.validationColumns.length} columns, checked against release TSV |`,
+  `| Zoom-axis cache budget | ${formatMib(documentationContract.budgets.zoomAxisBytes)} |`,
+  `| Prepared-axis budget | ${formatMib(documentationContract.budgets.preparedAxisBytes)} |`,
+  `| Wasm session budget | ${formatMib(documentationContract.budgets.wasmSessionBytes)} |`,
   `| Maximum tile edge | ${wasm.match(/const MAX_TILE_EDGE: usize = ([^;]+);/)?.[1] ?? "unknown"} cells |`,
   "",
   "Exact terminal mode, user-selected alternatives, and per-tile configuration digests are described in the scientific specification.",
