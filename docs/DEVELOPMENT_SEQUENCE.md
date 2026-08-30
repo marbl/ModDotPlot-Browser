@@ -125,7 +125,7 @@ v0.2.1 source archive, default global-symbol inspection excludes every rejected 
 both default and validation-feature Rust suites pass, and all browser and scale gates
 pass. Evidence is in [the v0.3.0 validation record](releases/v0.3.0/VALIDATION.md).
 
-## Cycle 3: v0.4.0 orchestration and operational scaling
+## Completed checkpoint: v0.4.0
 
 Goal: replace convention-based browser state and distributed memory limits with
 explicit job and resource ownership.
@@ -157,6 +157,16 @@ Acceptance:
 * The supported million-record annotation case meets the declared interaction budget.
 * Representative haploid and diploid human inputs pass browser memory/navigation
   traces; one-billion-base claims remain conditional on sharding evidence.
+
+Completed on 2026-08-30. Worker state is owned by independently cancellable dataset,
+comparison, and feature jobs; current-job identity guards every publication. A unified
+resource model chooses a declared fallback before over-budget work, sequence ingestion
+and progressive axis construction are sharded, and annotation parsing cancels at
+bounded yield points. The million-record annotation case remained below the retained
+and transient limits, so compact graph conversion was not justified. OPFS remains
+disabled because in-memory sharding is adequate for the supported envelope; robust
+one-billion-base operation on ordinary laptops remains conditional. Evidence is in
+[the v0.4.0 validation record](releases/v0.4.0/VALIDATION.md).
 
 ## Cycle 4: v0.5.0 scheduler and scientific validation
 

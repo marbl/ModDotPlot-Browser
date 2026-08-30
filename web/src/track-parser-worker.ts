@@ -22,6 +22,7 @@ const workerScope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWork
 const DEFAULT_COLOR = "#171717";
 const OTHER_GENE_COLOR = "#45464a";
 const MAX_REPORTED_ISSUES = 24;
+const parserJobs = new Map<number, AbortController>();
 
 interface ParseState {
   fileName: string;
@@ -70,23 +71,38 @@ interface GeneRecord {
 
 workerScope.onmessage = (event: MessageEvent<TrackParserRequest>): void => {
   const request = event.data;
+  if (request.type === "cancel") {
+    for (const requestId of request.requestIds) {
+      parserJobs.get(requestId)?.abort("annotation import cancelled");
+      parserJobs.delete(requestId);
+    }
+    return;
+  }
+  const controller = new AbortController();
+  parserJobs.set(request.requestId, controller);
   const admissionError = annotationAdmissionError(request.file.size, 0);
   const operation = admissionError
     ? Promise.reject(new Error(admissionError))
-    : request.type === "parse" ? parseFile(request) : inspectFile(request);
+    : request.type === "parse"
+      ? parseFile(request, controller.signal)
+      : inspectFile(request, controller.signal);
   void operation.catch((error: unknown) => {
+    if (controller.signal.aborted) return;
     post({
       type: "error",
       requestId: request.requestId,
       message: error instanceof Error ? error.message : String(error),
       issues: [],
     });
-  });
+  }).finally(() => parserJobs.delete(request.requestId));
 };
 
-async function inspectFile(request: Extract<TrackParserRequest, { type: "inspect" }>): Promise<void> {
+async function inspectFile(
+  request: Extract<TrackParserRequest, { type: "inspect" }>,
+  signal: AbortSignal,
+): Promise<void> {
   const identifiers = new Set<string>();
-  await readLines(request.file, (line) => {
+  await readLines(request.file, signal, (line) => {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("track ") || trimmed.startsWith("browser ")) return;
     const identifier = line.split("\t", 1)[0]?.trim();
@@ -94,6 +110,7 @@ async function inspectFile(request: Extract<TrackParserRequest, { type: "inspect
   }, (progress) => {
     post({ type: "progress", requestId: request.requestId, progress, text: `Matching ${request.file.name}` });
   });
+  if (signal.aborted) return;
   const matches: Array<TrackSequenceCandidate & { identifier: string; matchKind: "exact" | "alias" }> = [];
   for (const candidate of request.candidates) {
     let best: { identifier: string; matchKind: "exact" | "alias" } | null = null;
@@ -113,8 +130,10 @@ async function inspectFile(request: Extract<TrackParserRequest, { type: "inspect
   });
 }
 
-async function parseFile(request: TrackParserRequest): Promise<void> {
-  if (request.type !== "parse") return;
+async function parseFile(
+  request: Extract<TrackParserRequest, { type: "parse" }>,
+  signal: AbortSignal,
+): Promise<void> {
   const state: ParseState = {
     fileName: request.file.name,
     format: inferFeatureFormat(request.file.name),
@@ -133,9 +152,10 @@ async function parseFile(request: TrackParserRequest): Promise<void> {
     genes: new Map(),
     otherGff: [],
   };
-  await readLines(request.file, (line) => parseLine(state, line), (progress) => {
+  await readLines(request.file, signal, (line) => parseLine(state, line), (progress) => {
     post({ type: "progress", requestId: request.requestId, progress, text: `Reading ${request.file.name}` });
   });
+  if (signal.aborted) return;
   const report = finish(state);
   if (report.validRecords === 0 || report.tracks.every((track) => track.features.length === 0)) {
     const seen = report.identifiers.length > 0 ? ` Found: ${report.identifiers.slice(0, 8).join(", ")}.` : "";
@@ -515,16 +535,18 @@ function stripExtension(name: string): string {
 
 async function readLines(
   file: File,
+  signal: AbortSignal,
   consume: (line: string) => void,
   progress: (fraction: number) => void,
 ): Promise<void> {
+  if (signal.aborted) return;
   const compressed = /\.(?:gz|bgz|bgzf)$/i.test(file.name);
   let bytesRead = 0;
   let lastPercentage = -1;
   const reportBytes = (): void => {
     const fraction = file.size > 0 ? Math.min(1, bytesRead / file.size) : 1;
     const percentage = Math.floor(fraction * 100);
-    if (percentage !== lastPercentage) {
+    if (!signal.aborted && percentage !== lastPercentage) {
       lastPercentage = percentage;
       progress(fraction);
     }
@@ -551,8 +573,13 @@ async function readLines(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let pending = "";
+  let chunksSinceYield = 0;
   try {
     while (true) {
+      if (signal.aborted) {
+        await reader.cancel(signal.reason);
+        return;
+      }
       const chunk = await reader.read();
       if (chunk.done) break;
       if (!compressed) {
@@ -563,12 +590,19 @@ async function readLines(
       const lines = pending.split(/\r?\n/);
       pending = lines.pop() ?? "";
       for (const line of lines) consume(line);
+      chunksSinceYield += 1;
+      if (chunksSinceYield >= 16) {
+        chunksSinceYield = 0;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
     }
   } catch (error: unknown) {
+    if (signal.aborted) return;
     if (!compressed) throw error;
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not decompress ${file.name} as gzip/BGZF: ${reason}`);
   }
+  if (signal.aborted) return;
   pending += decoder.decode();
   if (pending.length > 0) consume(pending);
   if (lastPercentage < 100) progress(1);

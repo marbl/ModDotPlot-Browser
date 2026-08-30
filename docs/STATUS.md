@@ -9,6 +9,9 @@ by the named evidence; it does not imply broad research validation.
 
 * Transactional, cancellable multi-file FASTA loading with generation filtering,
   annotation-file preflight rejection, and modal parse-error reporting.
+* Owned dataset, comparison, and feature jobs with immutable IDs, abort signals,
+  job-local configuration/cache state, randomized stale-publication tests, and
+  serialized Wasm mutation.
 * `U/u` to `T/t` normalization tested through direct packing, streaming FASTA,
   canonical k-mers, and the exact-containment oracle.
 * Independent X/Y sequence selection and initially exact short-sequence dispatch.
@@ -32,6 +35,9 @@ by the named evidence; it does not imply broad research validation.
   the non-default Rust `validation` feature and absent from default global symbols.
 * Frozen production axes, 3 GiB session admission, prepared-axis and zoom-cache
   budgets, logarithmic recency tracking, and coordinated renderer eviction.
+* A 4 GiB cross-layer plan accounts separately for Wasm, JavaScript tiles, GPU
+  textures, annotations, computed tracks, and transient publication. It reports
+  admission, eviction, downgrade, sharding, or rejection decisions and fallbacks.
 * Public sketch and exact tile builders validate ranges, dimensions, and compatibility
   before output allocation and return typed errors through the Wasm boundary.
 * Consuming Wasm tile channels with no redundant JavaScript `.slice()`.
@@ -123,15 +129,15 @@ are in the [v0.2.0-beta.1 validation record](releases/v0.2.0-beta.1/VALIDATION.m
    correlation. Do not interpret `ANI_c` as biological ANI; any biological comparison
    is limited to controlled point mutation without large indels.
 2. Add stable numeric and pixel goldens beyond the current behavioral browser suite.
-3. Implement sequence/sketch sharding and optional bounded disk spill before claiming
-   robust one-billion-base operation across ordinary laptops.
+3. Measure whether the new bounded sequence/axis sharding needs optional disk spill
+   before claiming robust one-billion-base operation across ordinary laptops.
 4. Add data and high-resolution image export with complete method provenance.
 
 Until gates 1–2 are complete, releases should remain labeled functional preview or
 beta, not research-validated.
 
-The staged work stops after each version for manual validation. v1.0.0 is not part of
-the current sequence because additional usability work is planned first.
+Every staged source and web build is retained for ordered manual validation. v1.0.0 is
+not part of the current sequence because additional usability work is planned first.
 
 ## Historical evidence
 

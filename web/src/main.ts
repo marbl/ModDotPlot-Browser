@@ -20,6 +20,12 @@ import {
 } from "./heatmap";
 import { ImportedTrackManager } from "./imported-track";
 import { DotplotRenderer, type HoverDatum, type ViewChange } from "./renderer";
+import {
+  decideResourceAdmission,
+  totalResourceBytes,
+  type ResourceClass,
+  type ResourceUsage,
+} from "./resource-plan";
 import type {
   ComparisonParameters,
   MainToWorkerMessage,
@@ -802,8 +808,32 @@ function setPlotLoading(loading: boolean): void {
 }
 
 function updateMemory(): void {
-  const total = wasmBytes + renderer.estimatedBytes() + featureTracks.estimatedBytes() + importedTracks.estimatedBytes();
+  const rendererBytes = renderer.estimatedByteBreakdown();
+  const usage: ResourceUsage = {
+    wasm: wasmBytes,
+    jsTiles: rendererBytes.jsTiles,
+    gpuTextures: rendererBytes.gpuTextures,
+    annotations: importedTracks.estimatedBytes(),
+    featureTracks: featureTracks.estimatedBytes(),
+    transientPublication: 0,
+  };
+  const total = totalResourceBytes(usage);
   memoryUsage.textContent = total > 0 ? `Memory ~${formatBytes(total)}` : "Memory —";
+  const resourceClasses: ResourceClass[] = [
+    "wasm",
+    "jsTiles",
+    "gpuTextures",
+    "annotations",
+    "featureTracks",
+    "transientPublication",
+  ];
+  const constrained = resourceClasses
+    .map((resource) => decideResourceAdmission(usage, resource, 0))
+    .find((decision) => decision.action !== "admit");
+  memoryUsage.dataset.resourceAction = constrained?.action ?? "admit";
+  memoryUsage.title = constrained
+    ? `${constrained.reason} ${constrained.fallback ?? ""}`.trim()
+    : "Current Wasm, JavaScript tile, GPU texture, annotation, and transient usage fits the declared plan.";
 }
 
 function clearSession(): void {

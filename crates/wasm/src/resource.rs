@@ -31,12 +31,15 @@ pub(super) fn estimated_frozen_axis_bytes(
     };
     #[cfg(not(feature = "validation"))]
     let sparse = 0;
-    resolution.saturating_mul(
-        one_signature
-            .saturating_mul(2)
-            .saturating_add(sparse)
-            .saturating_add(std::mem::size_of::<(u64, u64)>()),
-    )
+    resolution
+        .saturating_mul(
+            one_signature
+                .saturating_mul(2)
+                .saturating_add(sparse)
+                .saturating_add(std::mem::size_of::<(u64, u64)>()),
+        )
+        .saturating_add(std::mem::size_of::<super::FrozenAxis>())
+        .saturating_add(1_024)
 }
 
 pub(super) fn estimated_sequence_bytes(sequences: &[PackedSequence], capacity: usize) -> usize {

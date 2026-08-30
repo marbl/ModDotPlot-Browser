@@ -1324,6 +1324,29 @@ mod tests {
     }
 
     #[test]
+    fn predicted_axis_memory_bounds_observed_retained_bytes() {
+        let mut session = ComputeSession::new();
+        session
+            .sequences
+            .push(PackedSequence::from_ascii("memory", &vec![b'A'; 100_000]));
+        let config = BrowserScientificConfig {
+            inner: CoreScientificConfig::production(21, 1_024, 10, false).unwrap(),
+        };
+        session
+            .begin_prepare_scientific(0, 0, 128, &config, false)
+            .unwrap();
+        while session.prepare_comparison_chunk(32).unwrap() < 1.0 {}
+        let axis = &session.prepared_levels[&1_024].x;
+        let observed =
+            std::mem::size_of::<FrozenAxis>().saturating_add(axis.estimated_heap_bytes());
+        let predicted = estimated_frozen_axis_bytes(128, config.inner);
+        assert!(
+            observed <= predicted,
+            "observed {observed} bytes exceeded predicted {predicted} bytes"
+        );
+    }
+
+    #[test]
     fn zoom_cache_uses_exact_scientific_identity_and_rejects_key_drift() {
         let mut session = ComputeSession::new();
         session.sequences.push(PackedSequence::from_ascii(

@@ -150,6 +150,13 @@ export class ImportedTrackManager {
       track.row.remove();
     }
     this.#tracks.length = 0;
+    if (this.#worker && this.#pending.size > 0) {
+      const request: TrackParserRequest = {
+        type: "cancel",
+        requestIds: [...this.#pending.keys()],
+      };
+      this.#worker.postMessage(request);
+    }
     this.#pending.clear();
     this.#options.emptyMessage.hidden = false;
     this.#options.tooltip.hidden = true;

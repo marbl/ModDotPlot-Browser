@@ -7,7 +7,6 @@ import type {
   FeatureTrackRequest,
   MainToWorkerMessage,
   ScientificConfigMetadata,
-  SequenceMetadata,
   WorkerToMainMessage,
 } from "./protocol";
 import { transposeTile } from "./tile";
@@ -16,28 +15,26 @@ import {
   selectRefinementTiles,
   tileRefinementPriority,
 } from "./refinement";
+import {
+  ComparisonJob,
+  DatasetSession,
+  FeatureJob,
+  SerializedWorkerQueue,
+} from "./worker-jobs";
+import {
+  SEQUENCE_INGEST_SHARD_BYTES,
+  axisShardBins,
+  sequenceShardRanges,
+} from "./sharding";
 
 const context = self as DedicatedWorkerGlobalScope;
 let session: ComputeSession;
 let wasmMemory: WebAssembly.Memory;
-let activeGeneration = 0;
-let activeTileRequestId = -1;
-let activeFeatureTrackRequestId = -1;
-let activeParameters: ComparisonParameters | null = null;
-let loadedSequences: SequenceMetadata[] = [];
-const scientificConfigs = new Map<number, ScientificConfig>();
-const publishedTiles = new Set<string>();
-const refinementPriority = new Map<string, number>();
-let preparationToken = 0;
-let operationEpoch = 0;
-let executingEpoch = 0;
+let datasetJob = new DatasetSession(0);
+let comparisonJob: ComparisonJob | null = null;
+let featureJob: FeatureJob | null = null;
+const scheduler = new SerializedWorkerQueue();
 let messageQueue = Promise.resolve();
-let pendingPresentation: {
-  generation: number;
-  requestId: number;
-  resolve: () => void;
-} | null = null;
-const FASTA_INGEST_BATCH_BYTES = 4 * 1024 * 1024;
 
 const engineReady = init().then((wasm) => {
   wasmMemory = wasm.memory;
@@ -48,53 +45,70 @@ const engineReady = init().then((wasm) => {
 context.onmessage = (event: MessageEvent<MainToWorkerMessage>): void => {
   const message = event.data;
   if (message.type === "preview-presented") {
-    if (
-      pendingPresentation?.generation === message.generation
-      && pendingPresentation.requestId === message.requestId
-    ) {
-      releasePresentationWait();
+    if (comparisonJob?.canPublish(message.generation, message.requestId)) {
+      comparisonJob.releasePresentation();
     }
     return;
   }
   if (message.type === "cancel-tiles") {
-    operationEpoch += 1;
-    if (message.generation === activeGeneration) {
-      activeTileRequestId = message.requestId;
-      releasePresentationWait();
+    scheduler.invalidate();
+    if (message.generation === comparisonJob?.generation) {
+      comparisonJob.activeTileRequestId = message.requestId;
+      comparisonJob.releasePresentation();
     }
     return;
   }
   if (message.type === "evict-tiles") {
-    if (message.generation === activeGeneration) {
+    if (message.generation === comparisonJob?.generation) {
       for (const tile of message.tiles) forgetPublishedTile(tile.resolution, tile.x, tile.y);
     }
     return;
   }
   if (message.type === "cancel-feature-tracks") {
-    if (message.generation === activeGeneration) activeFeatureTrackRequestId = message.requestId;
+    if (message.generation === comparisonJob?.generation) {
+      featureJob?.cancel("feature tracks cancelled");
+      featureJob = new FeatureJob(message.generation, message.requestId);
+      featureJob.cancel("cancellation marker");
+    }
     return;
   }
   if (message.type === "request-feature-tracks") {
-    activeFeatureTrackRequestId = message.requestId;
-    const ticket = operationEpoch;
+    featureJob?.cancel("superseded feature request");
+    const job = new FeatureJob(message.generation, message.requestId);
+    featureJob = job;
     messageQueue = messageQueue.then(async () => {
-      if (ticket !== operationEpoch) return;
-      executingEpoch = ticket;
+      if (job.signal.aborted || featureJob !== job) return;
       await engineReady;
-      await computeFeatureTracks(message.generation, message.requestId, message.tracks);
+      await computeFeatureTracks(job, message.tracks);
     }).catch((error: unknown) => {
-      if (ticket !== operationEpoch || message.requestId !== activeFeatureTrackRequestId) return;
+      if (job.signal.aborted || featureJob !== job) return;
       const errorMessage = error instanceof Error ? error.message : String(error);
       post({ type: "error", message: errorMessage });
     });
     return;
   }
-  const ticket = ++operationEpoch;
+  if (message.type === "load" || message.type === "clear") {
+    datasetJob.cancel("dataset replaced");
+    comparisonJob?.cancel("dataset replaced");
+    comparisonJob = null;
+    featureJob?.cancel("dataset replaced");
+    featureJob = null;
+    datasetJob = new DatasetSession(message.generation);
+  } else if (message.type === "prepare") {
+    comparisonJob?.cancel("comparison replaced");
+    comparisonJob = new ComparisonJob(message.generation, message.requestId, message.parameters);
+    featureJob?.cancel("comparison replaced");
+    featureJob = null;
+  } else if (message.type === "request-tiles" && comparisonJob) {
+    comparisonJob.activeTileRequestId = message.requestId;
+    comparisonJob.releasePresentation();
+  }
+  const ticket = scheduler.invalidate();
   messageQueue = messageQueue.then(async () => {
-    executingEpoch = ticket;
+    scheduler.begin(ticket);
     await handleMessage(message);
   }).catch((error: unknown) => {
-    if (ticket !== operationEpoch) return;
+    if (ticket !== scheduler.ticket()) return;
     const errorMessage = error instanceof Error ? error.message : String(error);
     post({ type: "error", message: errorMessage });
   });
@@ -104,30 +118,17 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
   await engineReady;
   switch (message.type) {
     case "load":
-      activeGeneration = message.generation;
-      activeTileRequestId = -1;
-      activeFeatureTrackRequestId = -1;
-      activeParameters = null;
-      publishedTiles.clear();
-      refinementPriority.clear();
-      releasePresentationWait();
       await loadFiles(message.files, message.generation);
       break;
     case "prepare":
-      activeGeneration = message.generation;
-      activeTileRequestId = message.requestId;
-      activeParameters = message.parameters;
-      publishedTiles.clear();
-      refinementPriority.clear();
-      releasePresentationWait();
-      releaseScientificConfigs();
+      if (!comparisonJob?.canPublish(message.generation, message.requestId)) return;
       if (message.parameters.previewRegisterCount < message.parameters.detailedRegisterCount) {
-        scientificConfigs.set(
+        comparisonJob.configurations.set(
           message.parameters.previewRegisterCount,
           new ScientificConfig(message.parameters.k, message.parameters.previewRegisterCount, false),
         );
       }
-      scientificConfigs.set(
+      comparisonJob.configurations.set(
         message.parameters.detailedRegisterCount,
         new ScientificConfig(
           message.parameters.k,
@@ -148,46 +149,36 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     case "request-feature-tracks":
       break;
     case "request-tiles":
-      if (message.generation !== activeGeneration || !activeParameters) return;
-      activeTileRequestId = message.requestId;
+      if (!comparisonJob?.canPublish(message.generation, message.requestId)) return;
       await computeRequestedTiles(
         message.generation,
         message.requestId,
         message.resolution,
         message.mode,
         message.tiles,
-        activeParameters,
+        comparisonJob.parameters,
       );
       break;
     case "clear":
-      activeGeneration = message.generation;
-      activeTileRequestId = -1;
-      activeFeatureTrackRequestId = -1;
-      activeParameters = null;
-      loadedSequences = [];
-      publishedTiles.clear();
-      refinementPriority.clear();
-      releasePresentationWait();
-      releaseScientificConfigs();
       session.clear();
       break;
   }
 }
 
 async function computeFeatureTracks(
-  generation: number,
-  requestId: number,
+  job: FeatureJob,
   tracks: FeatureTrackRequest[],
 ): Promise<void> {
+  const { generation, requestId } = job;
   if (!isCurrentFeatureTrackRequest(generation, requestId) || tracks.length === 0) return;
   const sequenceIndexes = [...new Set(tracks.map((track) => track.sequenceIndex))];
   const totalBases = Math.max(1, sequenceIndexes.reduce((total, sequenceIndex) =>
-    total + (loadedSequences.find((sequence) => sequence.index === sequenceIndex)?.length ?? 0), 0));
+    total + (datasetJob.sequences.find((sequence) => sequence.index === sequenceIndex)?.length ?? 0), 0));
   let completedBases = 0;
 
   for (const sequenceIndex of sequenceIndexes) {
     if (!isCurrentFeatureTrackRequest(generation, requestId)) return;
-    const metadata = loadedSequences.find((sequence) => sequence.index === sequenceIndex);
+    const metadata = datasetJob.sequences.find((sequence) => sequence.index === sequenceIndex);
     if (!metadata) throw new Error("A selected feature-track sequence is no longer loaded.");
     let ready = session.begin_composition_index(sequenceIndex);
     let progress = ready ? 1 : 0;
@@ -314,12 +305,21 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
         if (!compressedFile) {
           reportProgress(file, fileBytes);
         }
-        if (batchBytes === 0 && result.value.byteLength >= FASTA_INGEST_BATCH_BYTES) {
-          staging.push_fasta_chunk(result.value);
-        } else {
+        if (batchBytes + result.value.byteLength <= SEQUENCE_INGEST_SHARD_BYTES) {
           batchChunks.push(result.value);
           batchBytes += result.value.byteLength;
-          if (batchBytes >= FASTA_INGEST_BATCH_BYTES) flushBatch();
+          if (batchBytes >= SEQUENCE_INGEST_SHARD_BYTES) flushBatch();
+        } else {
+          flushBatch();
+          for (const range of sequenceShardRanges(result.value.byteLength)) {
+            const shard = result.value.subarray(range.start, range.end);
+            if (shard.byteLength === SEQUENCE_INGEST_SHARD_BYTES) {
+              staging.push_fasta_chunk(shard);
+            } else {
+              batchChunks.push(shard);
+              batchBytes += shard.byteLength;
+            }
+          }
         }
       }
       flushBatch();
@@ -335,8 +335,8 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
     }));
     session.free();
     session = staging;
-    loadedSequences = committed;
-    post({ type: "sequences", generation, sequences: loadedSequences });
+    datasetJob.sequences = committed;
+    post({ type: "sequences", generation, sequences: datasetJob.sequences });
     post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
     return;
   } finally {
@@ -351,11 +351,11 @@ async function prepareComparison(
 ): Promise<void> {
   const started = performance.now();
   const domainLength = Math.max(
-    loadedSequences.find((sequence) => sequence.index === parameters.xIndex)?.length ?? 0,
-    loadedSequences.find((sequence) => sequence.index === parameters.yIndex)?.length ?? 0,
+    datasetJob.sequences.find((sequence) => sequence.index === parameters.xIndex)?.length ?? 0,
+    datasetJob.sequences.find((sequence) => sequence.index === parameters.yIndex)?.length ?? 0,
   );
   if (parameters.resolution === domainLength) {
-    releaseScientificConfigs();
+    releaseScientificConfigurations(requireComparisonJob());
     session.select_exact_comparison(parameters.xIndex, parameters.yIndex, parameters.k);
     post({
       type: "comparison-ready",
@@ -400,7 +400,7 @@ async function prepareComparison(
     type: "comparison-ready",
     generation,
     parameters,
-    configurations: [...scientificConfigs.values()].map(configMetadata),
+    configurations: [...requireComparisonJob().configurations.values()].map(configMetadata),
   });
   await computeLevel(
     generation,
@@ -477,14 +477,13 @@ async function prepareOverviewLevel(
       Uint32Array.from(progressiveTileFilter.flatMap((tile) => [tile.x, tile.y])),
     );
   }
-  const token = ++preparationToken;
+  const job = requireComparisonJob();
+  const token = ++job.preparationToken;
   let progress = 0;
-  const chunkBins = progressive
-    ? 256
-    : Math.max(16, Math.min(64, Math.ceil(parameters.resolution / 16)));
+  const chunkBins = axisShardBins(parameters.resolution, progressive);
   while (progress < 1) {
     if (!isCurrentTileRequest(generation, requestId)) {
-      if (token === preparationToken) session.cancel_preparation();
+      if (token === job.preparationToken) session.cancel_preparation();
       return false;
     }
     progress = session.prepare_comparison_chunk(chunkBins);
@@ -550,7 +549,7 @@ async function computeLevel(
   for (const { x, y } of coordinates) {
       if (!isCurrentTileRequest(generation, requestId)) return;
       const key = `${parameters.resolution}:${x}:${y}:${quality}`;
-      if (publishedTiles.has(key)) {
+      if (requireComparisonJob().publishedTiles.has(key)) {
         completed += 1;
         continue;
       }
@@ -678,7 +677,7 @@ async function computeExactRequestedTiles(
   for (const coordinate of tiles) {
     if (!isCurrentTileRequest(generation, requestId)) return;
     const key = `${resolution}:${coordinate.x}:${coordinate.y}:exact`;
-    if (!publishedTiles.has(key)) {
+    if (!requireComparisonJob().publishedTiles.has(key)) {
       const tile = session.compute_kmer_tile(
         BigInt(coordinate.x),
         BigInt(coordinate.y),
@@ -716,7 +715,7 @@ async function computeExactRequestedTiles(
         },
         [identity.buffer, direction.buffer, directionSupport.buffer, xBases.buffer],
       );
-      publishedTiles.add(key);
+      requireComparisonJob().publishedTiles.add(key);
       if (mirror) {
         context.postMessage(
           {
@@ -741,7 +740,7 @@ async function computeExactRequestedTiles(
             yBases!.buffer,
           ],
         );
-        publishedTiles.add(`${resolution}:${coordinate.y}:${coordinate.x}:exact`);
+        requireComparisonJob().publishedTiles.add(`${resolution}:${coordinate.y}:${coordinate.x}:exact`);
       }
     }
     completed += 1;
@@ -774,7 +773,7 @@ async function computeRequestedLevel(
   for (const coordinate of prioritizedTiles) {
     if (!isCurrentTileRequest(generation, requestId)) return;
     const key = `${resolution}:${coordinate.x}:${coordinate.y}:${quality}`;
-    if (!publishedTiles.has(key)) {
+    if (!requireComparisonJob().publishedTiles.has(key)) {
       const tile = resolution === parametersResolution()
         ? session.compute_tile_scientific(
             coordinate.x,
@@ -830,7 +829,10 @@ function rememberRefinementPriority(
   identity: Uint16Array,
   support: Uint16Array,
 ): void {
-  refinementPriority.set(refinementKey(resolution, x, y), tileRefinementPriority(identity, support));
+  requireComparisonJob().refinementPriority.set(
+    refinementKey(resolution, x, y),
+    tileRefinementPriority(identity, support),
+  );
 }
 
 function prioritizeForRefinement<T extends { x: number; y: number }>(
@@ -842,8 +844,8 @@ function prioritizeForRefinement<T extends { x: number; y: number }>(
   return selectRefinementTiles(
     resolution,
     tiles,
-    refinementPriority,
-    activeParameters?.sparseCorrection ?? false,
+    requireComparisonJob().refinementPriority,
+    requireComparisonJob().parameters.sparseCorrection,
   );
 }
 
@@ -854,8 +856,8 @@ function hasDetailedCandidates<T extends { x: number; y: number }>(
   return selectRefinementTiles(
     resolution,
     tiles,
-    refinementPriority,
-    activeParameters?.sparseCorrection ?? false,
+    requireComparisonJob().refinementPriority,
+    requireComparisonJob().parameters.sparseCorrection,
   ).length > 0;
 }
 
@@ -896,7 +898,7 @@ function publishSketchTile(
     },
     [identity.buffer, direction.buffer, directionSupport.buffer],
   );
-  publishedTiles.add(`${resolution}:${x}:${y}:${quality}`);
+  requireComparisonJob().publishedTiles.add(`${resolution}:${x}:${y}:${quality}`);
   if (mirror) {
     context.postMessage(
       {
@@ -915,13 +917,12 @@ function publishSketchTile(
       },
       [mirror.identity.buffer, mirror.direction.buffer, mirror.directionSupport.buffer],
     );
-    publishedTiles.add(`${resolution}:${y}:${x}:${quality}`);
+    requireComparisonJob().publishedTiles.add(`${resolution}:${y}:${x}:${quality}`);
   }
 }
 
 function parametersResolution(): number {
-  if (!activeParameters) throw new Error("No active comparison parameters");
-  return activeParameters.resolution;
+  return requireComparisonJob().parameters.resolution;
 }
 
 function allTileCoordinates(
@@ -938,7 +939,7 @@ function allTileCoordinates(
 }
 
 function requireScientificConfig(registerCount: number): ScientificConfig {
-  const config = scientificConfigs.get(registerCount);
+  const config = requireComparisonJob().configurations.get(registerCount);
   if (!config) throw new Error(`No scientific configuration for ${registerCount} registers.`);
   return config;
 }
@@ -963,15 +964,15 @@ function configMetadata(config: ScientificConfig): ScientificConfigMetadata {
   };
 }
 
-function releaseScientificConfigs(): void {
-  for (const config of scientificConfigs.values()) config.free();
-  scientificConfigs.clear();
+function releaseScientificConfigurations(job: ComparisonJob): void {
+  for (const config of job.configurations.values()) config.free();
+  job.configurations.clear();
 }
 
 function readBaseCodes(sequenceIndex: number, start: number, count: number): Uint8Array {
   const result = new Uint8Array(count);
   result.fill(4);
-  const metadata = loadedSequences.find((sequence) => sequence.index === sequenceIndex);
+  const metadata = datasetJob.sequences.find((sequence) => sequence.index === sequenceIndex);
   if (!metadata || start >= metadata.length) return result;
   const end = Math.min(metadata.length, start + count);
   const ascii = session.sequence_ascii(sequenceIndex, BigInt(start), BigInt(end));
@@ -990,22 +991,17 @@ function readBaseCodes(sequenceIndex: number, start: number, count: number): Uin
 }
 
 function waitForPreviewPresentation(generation: number, requestId: number): Promise<void> {
-  releasePresentationWait();
+  const job = requireComparisonJob();
+  job.releasePresentation();
   return new Promise((resolve) => {
-    pendingPresentation = { generation, requestId, resolve };
+    job.pendingPresentation = { resolve };
     post({ type: "preview-complete", generation, requestId });
   });
 }
 
-function releasePresentationWait(): void {
-  const pending = pendingPresentation;
-  pendingPresentation = null;
-  pending?.resolve();
-}
-
 function forgetPublishedTile(resolution: number, x: number, y: number): void {
   for (const quality of ["preview", "refined", "exact"] as const) {
-    publishedTiles.delete(`${resolution}:${x}:${y}:${quality}`);
+    comparisonJob?.publishedTiles.delete(`${resolution}:${x}:${y}:${quality}`);
   }
 }
 
@@ -1014,19 +1010,23 @@ function allocatedWorkerBytes(): number {
 }
 
 function isCurrentTileRequest(generation: number, requestId: number): boolean {
-  return operationIsCurrent()
-    && generation === activeGeneration
-    && requestId === activeTileRequestId;
+  return operationIsCurrent() && comparisonJob?.canPublish(generation, requestId) === true;
 }
 
 function isCurrentFeatureTrackRequest(generation: number, requestId: number): boolean {
-  return operationIsCurrent()
-    && generation === activeGeneration
-    && requestId === activeFeatureTrackRequestId;
+  return datasetJob.canServe()
+    && featureJob?.canPublish(generation, requestId) === true;
 }
 
 function operationIsCurrent(): boolean {
-  return executingEpoch === operationEpoch;
+  return scheduler.isCurrent() && !datasetJob.signal.aborted;
+}
+
+function requireComparisonJob(): ComparisonJob {
+  if (!comparisonJob || comparisonJob.signal.aborted) {
+    throw new Error("No active comparison job");
+  }
+  return comparisonJob;
 }
 
 function yieldToMessages(): Promise<void> {

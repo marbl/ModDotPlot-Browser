@@ -232,6 +232,13 @@ export class DotplotRenderer {
     return this.#cachedTileBytes;
   }
 
+  estimatedByteBreakdown(): { jsTiles: number; gpuTextures: number } {
+    return {
+      jsTiles: Math.ceil(this.#cachedTileBytes / 2),
+      gpuTextures: Math.floor(this.#cachedTileBytes / 2),
+    };
+  }
+
   resetView(): void {
     this.#activeResolution = this.#metadata.resolution;
     this.#view = initialViewport(this.#metadata.resolution, this.#view.minSize);

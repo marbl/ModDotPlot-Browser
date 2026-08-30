@@ -68,6 +68,7 @@ export interface TrackSequenceCandidate {
 }
 
 export type TrackParserRequest =
+  | { type: "cancel"; requestIds: number[] }
   | {
       type: "parse";
       requestId: number;

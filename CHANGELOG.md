@@ -7,6 +7,33 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-30
+
+### Changed
+
+* Replaced correlated compute-worker globals with owned dataset, comparison, and
+  feature jobs carrying immutable IDs, cancellation signals, and publication guards.
+* Added a complete 4 GiB browser resource plan spanning Wasm, JavaScript tiles, GPU
+  textures, annotations, sequence-derived tracks, and transient publication data.
+* Split FASTA ingestion into bounded 4 MiB shards and bounded progressive axis work;
+  OPFS spill remains disabled pending evidence that in-memory sharding is insufficient.
+* Made annotation-worker cancellation cooperative during streamed parsing and suppress
+  completion or error publication from cancelled imports.
+
+### Added
+
+* Added randomized stale-publication tests, synchronous cancellation limits,
+  generation-lifecycle coverage, cross-layer fallback tests, and representative
+  haploid/diploid human resource-envelope checks.
+* Added predicted-versus-observed retained-axis memory tests and exposed separate
+  renderer CPU-tile and GPU-texture estimates.
+
+### Validation
+
+* Retained the existing compact annotation graph after the one-million-record case
+  measured 176,000,000 retained bytes and 1.40 seconds including publication cloning,
+  both within the preregistered v0.4.0 envelope.
+
 ## [0.3.0] - 2026-08-30
 
 ### Changed

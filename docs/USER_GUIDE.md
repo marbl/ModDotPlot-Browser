@@ -34,6 +34,12 @@ packed records retained together must fit the 3 GiB Wasm session budget. Complet
 diploid human assemblies are retained eagerly so later axis changes never depend on the
 source file remaining unchanged.
 
+Sequence input is handed to Wasm in bounded 4 MiB shards. The memory indicator combines
+Wasm, JavaScript tile, GPU texture, annotation, computed-track, and publication
+estimates. If a layer exceeds its budget, the application reports the applicable
+eviction, lower-detail, sharding, or rejection fallback. Robust one-billion-base use on
+ordinary laptops remains conditional on further measurements.
+
 Upper- and lowercase `U` are accepted and normalized to `T`; they are indistinguishable
 after loading. IUPAC ambiguity and gap characters retain their coordinates but prevent
 every overlapping k-mer from contributing. Other sequence symbols are rejected.

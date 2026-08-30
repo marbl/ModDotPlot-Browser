@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   MAX_IMPORTED_ANNOTATION_BYTES,
   MAX_IMPORTED_ANNOTATION_RECORDS,
@@ -6,6 +6,7 @@ import {
   type TrackParserMessage,
   type TrackParserRequest,
 } from "../src/imported-track-types";
+import { decideResourceAdmission, type ResourceUsage } from "../src/resource-plan";
 
 const RUN_SCALE_TEST = (globalThis as typeof globalThis & {
   process?: { env?: Record<string, string | undefined> };
@@ -13,7 +14,43 @@ const RUN_SCALE_TEST = (globalThis as typeof globalThis & {
 const MAX_PARSE_AND_CLONE_MS = 10_000;
 const MAX_ESTIMATED_RETAINED_BYTES = 256 * 1024 * 1024;
 
+beforeEach(() => vi.resetModules());
 afterEach(() => vi.unstubAllGlobals());
+
+test("cancels annotation parsing before terminal publication", async () => {
+  const file = new File([
+    new Array(100_000).fill(0).map((_, index) => `chr1\t${index * 10}\t${index * 10 + 5}`).join("\n"),
+  ], "cancel.bed", { type: "text/plain" });
+  let workerOnMessage: ((event: MessageEvent<TrackParserRequest>) => void) | null = null;
+  let progressSeen = false;
+  let terminalSeen = false;
+  const worker = {
+    onmessage: null as ((event: MessageEvent<TrackParserRequest>) => void) | null,
+    postMessage(message: TrackParserMessage) {
+      if (message.type === "progress" && !progressSeen) {
+        progressSeen = true;
+        workerOnMessage?.({
+          data: { type: "cancel", requestIds: [7] },
+        } as MessageEvent<TrackParserRequest>);
+      }
+      if (message.type === "complete" || message.type === "error") terminalSeen = true;
+    },
+  };
+  vi.stubGlobal("self", worker);
+  await import("../src/track-parser-worker");
+  workerOnMessage = worker.onmessage;
+  workerOnMessage?.({
+    data: {
+      type: "parse",
+      requestId: 7,
+      file,
+      targetSequence: { index: 0, name: "chr1", length: 1_000_000 },
+    },
+  } as MessageEvent<TrackParserRequest>);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  expect(progressSeen).toBe(true);
+  expect(terminalSeen).toBe(false);
+});
 
 test.skipIf(!RUN_SCALE_TEST)(
   "parses and publishes a generated million-record BED within the release envelope",
@@ -71,6 +108,17 @@ test.skipIf(!RUN_SCALE_TEST)(
     expect(features).toHaveLength(MAX_IMPORTED_ANNOTATION_RECORDS);
     expect(result.parseAndCloneMs).toBeLessThanOrEqual(MAX_PARSE_AND_CLONE_MS);
     expect(estimatedRetainedBytes).toBeLessThanOrEqual(MAX_ESTIMATED_RETAINED_BYTES);
+    const emptyUsage: ResourceUsage = {
+      wasm: 0,
+      jsTiles: 0,
+      gpuTextures: 0,
+      annotations: 0,
+      featureTracks: 0,
+      transientPublication: 0,
+    };
+    expect(
+      decideResourceAdmission(emptyUsage, "transientPublication", estimatedRetainedBytes).action,
+    ).toBe("admit");
     console.log(JSON.stringify({
       records: result.report.validRecords,
       fileBytes: file.size,

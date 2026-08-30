@@ -86,10 +86,14 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   expect(unexpectedRequests).toEqual([]);
 });
 
-test("a newer load transaction wins and clear rejects stale publication", async ({ page }) => {
+test("a newer load transaction wins over compressed input and clear rejects stale publication", async ({ page }) => {
   await page.goto("/");
   const large = `>stale\n${"ACGT".repeat(300_000)}\n`;
-  await loadFasta(page, "stale.fa", large);
+  await page.locator("#file-input").setInputFiles({
+    name: "stale.fa.gz",
+    mimeType: "application/gzip",
+    buffer: gzipSync(Buffer.from(large)),
+  });
   await expect(page.locator("#plot-loading")).toBeVisible();
   await expect(page.locator("#plot-loading canvas.dna-loader")).toBeVisible();
   await loadFasta(page, "current.fa", ">current\nACGTACGTACGTACGTACGTACGT\n");

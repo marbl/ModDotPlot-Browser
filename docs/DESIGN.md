@@ -29,9 +29,9 @@ Required behavior:
 8. Prefer scientific correctness over throughput, then optimize within the validated
    estimator contract.
 
-No mobile support, session persistence, or data/image export is required in the
-current scope. Numeric tiles are deliberately renderer-independent so export can be
-added without changing the estimator.
+No mobile support or session persistence is required in the current scope. Numeric
+tiles are deliberately renderer-independent so the planned v0.5 export does not
+change the estimator.
 
 ## 2. System architecture
 
@@ -93,9 +93,11 @@ except short base-code spans needed for exact terminal coloring.
 
 ### Browser application
 
-The compute worker serializes state mutations and transfers owned typed arrays. The
-renderer retains CPU arrays for hover, context restoration, and cache fallback, plus
-one GPU texture per tile channel.
+The compute worker serializes state mutations and transfers owned typed arrays. Loaded
+datasets, comparisons, and feature-track requests have separate immutable job IDs,
+cancellation signals, configuration ownership, and publication guards. The renderer
+retains CPU arrays for hover, context restoration, and cache fallback, plus one GPU
+texture per tile channel.
 
 ## 3. Data representations
 
@@ -193,8 +195,10 @@ each matching k-mer across its complete footprint.
 
 ## 6. State and cancellation
 
-The compute worker uses a serialized promise queue plus monotonically increasing
-dataset generation, tile request id, and operation epoch.
+The compute worker uses a serialized promise queue plus owned `DatasetSession`,
+`ComparisonJob`, and `FeatureJob` lifetimes. A dataset can serve several later
+comparison generations, while each comparison and feature publication must match its
+own current immutable identity.
 
 ```text
 Empty → Loading(staging session) → Ready(committed dataset)
@@ -213,8 +217,8 @@ carries quality, resolution, coordinates, and configuration digest. The main thr
 rejects stale generations even if a browser delivers messages late.
 
 `preview-presented` and cancellation messages bypass queued heavy work so they can take
-effect at yield boundaries. Preparation and tile loops yield frequently enough for
-interactive cancellation.
+effect at yield boundaries. Preparation, tile, and annotation-stream loops yield at
+bounded shards. Cancelled jobs cannot publish terminal data.
 
 ## 7. Cache and memory policy
 
@@ -223,7 +227,12 @@ Memory admission happens before large allocations.
 * Wasm zoom-axis cache: 192 MiB.
 * Prepared frozen axes: 384 MiB.
 * Application-owned Wasm session budget: 3 GiB.
-* Renderer CPU/GPU tile cache: nominally 192 MiB, with visible/fallback protection.
+* JavaScript tile cache: 96 MiB.
+* GPU textures: 96 MiB.
+* Imported annotations: 512 MiB.
+* Computed feature tracks: 64 MiB.
+* Transient publication: 256 MiB.
+* Complete cross-layer plan: 4 GiB.
 
 The Wasm axis cache uses a recency map with logarithmic touch/eviction and tracks
 estimated heap bytes. Renderer tile keys include resolution, coordinates, quality, and
@@ -232,8 +241,11 @@ the worker so its published-tile bookkeeping cannot grow without bound. The curr
 overview plus tiles required to avoid a blank viewport are protected, so an unusually
 large active viewport can temporarily exceed the renderer's nominal cache budget.
 
+Before risky allocation, the applicable plan selects admission, cache eviction,
+quality downgrade, bounded sharding, or rejection with a user-facing fallback. OPFS
+spill is reserved but disabled until measurements justify its browser complexity.
 Reported memory includes packed sequences, retained Wasm structures, tile CPU arrays,
-and estimated textures. It excludes allocator metadata, temporary high-water peaks,
+estimated textures, annotations, and feature tracks. It excludes allocator metadata,
 browser internals, and driver overhead. Wasm linear memory can reuse freed regions but
 normally does not shrink; reloading the page resets the instance.
 
