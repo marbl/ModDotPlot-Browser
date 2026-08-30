@@ -2,9 +2,12 @@
 
 use moddotplot_core::{
     DEFAULT_B_BITS, ExactKmerSet, FrozenAxis, MatrixTile, PackedSequence, ScientificConfig,
-    SparseCorrectionPolicy, TileRequest, build_axis_overview, compute_frozen_tile,
-    compute_frozen_tile_adaptive, estimate_containment_bit_sliced, exact_moddotplot_score,
+    TileRequest, build_axis_overview, compute_frozen_tile, estimate_containment_bit_sliced,
+    exact_moddotplot_score,
 };
+#[cfg(feature = "validation")]
+use moddotplot_core::{SparseCorrectionPolicy, compute_frozen_tile_adaptive};
+#[cfg(feature = "validation")]
 use std::time::Instant;
 
 const K: u8 = 21;
@@ -132,6 +135,21 @@ fn browser_default_direction_sign_matches_controlled_orientation() {
 }
 
 #[test]
+fn schema_1_numeric_fixture_matches_v0_2_1_bytes() {
+    let left_bases = pseudo_random_sequence(48_000, 0x0210_0300);
+    let right_bases = mutate_at_rate(&left_bases, 0.07, 0x0210_0301);
+    let left = PackedSequence::from_ascii("schema-1-left", &left_bases);
+    let right = PackedSequence::from_ascii("schema-1-right", &right_bases);
+    for (registers, expected) in [
+        (256, 6_287_528_316_830_669_084_u64),
+        (1_024, 15_310_234_810_913_278_692_u64),
+    ] {
+        let tile = production_tile(&left, &right, RESOLUTION, registers).2;
+        assert_eq!(tile_digest(&tile), expected, "registers={registers}");
+    }
+}
+
+#[test]
 fn current_selective_composite_is_bounded_against_all_detailed_output() {
     const COMPOSITE_RESOLUTION: usize = 24;
     const CHARACTERIZATION_TILE_EDGE: usize = 8;
@@ -156,12 +174,13 @@ fn current_selective_composite_is_bounded_against_all_detailed_output() {
 
         // Keep the complete detailed axes live through the comparison so the test
         // exercises the same frozen production representation as the browser.
-        assert_eq!(left_detailed.resolution, COMPOSITE_RESOLUTION);
-        assert_eq!(right_detailed.resolution, COMPOSITE_RESOLUTION);
+        assert_eq!(left_detailed.resolution(), COMPOSITE_RESOLUTION);
+        assert_eq!(right_detailed.resolution(), COMPOSITE_RESOLUTION);
     }
 }
 
 #[test]
+#[cfg(feature = "validation")]
 #[ignore = "diagnostic for an explicit sparse-policy decision"]
 fn report_sparse_correction_effect_on_repeat_ani_c() {
     let periodic = (0..48_000)
@@ -192,9 +211,6 @@ fn report_sparse_correction_effect_on_repeat_ani_c() {
                 y_start: 0,
                 width: RESOLUTION,
                 height: RESOLUTION,
-                b_bits: config.b_bits(),
-                register_limit: config.register_count(),
-                k: config.k(),
             },
             SparseCorrectionPolicy {
                 ani_floor: config.ani_floor(),
@@ -223,6 +239,7 @@ fn report_sparse_correction_effect_on_repeat_ani_c() {
 }
 
 #[test]
+#[cfg(feature = "validation")]
 #[ignore = "explicit sparse-policy runtime benchmark"]
 fn report_sparse_correction_runtime_cost() {
     const LENGTH: usize = 2_000_000;
@@ -272,9 +289,6 @@ fn report_sparse_correction_runtime_cost() {
                         y_start: 0,
                         width: BENCHMARK_RESOLUTION,
                         height: BENCHMARK_RESOLUTION,
-                        b_bits: config.b_bits(),
-                        register_limit: config.register_count(),
-                        k: config.k(),
                     };
                     let started = Instant::now();
                     let tile = if sparse {
@@ -371,9 +385,6 @@ fn production_tile(
             y_start: 0,
             width: resolution,
             height: resolution,
-            b_bits: config.b_bits(),
-            register_limit: config.register_count(),
-            k: config.k(),
         },
     )
     .unwrap();
@@ -386,21 +397,22 @@ fn approximate_max_containment(
     column: usize,
     row: usize,
 ) -> Option<(f64, f64)> {
-    if left.core_encoded[column].observations() == 0 || right.core_encoded[row].observations() == 0
+    if left.core_encoded()[column].observations() == 0
+        || right.core_encoded()[row].observations() == 0
     {
         return None;
     }
-    let registers = left.core_encoded[column].register_count();
+    let registers = left.core_encoded()[column].register_count();
     let left_score = estimate_containment_bit_sliced(
-        &left.core_encoded[column],
-        &right.expanded_encoded[row],
+        &left.core_encoded()[column],
+        &right.expanded_encoded()[row],
         K,
         DEFAULT_B_BITS,
         registers,
     );
     let right_score = estimate_containment_bit_sliced(
-        &right.core_encoded[row],
-        &left.expanded_encoded[column],
+        &right.core_encoded()[row],
+        &left.expanded_encoded()[column],
         K,
         DEFAULT_B_BITS,
         registers,
@@ -594,6 +606,25 @@ fn percentile(values: &[f64], percentile: usize) -> f64 {
 
 fn count_as_f64(count: usize) -> f64 {
     f64::from(u32::try_from(count).expect("bounded validation count fits u32"))
+}
+
+fn tile_digest(tile: &MatrixTile) -> u64 {
+    let mut digest = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in tile
+        .identity
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .chain(tile.direction.iter().flat_map(|value| value.to_le_bytes()))
+        .chain(
+            tile.direction_support
+                .iter()
+                .flat_map(|value| value.to_le_bytes()),
+        )
+    {
+        digest ^= u64::from(byte);
+        digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    digest
 }
 
 fn boundary(index: usize, count: usize, domain: u64) -> u64 {

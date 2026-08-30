@@ -35,10 +35,7 @@ pub struct RegisterComparison {
 #[repr(u8)]
 pub enum OphJaccardEstimator {
     /// Legacy truncated-bit statistic with a constant collision correction.
-    #[deprecated(
-        since = "0.2.1",
-        note = "validation-only legacy estimator; scheduled for removal from the default API in v0.3.0"
-    )]
+    #[cfg(feature = "validation")]
     BbitCollisionCorrected = 1,
     /// Standard OPH matched-winner count divided by non-jointly-empty bins.
     VerifiedWinners = 2,
@@ -46,9 +43,9 @@ pub enum OphJaccardEstimator {
 
 impl OphJaccardEstimator {
     /// Stable identifier used in scientific provenance.
-    #[allow(deprecated)]
     pub const fn as_str(self) -> &'static str {
         match self {
+            #[cfg(feature = "validation")]
             Self::BbitCollisionCorrected => "bbit_collision_corrected",
             Self::VerifiedWinners => "verified_winners",
         }
@@ -186,12 +183,20 @@ impl BitSlicedSignature {
             comparison.ambiguous_matches += ambiguous.count_ones();
         }
 
-        comparison.jaccard = collision_corrected_jaccard(
-            comparison.bbit_matches,
-            comparison.verified_matches,
-            comparison.considered,
-            b,
-        );
+        #[cfg(feature = "validation")]
+        {
+            comparison.jaccard = collision_corrected_jaccard(
+                comparison.bbit_matches,
+                comparison.verified_matches,
+                comparison.considered,
+                b,
+            );
+        }
+        #[cfg(not(feature = "validation"))]
+        {
+            comparison.jaccard =
+                verified_winner_jaccard(comparison.verified_matches, comparison.considered);
+        }
         comparison
     }
 
@@ -325,10 +330,7 @@ impl OphSketch {
     /// Panics unless the requested count is a power-of-two divisor of the source
     /// register count and is at least two.
     #[must_use]
-    #[deprecated(
-        since = "0.2.1",
-        note = "validation-only fused-projection path; scheduled for removal from the default API in v0.3.0"
-    )]
+    #[cfg(feature = "validation")]
     pub fn project_registers(&self, register_count: usize) -> Self {
         assert!(register_count >= 2 && register_count.is_power_of_two());
         assert!(register_count <= self.registers.len());
@@ -436,12 +438,20 @@ impl OphSketch {
             }
         }
 
-        comparison.jaccard = collision_corrected_jaccard(
-            comparison.bbit_matches,
-            comparison.verified_matches,
-            comparison.considered,
-            b,
-        );
+        #[cfg(feature = "validation")]
+        {
+            comparison.jaccard = collision_corrected_jaccard(
+                comparison.bbit_matches,
+                comparison.verified_matches,
+                comparison.considered,
+                b,
+            );
+        }
+        #[cfg(not(feature = "validation"))]
+        {
+            comparison.jaccard =
+                verified_winner_jaccard(comparison.verified_matches, comparison.considered);
+        }
         comparison
     }
 
@@ -490,6 +500,7 @@ impl OphSketch {
     }
 }
 
+#[cfg(feature = "validation")]
 pub(crate) fn collision_corrected_jaccard(
     matches: u32,
     verified_matches: u32,
@@ -685,6 +696,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "validation")]
     fn projected_registers_match_direct_coarse_insertion() {
         let mut detailed = OphSketch::new(2_048, 10);
         let mut quick = OphSketch::new(256, 10);

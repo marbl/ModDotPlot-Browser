@@ -88,7 +88,7 @@ Completed work:
 
 Evidence is in [the v0.2.1 validation record](releases/v0.2.1/VALIDATION.md).
 
-## Cycle 2: v0.3.0 core contract and production-surface cleanup
+## Completed checkpoint: v0.3.0
 
 Goal: make invalid scientific composition unrepresentable and reduce the maintained
 production API. Default numeric output must remain byte-identical to v0.2.1.
@@ -119,6 +119,11 @@ Acceptance:
 * A default-artifact symbol audit finds no rejected estimator or projection kernel.
 * Extracted module dependencies are acyclic and ownership is clear.
 * Every v0.2.1 scientific, browser, build, annotation, and memory gate still passes.
+
+Completed on 2026-08-30. The exact channel digests match the independently executed
+v0.2.1 source archive, default global-symbol inspection excludes every rejected path,
+both default and validation-feature Rust suites pass, and all browser and scale gates
+pass. Evidence is in [the v0.3.0 validation record](releases/v0.3.0/VALIDATION.md).
 
 ## Cycle 3: v0.4.0 orchestration and operational scaling
 

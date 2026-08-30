@@ -107,13 +107,43 @@ impl SparseBitVector {
     }
 }
 
+/// Stable content identity for one packed biological sequence.
+///
+/// The identity covers the complete scientifically relevant base stream. Invalid
+/// IUPAC symbols share one token because every invalid symbol has the same k-mer
+/// exclusion semantics in the core.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SequenceIdentity([u8; 16]);
+
+impl SequenceIdentity {
+    /// Canonical identity bytes used in cache and provenance records.
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+}
+
 /// Compact sequence storage using two bits per base and sparse invalid-base bits.
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct PackedSequence {
     name: String,
     len: u64,
     bases: Vec<u8>,
     invalid: SparseBitVector,
+    identity_left: u64,
+    identity_right: u64,
+}
+
+impl Default for PackedSequence {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            len: 0,
+            bases: Vec::new(),
+            invalid: SparseBitVector::default(),
+            identity_left: 0xcbf2_9ce4_8422_2325,
+            identity_right: 0x6a09_e667_f3bc_c909,
+        }
+    }
 }
 
 impl fmt::Debug for PackedSequence {
@@ -154,6 +184,14 @@ impl PackedSequence {
         self.len
     }
 
+    /// Stable identity of the complete scientifically relevant base stream.
+    pub fn identity(&self) -> SequenceIdentity {
+        let mut bytes = [0_u8; 16];
+        bytes[..8].copy_from_slice(&self.identity_left.to_le_bytes());
+        bytes[8..].copy_from_slice(&self.identity_right.to_le_bytes());
+        SequenceIdentity(bytes)
+    }
+
     /// Returns true when the sequence contains no bases.
     pub fn is_empty(&self) -> bool {
         self.len == 0
@@ -181,7 +219,21 @@ impl PackedSequence {
         if !is_valid {
             self.invalid.insert(base_index);
         }
+        self.update_identity(code, is_valid);
         self.len += 1;
+    }
+
+    fn update_identity(&mut self, code: u8, is_valid: bool) {
+        let identity_token = code | (u8::from(is_valid) << 2);
+        self.identity_left ^= u64::from(identity_token);
+        self.identity_left = self.identity_left.wrapping_mul(0x0000_0100_0000_01b3);
+        self.identity_right ^= u64::from(identity_token)
+            .wrapping_add(self.len.rotate_left(17))
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        self.identity_right = self
+            .identity_right
+            .rotate_left(27)
+            .wrapping_mul(0x94d0_49bb_1331_11eb);
     }
 
     /// Appends one whitespace-free IUPAC sequence run in packed groups of eight.
@@ -245,7 +297,10 @@ impl PackedSequence {
                     }
                 }
             }
-            self.len += 8;
+            for (index, code) in [c0, c1, c2, c3, c4, c5, c6, c7].into_iter().enumerate() {
+                self.update_identity(code & 3, validity & (1 << index) != 0);
+                self.len += 1;
+            }
             offset += 8;
         }
 

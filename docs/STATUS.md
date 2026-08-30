@@ -12,8 +12,9 @@ by the named evidence; it does not imply broad research validation.
 * `U/u` to `T/t` normalization tested through direct packing, streaming FASTA,
   canonical k-mers, and the exact-containment oracle.
 * Independent X/Y sequence selection and initially exact short-sequence dispatch.
-* Immutable validated `ScientificConfig` with stable digest through core, Wasm, worker,
-  renderer tile keys, and UI provenance.
+* Immutable validated `ScientificConfig` with exact identity through core axes and Wasm
+  caches, plus a stable external digest through worker, renderer tile keys, and UI
+  provenance.
 * ntHash2-only production hashing; obsolete candidate implementations removed from the
   release tree after tagging `v0.1.0`.
 * Hash-independent exact canonical k-mer containment oracle.
@@ -24,6 +25,11 @@ by the named evidence; it does not imply broad research validation.
   replace them individually as they finish; post-paint detail is uncertainty-selected,
   and cancellable.
   Coarse visual fallback, zoom tiling, prefetch, and exact terminal tiles are retained.
+* Private frozen production axes carrying complete scientific and source-sequence
+  provenance; geometric-only tile requests reject incompatible composition before
+  allocation. Schema-1 tile bytes match the retained v0.2.1 checkpoint exactly.
+* Legacy estimator selection, fused projection, and sparse correction isolated behind
+  the non-default Rust `validation` feature and absent from default global symbols.
 * Frozen production axes, 3 GiB session admission, prepared-axis and zoom-cache
   budgets, logarithmic recency tracking, and coordinated renderer eviction.
 * Public sketch and exact tile builders validate ranges, dimensions, and compatibility

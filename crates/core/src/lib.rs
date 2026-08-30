@@ -13,7 +13,7 @@ pub mod fasta;
 pub mod gc;
 pub mod hash;
 pub mod kmer;
-pub mod matrix;
+mod matrix;
 pub mod reference;
 pub mod sketch;
 
@@ -28,20 +28,26 @@ pub use config::{
     DEFAULT_IDENTITY_SCALE, DEFAULT_MISSING_IDENTITY, DEFAULT_VERIFICATION_BITS,
     SCIENTIFIC_CONFIG_VERSION, ScientificConfig, ScientificConfigIdentity,
 };
-#[allow(deprecated)]
 pub use containment::{
     ContainmentEstimate, DirectionEvidence, estimate_containment, estimate_containment_bit_sliced,
-    estimate_containment_bit_sliced_with, estimate_containment_from_comparison,
-    estimate_containment_from_comparison_with, estimate_containment_with,
+    estimate_containment_from_comparison,
 };
-pub use dna::{CanonicalKmer, Orientation, PackedSequence};
+#[cfg(feature = "validation")]
+pub use containment::{
+    estimate_containment_bit_sliced_with, estimate_containment_from_comparison_with,
+    estimate_containment_with,
+};
+pub use dna::{CanonicalKmer, Orientation, PackedSequence, SequenceIdentity};
 pub use fasta::{FastaError, FastaParser, MAX_SEQUENCE_LENGTH};
 pub use gc::{CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE};
 pub use kmer::{KmerTileRequest, compute_kmer_tile};
 pub use matrix::{
-    AxisOverview, FrozenAxis, MatrixBuildError, MatrixTile, SparseCoreHashSet,
-    SparseCorrectionPolicy, TileBuildError, TileRequest, build_axis_overview, build_axis_range,
-    compute_frozen_tile, compute_frozen_tile_adaptive, compute_tile, compute_tile_adaptive,
+    AxisOverview, FrozenAxis, MatrixBuildError, MatrixTile, TileBuildError, TileRequest,
+    build_axis_overview, build_axis_range, compute_frozen_tile, compute_tile,
+};
+#[cfg(feature = "validation")]
+pub use matrix::{
+    SparseCoreHashSet, SparseCorrectionPolicy, compute_frozen_tile_adaptive, compute_tile_adaptive,
 };
 pub use reference::{ExactKmerSet, ExactSimilarity, exact_moddotplot_score};
 pub use sketch::{

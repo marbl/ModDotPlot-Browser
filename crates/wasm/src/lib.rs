@@ -1,24 +1,38 @@
 //! Narrow, worker-oriented WebAssembly API for moddotplot-rs.
 
+mod cache;
+mod composition;
+mod preparation;
+mod resource;
+mod session;
+
+use cache::{AxisCacheEntry, AxisCacheKey, validate_axis_cache_identity};
+use composition::CompositionState;
+use preparation::{
+    ComparisonPreparation, PendingPreparationTile, PreparedComparison, join_axis_parts,
+    progressive_tiles_for_part,
+};
+use resource::{
+    MAX_CACHED_AXIS_BYTES, MAX_PENDING_PREPARATION_TILE_BYTES, MAX_TILE_EDGE,
+    MAX_WASM_SESSION_BYTES, estimated_frozen_axis_bytes, estimated_sequence_bytes,
+    matrix_tile_heap_bytes, validate_prepared_axis_admission,
+};
+use session::ComparisonContext;
+
 #[cfg(test)]
 use moddotplot_core::hash::HashAlgorithm;
 use moddotplot_core::{
     CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE, FastaParser,
     FrozenAxis, KmerTileRequest, MatrixTile, PackedSequence,
-    ScientificConfig as CoreScientificConfig, ScientificConfigIdentity, SparseCorrectionPolicy,
-    TileRequest, build_axis_range, compute_frozen_tile, compute_frozen_tile_adaptive,
-    compute_kmer_tile,
+    ScientificConfig as CoreScientificConfig, ScientificConfigIdentity, TileBuildError,
+    TileRequest, build_axis_range, compute_frozen_tile, compute_kmer_tile,
 };
+#[cfg(feature = "validation")]
+use moddotplot_core::{SparseCorrectionPolicy, compute_frozen_tile_adaptive};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-
-const MAX_CACHED_AXIS_BYTES: usize = 192 * 1024 * 1024;
-const MAX_PREPARED_AXIS_BYTES: usize = 384 * 1024 * 1024;
-const MAX_WASM_SESSION_BYTES: usize = 3 * 1024 * 1024 * 1024;
-const MAX_PENDING_PREPARATION_TILE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_TILE_EDGE: usize = 256;
 
 /// Core-owned immutable configuration used by browser preparation and tile requests.
 #[wasm_bindgen(js_name = ScientificConfig)]
@@ -138,70 +152,6 @@ struct SequenceMetadata {
     length: u64,
 }
 
-struct PreparedComparison {
-    x: FrozenAxis,
-    y: Option<FrozenAxis>,
-    x_index: usize,
-    y_index: usize,
-    domain_length: u64,
-    config: CoreScientificConfig,
-}
-
-struct ComparisonPreparation {
-    x_index: usize,
-    y_index: usize,
-    domain_length: u64,
-    resolution: usize,
-    config: CoreScientificConfig,
-    axis: u8,
-    x_next_bin: usize,
-    y_next_bin: usize,
-    progressive_tiles: bool,
-    progressive_tile_origins: Option<HashSet<(usize, usize)>>,
-    x_parts: Vec<FrozenAxis>,
-    y_parts: Vec<FrozenAxis>,
-}
-
-struct PendingPreparationTile {
-    x: usize,
-    y: usize,
-    inner: MatrixTile,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ComparisonContext {
-    x_index: usize,
-    y_index: usize,
-    domain_length: u64,
-    k: u8,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct AxisCacheKey {
-    sequence_index: usize,
-    resolution: usize,
-    start: usize,
-    count: usize,
-    scientific_identity: ScientificConfigIdentity,
-}
-
-struct AxisCacheEntry {
-    axis: Rc<FrozenAxis>,
-    bytes: usize,
-    last_used: u64,
-}
-
-fn validate_axis_cache_identity(
-    key: AxisCacheKey,
-    config: CoreScientificConfig,
-) -> Result<(), &'static str> {
-    if key.scientific_identity == config.identity() {
-        Ok(())
-    } else {
-        Err("zoom-axis cache key does not match its scientific configuration")
-    }
-}
-
 /// Stateful compute session owned by one dedicated browser worker.
 #[wasm_bindgen]
 pub struct ComputeSession {
@@ -216,8 +166,7 @@ pub struct ComputeSession {
     cache_recency: BTreeMap<u64, AxisCacheKey>,
     cache_clock: u64,
     axis_cache_bytes: usize,
-    composition_indices: HashMap<usize, CompositionIndex>,
-    composition_builders: HashMap<usize, CompositionIndexBuilder>,
+    composition: CompositionState,
 }
 
 #[wasm_bindgen]
@@ -238,8 +187,7 @@ impl ComputeSession {
             cache_recency: BTreeMap::new(),
             cache_clock: 0,
             axis_cache_bytes: 0,
-            composition_indices: HashMap::new(),
-            composition_builders: HashMap::new(),
+            composition: CompositionState::default(),
         }
     }
 
@@ -349,22 +297,7 @@ impl ComputeSession {
                     .len()
                     .saturating_mul(std::mem::size_of::<(u64, AxisCacheKey)>()),
             );
-        bytes = bytes.saturating_add(
-            self.composition_indices
-                .capacity()
-                .saturating_mul(std::mem::size_of::<(usize, CompositionIndex)>()),
-        );
-        for index in self.composition_indices.values() {
-            bytes = bytes.saturating_add(index.estimated_heap_bytes());
-        }
-        bytes = bytes.saturating_add(
-            self.composition_builders
-                .capacity()
-                .saturating_mul(std::mem::size_of::<(usize, CompositionIndexBuilder)>()),
-        );
-        for builder in self.composition_builders.values() {
-            bytes = bytes.saturating_add(builder.estimated_heap_bytes());
-        }
+        bytes = bytes.saturating_add(self.composition.estimated_heap_bytes());
         bytes
     }
 
@@ -406,7 +339,7 @@ impl ComputeSession {
             .is_some_and(|prepared| {
                 prepared.x_index == x_index
                     && prepared.y_index == y_index
-                    && prepared.x.resolution == resolution
+                    && prepared.x.resolution() == resolution
                     && prepared.config.k() == config.k()
                     && prepared.config.hash_algorithm() == config.hash_algorithm()
                     && prepared.config.hash_seed() == config.hash_seed()
@@ -673,33 +606,22 @@ impl ComputeSession {
                 "prepared level scientific configuration does not match",
             ));
         }
-        validate_tile_request(prepared.x.resolution, x_start, y_start, width, height)?;
+        validate_tile_request(prepared.x.resolution(), x_start, y_start, width, height)?;
         let y = prepared.y.as_ref().unwrap_or(&prepared.x);
         let request = TileRequest {
             x_start,
             y_start,
             width,
             height,
-            b_bits: config.b_bits(),
-            register_limit: config.register_count(),
-            k: config.k(),
         };
-        let inner = if config.sparse_core_cap() > 0 {
-            let x_sequence = &self.sequences[prepared.x_index];
-            let y_sequence = &self.sequences[prepared.y_index];
-            compute_frozen_tile_adaptive(
-                &prepared.x,
-                y,
-                x_sequence,
-                y_sequence,
-                config.hash_algorithm(),
-                config.hash_seed(),
-                request,
-                sparse_policy(config),
-            )
-        } else {
-            compute_frozen_tile(&prepared.x, y, request)
-        }
+        let inner = compute_scientific_tile(
+            &prepared.x,
+            y,
+            &self.sequences[prepared.x_index],
+            &self.sequences[prepared.y_index],
+            config,
+            request,
+        )
         .map_err(|error| JsError::new(&error.to_string()))?;
         Ok(WasmTile { inner })
     }
@@ -764,24 +686,15 @@ impl ComputeSession {
             y_start,
             width,
             height,
-            b_bits: config.b_bits(),
-            register_limit: config.register_count(),
-            k: config.k(),
         };
-        let inner = if config.sparse_core_cap() > 0 {
-            compute_frozen_tile_adaptive(
-                &x,
-                &y,
-                &self.sequences[x_index],
-                &self.sequences[y_index],
-                config.hash_algorithm(),
-                config.hash_seed(),
-                request,
-                sparse_policy(config),
-            )
-        } else {
-            compute_frozen_tile(&x, &y, request)
-        }
+        let inner = compute_scientific_tile(
+            &x,
+            &y,
+            &self.sequences[x_index],
+            &self.sequences[y_index],
+            config,
+            request,
+        )
         .map_err(|error| JsError::new(&error.to_string()))?;
         Ok(WasmTile { inner })
     }
@@ -879,19 +792,7 @@ impl ComputeSession {
     ///
     /// Returns an error for a missing sequence index.
     pub fn begin_composition_index(&mut self, sequence_index: usize) -> Result<bool, JsError> {
-        if self.composition_indices.contains_key(&sequence_index) {
-            return Ok(true);
-        }
-        let sequence = self
-            .sequences
-            .get(sequence_index)
-            .ok_or_else(|| JsError::new("GC sequence index is out of range"))?;
-        self.composition_builders
-            .entry(sequence_index)
-            .or_insert_with(|| {
-                CompositionIndexBuilder::new(sequence, DEFAULT_COMPOSITION_BLOCK_SIZE)
-            });
-        Ok(false)
+        self.composition.begin(&self.sequences, sequence_index)
     }
 
     /// Builds the next GC index chunk and returns completion in `[0, 1]`.
@@ -904,29 +805,8 @@ impl ComputeSession {
         sequence_index: usize,
         maximum_blocks: usize,
     ) -> Result<f64, JsError> {
-        if maximum_blocks == 0 {
-            return Err(JsError::new("GC preparation chunk size must be positive"));
-        }
-        let sequence = self
-            .sequences
-            .get(sequence_index)
-            .ok_or_else(|| JsError::new("GC sequence index is out of range"))?;
-        let builder = self
-            .composition_builders
-            .get_mut(&sequence_index)
-            .ok_or_else(|| JsError::new("begin_composition_index must be called first"))?;
-        let progress = builder.advance(sequence, maximum_blocks);
-        if builder.is_complete() {
-            let builder = self
-                .composition_builders
-                .remove(&sequence_index)
-                .ok_or_else(|| JsError::new("completed GC builder was not retained"))?;
-            let complete = builder
-                .finish()
-                .ok_or_else(|| JsError::new("GC index completion was inconsistent"))?;
-            self.composition_indices.insert(sequence_index, complete);
-        }
-        Ok(progress)
+        self.composition
+            .advance(&self.sequences, sequence_index, maximum_blocks)
     }
 
     /// Samples exact GC fractions for equal windows in a visible sequence range.
@@ -941,21 +821,8 @@ impl ComputeSession {
         end: u64,
         bins: usize,
     ) -> Result<Vec<f64>, JsError> {
-        if bins == 0 {
-            return Err(JsError::new("GC bin count must be positive"));
-        }
-        let sequence = self
-            .sequences
-            .get(sequence_index)
-            .ok_or_else(|| JsError::new("GC sequence index is out of range"))?;
-        if start > end || end > sequence.len() {
-            return Err(JsError::new("GC sequence range is out of bounds"));
-        }
-        let index = self
-            .composition_indices
-            .get(&sequence_index)
-            .ok_or_else(|| JsError::new("GC index is not ready"))?;
-        Ok(index.sample_gc(sequence, start, end, bins))
+        self.composition
+            .gc_bins(&self.sequences, sequence_index, start, end, bins)
     }
 
     /// Samples `CpG` observed/expected ratios for equal windows in a visible range.
@@ -970,21 +837,8 @@ impl ComputeSession {
         end: u64,
         bins: usize,
     ) -> Result<Vec<f64>, JsError> {
-        if bins == 0 {
-            return Err(JsError::new("CpG bin count must be positive"));
-        }
-        let sequence = self
-            .sequences
-            .get(sequence_index)
-            .ok_or_else(|| JsError::new("CpG sequence index is out of range"))?;
-        if start > end || end > sequence.len() {
-            return Err(JsError::new("CpG sequence range is out of bounds"));
-        }
-        let index = self
-            .composition_indices
-            .get(&sequence_index)
-            .ok_or_else(|| JsError::new("composition index is not ready"))?;
-        Ok(index.sample_cpg_observed_expected(sequence, start, end, bins))
+        self.composition
+            .cpg_bins(&self.sequences, sequence_index, start, end, bins)
     }
 
     /// Releases all sequence and comparison memory.
@@ -996,8 +850,7 @@ impl ComputeSession {
         self.clear_pending_preparation_tiles();
         self.sequences.clear();
         self.clear_axis_cache();
-        self.composition_indices.clear();
-        self.composition_builders.clear();
+        self.composition.clear();
     }
 
     fn append_records(&mut self, records: Vec<PackedSequence>) -> Result<JsValue, JsError> {
@@ -1157,94 +1010,6 @@ impl ComputeSession {
     }
 }
 
-fn join_axis_parts(mut parts: Vec<FrozenAxis>) -> FrozenAxis {
-    assert!(!parts.is_empty());
-    let mut joined = parts.remove(0);
-    for mut part in parts {
-        assert_eq!(part.offset, joined.offset + joined.core_encoded.len());
-        joined.bounds.append(&mut part.bounds);
-        joined.core_encoded.append(&mut part.core_encoded);
-        joined.expanded_encoded.append(&mut part.expanded_encoded);
-        joined.sparse_core.append(&mut part.sparse_core);
-    }
-    joined
-}
-
-fn pending_tile(
-    x: &FrozenAxis,
-    y: &FrozenAxis,
-    config: CoreScientificConfig,
-) -> Option<PendingPreparationTile> {
-    Some(PendingPreparationTile {
-        x: x.offset,
-        y: y.offset,
-        inner: compute_frozen_tile(
-            x,
-            y,
-            TileRequest {
-                x_start: x.offset,
-                y_start: y.offset,
-                width: x.core_encoded.len(),
-                height: y.core_encoded.len(),
-                b_bits: config.b_bits(),
-                register_limit: config.register_count(),
-                k: config.k(),
-            },
-        )
-        .ok()?,
-    })
-}
-
-fn progressive_tiles_for_part(
-    state: &ComparisonPreparation,
-    building_axis: u8,
-) -> Vec<PendingPreparationTile> {
-    if state.x_index == state.y_index {
-        let Some(current) = state.x_parts.last() else {
-            return Vec::new();
-        };
-        return state
-            .x_parts
-            .iter()
-            .filter_map(|previous| selected_pending_tile(state, current, previous))
-            .collect();
-    }
-    if building_axis == 0 {
-        let Some(current) = state.x_parts.last() else {
-            return Vec::new();
-        };
-        state
-            .y_parts
-            .iter()
-            .filter_map(|y_part| selected_pending_tile(state, current, y_part))
-            .collect()
-    } else {
-        let Some(current) = state.y_parts.last() else {
-            return Vec::new();
-        };
-        state
-            .x_parts
-            .iter()
-            .filter_map(|x_part| selected_pending_tile(state, x_part, current))
-            .collect()
-    }
-}
-
-fn selected_pending_tile(
-    state: &ComparisonPreparation,
-    x: &FrozenAxis,
-    y: &FrozenAxis,
-) -> Option<PendingPreparationTile> {
-    if state
-        .progressive_tile_origins
-        .as_ref()
-        .is_some_and(|origins| !origins.contains(&(x.offset, y.offset)))
-    {
-        return None;
-    }
-    pending_tile(x, y, state.config)
-}
-
 fn validate_tile_request(
     resolution: usize,
     x_start: usize,
@@ -1268,85 +1033,38 @@ fn validate_tile_request(
     Ok(())
 }
 
+fn compute_scientific_tile(
+    x: &FrozenAxis,
+    y: &FrozenAxis,
+    x_sequence: &PackedSequence,
+    y_sequence: &PackedSequence,
+    config: CoreScientificConfig,
+    request: TileRequest,
+) -> Result<MatrixTile, TileBuildError> {
+    #[cfg(feature = "validation")]
+    if config.sparse_core_cap() > 0 {
+        return compute_frozen_tile_adaptive(
+            x,
+            y,
+            x_sequence,
+            y_sequence,
+            config.hash_algorithm(),
+            config.hash_seed(),
+            request,
+            sparse_policy(config),
+        );
+    }
+    #[cfg(not(feature = "validation"))]
+    let _ = (x_sequence, y_sequence, config);
+    compute_frozen_tile(x, y, request)
+}
+
+#[cfg(feature = "validation")]
 fn sparse_policy(config: CoreScientificConfig) -> SparseCorrectionPolicy {
     SparseCorrectionPolicy {
         ani_floor: config.ani_floor(),
         minimum_detection_probability: config.minimum_detection_probability(),
     }
-}
-
-fn estimated_frozen_axis_bytes(resolution: usize, config: CoreScientificConfig) -> usize {
-    let words = config.register_count().div_ceil(64);
-    let signature_words = usize::from(config.verification_bits()).saturating_add(3);
-    let one_signature = signature_words
-        .saturating_mul(words)
-        .saturating_mul(std::mem::size_of::<u64>())
-        .saturating_add(std::mem::size_of::<moddotplot_core::BitSlicedSignature>());
-    let sparse = if config.sparse_core_cap() == 0 {
-        0
-    } else {
-        config
-            .sparse_core_cap()
-            .saturating_mul(32)
-            .saturating_add(std::mem::size_of::<
-                Option<moddotplot_core::SparseCoreHashSet>,
-            >())
-    };
-    resolution.saturating_mul(
-        one_signature
-            .saturating_mul(2)
-            .saturating_add(sparse)
-            .saturating_add(std::mem::size_of::<(u64, u64)>()),
-    )
-}
-
-fn estimated_sequence_bytes(sequences: &[PackedSequence], capacity: usize) -> usize {
-    std::mem::size_of::<ComputeSession>()
-        .saturating_add(capacity.saturating_mul(std::mem::size_of::<PackedSequence>()))
-        .saturating_add(
-            sequences
-                .iter()
-                .map(PackedSequence::estimated_heap_bytes)
-                .sum::<usize>(),
-        )
-}
-
-fn validate_prepared_axis_admission(
-    resolution: usize,
-    config: CoreScientificConfig,
-    axis_count: usize,
-    current_session_bytes: usize,
-) -> Result<usize, &'static str> {
-    let admitted = estimated_frozen_axis_bytes(resolution, config)
-        .checked_mul(axis_count)
-        .ok_or("prepared-axis estimate overflowed")?;
-    if admitted > MAX_PREPARED_AXIS_BYTES {
-        return Err(
-            "This quality tier exceeds the 384 MiB prepared-axis budget; lower plot detail or sketch accuracy.",
-        );
-    }
-    if current_session_bytes.saturating_add(admitted) > MAX_WASM_SESSION_BYTES {
-        return Err(
-            "This comparison exceeds the Wasm session memory budget; lower plot detail or sketch accuracy.",
-        );
-    }
-    Ok(admitted)
-}
-
-fn matrix_tile_heap_bytes(tile: &MatrixTile) -> usize {
-    tile.identity
-        .capacity()
-        .saturating_mul(std::mem::size_of::<u16>())
-        .saturating_add(
-            tile.direction
-                .capacity()
-                .saturating_mul(std::mem::size_of::<i16>()),
-        )
-        .saturating_add(
-            tile.direction_support
-                .capacity()
-                .saturating_mul(std::mem::size_of::<u16>()),
-        )
 }
 
 impl Default for ComputeSession {
@@ -1456,7 +1174,7 @@ mod tests {
             inner: CoreScientificConfig::production(3, 2, 4, false).unwrap(),
         };
         let detailed = BrowserScientificConfig {
-            inner: CoreScientificConfig::production(3, 4, 4, true).unwrap(),
+            inner: CoreScientificConfig::production(3, 4, 4, false).unwrap(),
         };
         session
             .begin_prepare_scientific(0, 0, 4, &preview, true)
@@ -1499,11 +1217,11 @@ mod tests {
         assert!(session.has_prepared_level(2));
         assert!(session.has_prepared_level(4));
         assert_eq!(
-            session.prepared_levels[&2].x.core_encoded[0].register_count(),
+            session.prepared_levels[&2].x.core_encoded()[0].register_count(),
             2
         );
         assert_eq!(
-            session.prepared_levels[&4].x.core_encoded[0].register_count(),
+            session.prepared_levels[&4].x.core_encoded()[0].register_count(),
             4
         );
 
@@ -1598,7 +1316,7 @@ mod tests {
 
     #[test]
     fn over_budget_pairwise_axis_is_rejected_before_preparation() {
-        let maximum = CoreScientificConfig::production(21, 4_096, 10, true).unwrap();
+        let maximum = CoreScientificConfig::production(21, 4_096, 10, false).unwrap();
         let error = validate_prepared_axis_admission(10_000, maximum, 2, 0)
             .expect_err("oversized pairwise axes must fail admission");
 

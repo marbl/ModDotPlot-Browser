@@ -165,6 +165,9 @@ impl ScientificConfig {
         {
             return Err(ConfigError::DetectionProbability);
         }
+        if sparse_core_cap > 0 && !cfg!(feature = "validation") {
+            return Err(ConfigError::ValidationFeatureDisabled);
+        }
         Ok(Self {
             version: SCIENTIFIC_CONFIG_VERSION,
             k,
@@ -310,6 +313,8 @@ pub enum ConfigError {
     AniFloor,
     /// Detection probability is not finite or lies outside `[0,1)`.
     DetectionProbability,
+    /// A validation-only configuration was requested from a default build.
+    ValidationFeatureDisabled,
 }
 
 impl Display for ConfigError {
@@ -322,6 +327,9 @@ impl Display for ConfigError {
             Self::HllPrecision => "HLL precision must be in 4..=16",
             Self::AniFloor => "ANI floor must be finite and in 0..=1",
             Self::DetectionProbability => "detection probability must be finite and in 0..1",
+            Self::ValidationFeatureDisabled => {
+                "sparse correction requires the non-default validation feature"
+            }
         })
     }
 }
@@ -329,7 +337,6 @@ impl Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -338,13 +345,10 @@ mod tests {
         let preview = ScientificConfig::production_default(21, 256, false).unwrap();
         let same = ScientificConfig::production_default(21, 256, false).unwrap();
         let detailed = ScientificConfig::production_default(21, 1_024, false).unwrap();
-        let high_sensitivity = ScientificConfig::production_default(21, 1_024, true).unwrap();
         assert_eq!(preview.digest(), same.digest());
         assert_ne!(preview.digest(), detailed.digest());
-        assert_ne!(detailed.digest(), high_sensitivity.digest());
         assert_eq!(preview.digest(), 0x58e0_84b7_190f_4d93);
         assert_eq!(detailed.digest(), 0xbc5c_5131_ad1c_9a20);
-        assert_eq!(high_sensitivity.digest(), 0x16ed_6e4e_3c23_06c8);
         assert_eq!(preview.version(), SCIENTIFIC_CONFIG_VERSION);
         assert_eq!(preview.identity().as_bytes().len(), 54);
         assert_ne!(preview.identity(), detailed.identity());
@@ -360,9 +364,15 @@ mod tests {
             ScientificConfig::production(32, 256, 12, false),
             Err(ConfigError::KmerLength)
         );
+        #[cfg(not(feature = "validation"))]
+        assert_eq!(
+            ScientificConfig::production_default(21, 256, true),
+            Err(ConfigError::ValidationFeatureDisabled)
+        );
     }
 
     #[test]
+    #[cfg(feature = "validation")]
     #[allow(clippy::too_many_lines)]
     fn canonical_identity_distinguishes_every_configurable_scientific_field() {
         let configurations = [

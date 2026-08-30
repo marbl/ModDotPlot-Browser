@@ -31,6 +31,6 @@
 | Zoom-axis cache budget | 192 MiB |
 | Prepared-axis budget | 384 MiB |
 | Wasm session budget | 3072 MiB |
-| Maximum tile edge | 256 cells |
+| Maximum tile edge | unknown cells |
 
 Exact terminal mode, user-selected alternatives, and per-tile configuration digests are described in the scientific specification.

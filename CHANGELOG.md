@@ -7,6 +7,28 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-30
+
+### Changed
+
+* Made ordinary matrix requests geometric only; k-mer length, register count,
+  comparison width, estimator, and transform are now derived from the axes.
+* Made frozen-axis representation fields private and attached the complete immutable
+  scientific configuration and stable source-sequence identity to every axis.
+* Reject incompatible scientific identities, coordinate layouts, ranges, and
+  contiguous-axis provenance before output allocation.
+* Isolated legacy estimator selection, fused register projection, and sparse exact
+  correction behind the non-default `validation` Cargo feature.
+* Split core axis, frozen-representation, ordinary-tile, and validation-only contracts,
+  and split Wasm preparation, cache, resource admission, composition, and session
+  context ownership into focused modules.
+
+### Added
+
+* Added a schema-1 numeric fixture whose complete tile-channel digests are verified
+  byte-for-byte against the retained v0.2.1 source checkpoint.
+* Added configuration, sequence-provenance, and contiguous-range mismatch tests.
+
 ## [0.2.1] - 2026-08-30
 
 ### Added
@@ -218,7 +240,8 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/marbl/moddotplot-rs/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.4...v0.2.0
 [0.2.0-beta.4]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.3...v0.2.0-beta.4

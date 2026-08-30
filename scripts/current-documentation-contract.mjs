@@ -42,7 +42,10 @@ function estimatorHeader(source) {
 }
 
 export function currentDocumentationContract(root) {
-  const wasm = read(root, "crates/wasm/src/lib.rs");
+  const wasm = [
+    read(root, "crates/wasm/src/lib.rs"),
+    read(root, "crates/wasm/src/resource.rs"),
+  ].join("\n");
   const html = read(root, "web/index.html");
   const main = read(root, "web/src/main.ts");
   const importedTrackTypes = read(root, "web/src/imported-track-types.ts");

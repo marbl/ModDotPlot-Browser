@@ -12,9 +12,9 @@ than restating it, reducing the risk of attribution drift. Machine-readable auth
 software version, preferred citation, and method references are maintained in
 [`CITATION.cff`](../CITATION.cff).
 
-The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current release candidate is
-`v0.2.1`. Scientific tiles carry
-a versioned configuration digest covering every estimator parameter that can affect
-their numeric output. The browser displays the digest and principal parameters under
-Advanced options. Release builds also include a CycloneDX SBOM, a dependency license
-bundle, checksums, and build provenance.
+The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current release is `v0.3.0`.
+Every built axis carries the complete immutable scientific configuration as its exact
+in-process identity, plus a stable source-sequence identity. The shorter configuration
+digest remains the external provenance label. The browser displays the digest and
+principal parameters under Advanced options. Release builds also include a CycloneDX
+SBOM, a dependency license bundle, checksums, and build provenance.

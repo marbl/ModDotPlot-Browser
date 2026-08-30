@@ -1,12 +1,25 @@
 //! Axis summary construction and numeric matrix tiles.
 
+mod axis;
+mod frozen;
+mod ordinary;
+#[cfg(feature = "validation")]
+mod sparse;
+
+use axis::divide_ceil;
+#[cfg(feature = "validation")]
+pub use sparse::SparseCorrectionPolicy;
+
+#[cfg(feature = "validation")]
 use crate::adaptive::needs_exact_correction;
 use crate::config::ScientificConfig;
 #[cfg(test)]
 use crate::containment::estimate_containment_bit_sliced_scalar;
 use crate::containment::{ContainmentEstimate, DirectionEvidence, estimate_containment_bit_sliced};
-use crate::dna::PackedSequence;
-use crate::hash::{HashAlgorithm, canonical_hashes};
+use crate::dna::{PackedSequence, SequenceIdentity};
+#[cfg(feature = "validation")]
+use crate::hash::HashAlgorithm;
+use crate::hash::canonical_hashes;
 use crate::sketch::{BitSlicedSignature, OphSketch};
 use std::collections::HashMap;
 
@@ -47,6 +60,10 @@ impl SparseCoreHashSet {
 /// Core and neighbor-expanded interval sketches for one sequence axis.
 #[derive(Clone, Debug)]
 pub struct AxisOverview {
+    /// Complete immutable scientific configuration used to build this axis.
+    pub scientific_config: ScientificConfig,
+    /// Stable identity of the complete source base stream.
+    pub sequence_identity: SequenceIdentity,
     /// FASTA record name.
     pub sequence_name: String,
     /// Length of this sequence in bases.
@@ -136,6 +153,8 @@ impl AxisOverview {
     /// Discards mutable build sketches and retains only production tile data.
     pub fn freeze(self) -> FrozenAxis {
         FrozenAxis {
+            scientific_config: self.scientific_config,
+            sequence_identity: self.sequence_identity,
             sequence_name: self.sequence_name,
             sequence_length: self.sequence_length,
             domain_length: self.domain_length,
@@ -158,11 +177,7 @@ impl AxisOverview {
     /// Panics unless the target register count is a supported power-of-two divisor
     /// and the fingerprint width is supported by the source sketches.
     #[must_use]
-    #[allow(deprecated)]
-    #[deprecated(
-        since = "0.2.1",
-        note = "validation-only fused-projection path; scheduled for removal from the default API in v0.3.0"
-    )]
+    #[cfg(feature = "validation")]
     pub fn project_registers(&self, register_count: usize, fingerprint_bits: u8) -> Self {
         let core = self
             .core
@@ -183,6 +198,21 @@ impl AxisOverview {
             .map(|sketch| sketch.bit_sliced(fingerprint_bits, register_count))
             .collect();
         Self {
+            scientific_config: ScientificConfig::new(
+                self.scientific_config.k(),
+                self.scientific_config.hash_algorithm(),
+                self.scientific_config.hash_seed(),
+                register_count,
+                fingerprint_bits.min(self.scientific_config.b_bits()),
+                fingerprint_bits,
+                self.scientific_config.oph_estimator(),
+                self.scientific_config.hll_precision(),
+                0,
+                self.scientific_config.ani_floor(),
+                self.scientific_config.minimum_detection_probability(),
+            )
+            .expect("a supported projection must produce a valid scientific identity"),
+            sequence_identity: self.sequence_identity,
             sequence_name: self.sequence_name.clone(),
             sequence_length: self.sequence_length,
             domain_length: self.domain_length,
@@ -202,26 +232,103 @@ impl AxisOverview {
 #[derive(Clone, Debug)]
 pub struct FrozenAxis {
     /// FASTA record name.
-    pub sequence_name: String,
+    sequence_name: String,
+    /// Stable identity of the complete source base stream.
+    sequence_identity: SequenceIdentity,
+    /// Complete immutable scientific configuration used to build this axis.
+    scientific_config: ScientificConfig,
     /// Length of this sequence in bases.
-    pub sequence_length: u64,
+    sequence_length: u64,
     /// Shared coordinate domain used by both selected axes.
-    pub domain_length: u64,
+    domain_length: u64,
     /// Logical number of intervals across the common domain.
-    pub resolution: usize,
+    resolution: usize,
     /// First global interval represented by the vectors in this summary.
-    pub offset: usize,
+    offset: usize,
     /// Half-open, sequence-clipped interval bounds.
-    pub bounds: Vec<(u64, u64)>,
+    bounds: Vec<(u64, u64)>,
     /// Word-parallel encodings of core intervals.
-    pub core_encoded: Vec<BitSlicedSignature>,
+    core_encoded: Vec<BitSlicedSignature>,
     /// Word-parallel encodings of expanded intervals.
-    pub expanded_encoded: Vec<BitSlicedSignature>,
+    expanded_encoded: Vec<BitSlicedSignature>,
     /// Complete hashes for cores retained by the optional sparse policy.
-    pub sparse_core: Vec<Option<SparseCoreHashSet>>,
+    sparse_core: Vec<Option<SparseCoreHashSet>>,
 }
 
 impl FrozenAxis {
+    /// Complete scientific configuration from which this axis was built.
+    pub const fn scientific_config(&self) -> ScientificConfig {
+        self.scientific_config
+    }
+
+    /// Stable content identity of the complete source sequence.
+    pub const fn sequence_identity(&self) -> SequenceIdentity {
+        self.sequence_identity
+    }
+
+    /// FASTA record name.
+    pub fn sequence_name(&self) -> &str {
+        &self.sequence_name
+    }
+
+    /// Source sequence length in bases.
+    pub const fn sequence_length(&self) -> u64 {
+        self.sequence_length
+    }
+
+    /// Shared coordinate domain length.
+    pub const fn domain_length(&self) -> u64 {
+        self.domain_length
+    }
+
+    /// Logical number of intervals in the shared domain.
+    pub const fn resolution(&self) -> usize {
+        self.resolution
+    }
+
+    /// First global interval represented by this axis range.
+    pub const fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// Half-open, sequence-clipped interval bounds.
+    pub fn bounds(&self) -> &[(u64, u64)] {
+        &self.bounds
+    }
+
+    /// Word-parallel core signatures.
+    pub fn core_encoded(&self) -> &[BitSlicedSignature] {
+        &self.core_encoded
+    }
+
+    /// Word-parallel neighbor-expanded signatures.
+    pub fn expanded_encoded(&self) -> &[BitSlicedSignature] {
+        &self.expanded_encoded
+    }
+
+    /// Joins contiguous ranges produced from one source axis.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TileBuildError::IncompatibleAxes`] when any part has different
+    /// scientific, sequence, coordinate, or layout provenance, or is not contiguous.
+    pub fn join_contiguous(mut parts: Vec<Self>) -> Result<Self, TileBuildError> {
+        let mut joined = parts
+            .drain(..1)
+            .next()
+            .ok_or(TileBuildError::IncompatibleAxes)?;
+        for mut part in parts {
+            if !frozen::compatible_contiguous(&joined, &part) {
+                return Err(TileBuildError::IncompatibleAxes);
+            }
+            joined.bounds.append(&mut part.bounds);
+            joined.core_encoded.append(&mut part.core_encoded);
+            joined.expanded_encoded.append(&mut part.expanded_encoded);
+            joined.sparse_core.append(&mut part.sparse_core);
+        }
+        Ok(joined)
+    }
+
     /// Approximate retained heap bytes, excluding allocator overhead.
     pub fn estimated_heap_bytes(&self) -> usize {
         self.sequence_name
@@ -264,6 +371,12 @@ impl FrozenAxis {
 }
 
 trait AxisData {
+    fn scientific_config(&self) -> ScientificConfig;
+    #[cfg(feature = "validation")]
+    fn sequence_name(&self) -> &str;
+    #[cfg(feature = "validation")]
+    fn sequence_identity(&self) -> SequenceIdentity;
+    #[cfg(feature = "validation")]
     fn sequence_length(&self) -> u64;
     fn domain_length(&self) -> u64;
     fn resolution(&self) -> usize;
@@ -274,6 +387,18 @@ trait AxisData {
 }
 
 impl AxisData for AxisOverview {
+    fn scientific_config(&self) -> ScientificConfig {
+        self.scientific_config
+    }
+    #[cfg(feature = "validation")]
+    fn sequence_name(&self) -> &str {
+        &self.sequence_name
+    }
+    #[cfg(feature = "validation")]
+    fn sequence_identity(&self) -> SequenceIdentity {
+        self.sequence_identity
+    }
+    #[cfg(feature = "validation")]
     fn sequence_length(&self) -> u64 {
         self.sequence_length
     }
@@ -298,6 +423,18 @@ impl AxisData for AxisOverview {
 }
 
 impl AxisData for FrozenAxis {
+    fn scientific_config(&self) -> ScientificConfig {
+        self.scientific_config
+    }
+    #[cfg(feature = "validation")]
+    fn sequence_name(&self) -> &str {
+        &self.sequence_name
+    }
+    #[cfg(feature = "validation")]
+    fn sequence_identity(&self) -> SequenceIdentity {
+        self.sequence_identity
+    }
+    #[cfg(feature = "validation")]
     fn sequence_length(&self) -> u64 {
         self.sequence_length
     }
@@ -332,21 +469,6 @@ pub struct TileRequest {
     pub width: usize,
     /// Requested tile height.
     pub height: usize,
-    /// Number of retained hash bits.
-    pub b_bits: u8,
-    /// Number of aligned registers to compare.
-    pub register_limit: usize,
-    /// K-mer length used by the ANI transform.
-    pub k: u8,
-}
-
-/// Statistical decision used by detailed tiles with bounded exact sparse cores.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SparseCorrectionPolicy {
-    /// ANI floor at which match detection is evaluated.
-    pub ani_floor: f64,
-    /// Minimum probability of observing at least one true matching register.
-    pub minimum_detection_probability: f64,
 }
 
 /// Numeric matrix data consumed directly by the renderer and future exporters.
@@ -448,43 +570,30 @@ pub fn build_axis_range(
     bin_count: usize,
     config: ScientificConfig,
 ) -> Result<AxisOverview, MatrixBuildError> {
-    if domain_length < sequence.len() || domain_length == 0 {
-        return Err(MatrixBuildError::Domain);
-    }
-    if resolution == 0 || resolution > usize::MAX / 2 {
-        return Err(MatrixBuildError::Resolution);
-    }
-    if bin_count == 0 || bin_start >= resolution {
-        return Err(MatrixBuildError::Range);
-    }
+    axis::validate_request(
+        sequence.len(),
+        domain_length,
+        resolution,
+        bin_start,
+        bin_count,
+    )?;
     Ok(build_axis_range_internal(
         sequence,
         domain_length,
         resolution,
         bin_start,
         bin_count,
-        config.k(),
-        config.hash_seed(),
-        config.register_count(),
-        config.hll_precision(),
-        config.hash_algorithm(),
-        (config.sparse_core_cap() > 0).then_some(config.sparse_core_cap()),
+        config,
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_axis_range_internal(
     sequence: &PackedSequence,
     domain_length: u64,
     resolution: usize,
     bin_start: usize,
     bin_count: usize,
-    k: u8,
-    seed: u64,
-    register_count: usize,
-    hll_precision: u8,
-    hash_algorithm: HashAlgorithm,
-    sparse_cap: Option<usize>,
+    config: ScientificConfig,
 ) -> AxisOverview {
     assert!(domain_length >= sequence.len() && domain_length > 0);
     assert!(resolution > 0 && resolution <= usize::MAX / 2);
@@ -495,7 +604,9 @@ fn build_axis_range_internal(
     let first_half = (2 * bin_start).saturating_sub(1);
     let end_half = (2 * bin_end + 1).min(half_count);
     let represented_half_count = end_half - first_half;
-    let empty = OphSketch::new(register_count, hll_precision);
+    let register_count = config.register_count();
+    let sparse_cap = (config.sparse_core_cap() > 0).then_some(config.sparse_core_cap());
+    let empty = OphSketch::new(register_count, config.hll_precision());
     let mut halves = vec![empty.clone(); represented_half_count];
     let represented_bins = bin_end - bin_start;
     let mut sparse_core = sparse_cap.map(|_| {
@@ -512,11 +623,11 @@ fn build_axis_range_internal(
 
     for kmer in canonical_hashes(
         sequence,
-        k,
+        config.k(),
         genomic_start,
         genomic_end,
-        hash_algorithm,
-        seed,
+        config.hash_algorithm(),
+        config.hash_seed(),
     ) {
         let segment =
             ((u128::from(kmer.start) * half_count as u128) / u128::from(domain_length)) as usize;
@@ -576,6 +687,8 @@ fn build_axis_range_internal(
         .collect();
 
     AxisOverview {
+        scientific_config: config,
+        sequence_identity: sequence.identity(),
         sequence_name: sequence.name().to_owned(),
         sequence_length: sequence.len(),
         domain_length,
@@ -588,12 +701,6 @@ fn build_axis_range_internal(
         expanded_encoded,
         sparse_core: sparse_core.unwrap_or_default(),
     }
-}
-
-fn divide_ceil(numerator: u128, denominator: usize) -> u64 {
-    let denominator = denominator as u128;
-    u64::try_from(numerator.div_ceil(denominator))
-        .expect("a coordinate within a u64 domain must fit in u64")
 }
 
 /// Computes a clipped matrix tile using `ModDotPlot`'s maximum directed containment.
@@ -628,20 +735,9 @@ fn compute_encoded_tile<A: AxisData>(
     request: TileRequest,
     is_self_axis: bool,
 ) -> Result<MatrixTile, TileBuildError> {
-    validate_encoded_tile(x, y, request)?;
-    let x_end = x
-        .offset()
-        .checked_add(x.core_encoded().len())
-        .ok_or(TileBuildError::Range)?;
-    let y_end = y
-        .offset()
-        .checked_add(y.core_encoded().len())
-        .ok_or(TileBuildError::Range)?;
-    let width = request.width.min(x_end.saturating_sub(request.x_start));
-    let height = request.height.min(y_end.saturating_sub(request.y_start));
-    let cells = width
-        .checked_mul(height)
-        .ok_or(TileBuildError::Dimensions)?;
+    let layout = ordinary::validate(x, y, request)?;
+    let config = x.scientific_config();
+    let (width, height, cells) = (layout.width, layout.height, layout.cells);
     let mut tile = MatrixTile {
         width,
         height,
@@ -678,16 +774,16 @@ fn compute_encoded_tile<A: AxisData>(
             let left = estimate_containment_bit_sliced(
                 &x.core_encoded()[x_local],
                 &y.expanded_encoded()[y_local],
-                request.k,
-                request.b_bits,
-                request.register_limit,
+                config.k(),
+                config.b_bits(),
+                config.register_count(),
             );
             let right = estimate_containment_bit_sliced(
                 &y.core_encoded()[y_local],
                 &x.expanded_encoded()[x_local],
-                request.k,
-                request.b_bits,
-                request.register_limit,
+                config.k(),
+                config.b_bits(),
+                config.register_count(),
             );
             let Some((ani, direction)) = choose_score(left, right) else {
                 continue;
@@ -699,62 +795,6 @@ fn compute_encoded_tile<A: AxisData>(
         }
     }
     Ok(tile)
-}
-
-fn validate_encoded_tile(
-    x: &impl AxisData,
-    y: &impl AxisData,
-    request: TileRequest,
-) -> Result<(), TileBuildError> {
-    if x.domain_length() != y.domain_length()
-        || x.resolution() != y.resolution()
-        || x.resolution() == 0
-        || x.resolution() > usize::MAX / 2
-        || x.core_encoded().len() != x.expanded_encoded().len()
-        || y.core_encoded().len() != y.expanded_encoded().len()
-        || (!x.sparse_core().is_empty() && x.sparse_core().len() != x.core_encoded().len())
-        || (!y.sparse_core().is_empty() && y.sparse_core().len() != y.core_encoded().len())
-    {
-        return Err(TileBuildError::IncompatibleAxes);
-    }
-    if request.width == 0 || request.height == 0 {
-        return Err(TileBuildError::Dimensions);
-    }
-    let x_end = x
-        .offset()
-        .checked_add(x.core_encoded().len())
-        .ok_or(TileBuildError::Range)?;
-    let y_end = y
-        .offset()
-        .checked_add(y.core_encoded().len())
-        .ok_or(TileBuildError::Range)?;
-    if !(x.offset()..x_end).contains(&request.x_start)
-        || !(y.offset()..y_end).contains(&request.y_start)
-    {
-        return Err(TileBuildError::Range);
-    }
-    if !(1..=31).contains(&request.k) || request.register_limit == 0 || request.b_bits == 0 {
-        return Err(TileBuildError::Parameters);
-    }
-    let signatures = x
-        .core_encoded()
-        .iter()
-        .chain(x.expanded_encoded())
-        .chain(y.core_encoded())
-        .chain(y.expanded_encoded());
-    let mut expected = None;
-    for signature in signatures {
-        let dimensions = (signature.register_count(), signature.fingerprint_bits());
-        if request.register_limit > dimensions.0 || request.b_bits > dimensions.1 {
-            return Err(TileBuildError::Parameters);
-        }
-        if expected.is_some_and(|expected| expected != dimensions) {
-            return Err(TileBuildError::IncompatibleAxes);
-        }
-        expected = Some(dimensions);
-    }
-    expected.ok_or(TileBuildError::IncompatibleAxes)?;
-    Ok(())
 }
 
 /// Computes a tile and exactly corrects only statistically underpowered sparse directions.
@@ -769,6 +809,7 @@ fn validate_encoded_tile(
 /// Returns [`TileBuildError`] before allocation when axes, source sequences, or request
 /// fields are incompatible.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "validation")]
 pub fn compute_tile_adaptive(
     x: &AxisOverview,
     y: &AxisOverview,
@@ -779,8 +820,9 @@ pub fn compute_tile_adaptive(
     request: TileRequest,
     policy: SparseCorrectionPolicy,
 ) -> Result<MatrixTile, TileBuildError> {
-    validate_source_sequences(x, y, x_sequence, y_sequence)?;
+    sparse::validate_source_sequences(x, y, x_sequence, y_sequence)?;
     let mut tile = compute_tile(x, y, request)?;
+    let config = x.scientific_config;
     if x.sparse_core.is_empty() && y.sparse_core.is_empty() {
         return Ok(tile);
     }
@@ -816,9 +858,9 @@ pub fn compute_tile_adaptive(
                 estimate_containment_bit_sliced(
                     &x.core_encoded[x_local],
                     &y.expanded_encoded[y_local],
-                    request.k,
-                    request.b_bits,
-                    request.register_limit,
+                    config.k(),
+                    config.b_bits(),
+                    config.register_count(),
                 )
                 .map(DirectedScore::from)
             });
@@ -826,9 +868,9 @@ pub fn compute_tile_adaptive(
                 estimate_containment_bit_sliced(
                     &y.core_encoded[y_local],
                     &x.expanded_encoded[x_local],
-                    request.k,
-                    request.b_bits,
-                    request.register_limit,
+                    config.k(),
+                    config.b_bits(),
+                    config.register_count(),
                 )
                 .map(DirectedScore::from)
             });
@@ -852,6 +894,7 @@ pub fn compute_tile_adaptive(
 /// Returns [`TileBuildError`] before allocation when axes, source sequences, or request
 /// fields are incompatible.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "validation")]
 pub fn compute_frozen_tile_adaptive(
     x: &FrozenAxis,
     y: &FrozenAxis,
@@ -862,8 +905,9 @@ pub fn compute_frozen_tile_adaptive(
     request: TileRequest,
     policy: SparseCorrectionPolicy,
 ) -> Result<MatrixTile, TileBuildError> {
-    validate_source_sequences(x, y, x_sequence, y_sequence)?;
+    sparse::validate_source_sequences(x, y, x_sequence, y_sequence)?;
     let mut tile = compute_frozen_tile(x, y, request)?;
+    let config = x.scientific_config;
     if x.sparse_core.is_empty() && y.sparse_core.is_empty() {
         return Ok(tile);
     }
@@ -899,9 +943,9 @@ pub fn compute_frozen_tile_adaptive(
                 estimate_containment_bit_sliced(
                     &x.core_encoded[x_local],
                     &y.expanded_encoded[y_local],
-                    request.k,
-                    request.b_bits,
-                    request.register_limit,
+                    config.k(),
+                    config.b_bits(),
+                    config.register_count(),
                 )
                 .map(DirectedScore::from)
             });
@@ -909,9 +953,9 @@ pub fn compute_frozen_tile_adaptive(
                 estimate_containment_bit_sliced(
                     &y.core_encoded[y_local],
                     &x.expanded_encoded[x_local],
-                    request.k,
-                    request.b_bits,
-                    request.register_limit,
+                    config.k(),
+                    config.b_bits(),
+                    config.register_count(),
                 )
                 .map(DirectedScore::from)
             });
@@ -928,29 +972,15 @@ pub fn compute_frozen_tile_adaptive(
     Ok(tile)
 }
 
-fn validate_source_sequences(
-    x: &impl AxisData,
-    y: &impl AxisData,
-    x_sequence: &PackedSequence,
-    y_sequence: &PackedSequence,
-) -> Result<(), TileBuildError> {
-    if x.sequence_length() != x_sequence.len()
-        || y.sequence_length() != y_sequence.len()
-        || x.domain_length() < x_sequence.len()
-        || y.domain_length() < y_sequence.len()
-    {
-        return Err(TileBuildError::IncompatibleSequence);
-    }
-    Ok(())
-}
-
 #[derive(Clone, Copy, Debug)]
+#[cfg(feature = "validation")]
 struct DirectedScore {
     containment: f64,
     ani: f64,
     direction: DirectionEvidence,
 }
 
+#[cfg(feature = "validation")]
 impl From<ContainmentEstimate> for DirectedScore {
     fn from(value: ContainmentEstimate) -> Self {
         Self {
@@ -962,6 +992,7 @@ impl From<ContainmentEstimate> for DirectedScore {
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[cfg(feature = "validation")]
 fn exact_sparse_tile_direction(
     query: &impl AxisData,
     target: &impl AxisData,
@@ -1008,8 +1039,8 @@ fn exact_sparse_tile_direction(
             let correct = needs_exact_correction(
                 core.len(),
                 target.expanded_encoded()[target_local].estimated_cardinality(),
-                request.register_limit,
-                request.k,
+                query.scientific_config().register_count(),
+                query.scientific_config().k(),
                 policy.ani_floor,
                 policy.minimum_detection_probability,
             );
@@ -1047,7 +1078,7 @@ fn exact_sparse_tile_direction(
     );
     for item in canonical_hashes(
         target_sequence,
-        request.k,
+        query.scientific_config().k(),
         genomic_start,
         genomic_end,
         hash_algorithm,
@@ -1119,7 +1150,7 @@ fn exact_sparse_tile_direction(
                 ani: if containment == 0.0 {
                     0.0
                 } else {
-                    containment.powf(1.0 / f64::from(request.k))
+                    containment.powf(1.0 / f64::from(query.scientific_config().k()))
                 },
                 direction: direction[output],
             });
@@ -1128,6 +1159,7 @@ fn exact_sparse_tile_direction(
     scores
 }
 
+#[cfg(feature = "validation")]
 fn expanded_target_cells(half: usize, resolution: usize) -> (usize, usize) {
     let base = half / 2;
     let first = if half.is_multiple_of(2) {
@@ -1144,6 +1176,7 @@ fn expanded_target_cells(half: usize, resolution: usize) -> (usize, usize) {
     (first, last)
 }
 
+#[cfg(feature = "validation")]
 fn add_exact_direction(
     evidence: &mut DirectionEvidence,
     query: crate::dna::Orientation,
@@ -1163,6 +1196,7 @@ fn add_exact_direction(
     }
 }
 
+#[cfg(feature = "validation")]
 fn choose_directed_score(
     left: Option<DirectedScore>,
     right: Option<DirectedScore>,
@@ -1179,6 +1213,7 @@ fn choose_directed_score(
 }
 
 /// Minimal open-addressing index for a set of already uniform 64-bit hashes.
+#[cfg(feature = "validation")]
 struct PrehashedQueryIndex {
     keys: Vec<u64>,
     values: Vec<usize>,
@@ -1187,6 +1222,7 @@ struct PrehashedQueryIndex {
     index_shift: u32,
 }
 
+#[cfg(feature = "validation")]
 impl PrehashedQueryIndex {
     fn new(hashes: impl IntoIterator<Item = u64>) -> Self {
         let hashes = hashes.into_iter().collect::<Vec<_>>();
@@ -1269,6 +1305,7 @@ fn compute_tile_impl(
         direction: vec![0; cell_count],
         direction_support: vec![0; cell_count],
     };
+    let config = x.scientific_config;
     let is_self_axis = std::ptr::eq(x, y);
     let mirror_within_tile = is_self_axis && request.x_start == request.y_start && width == height;
 
@@ -1307,16 +1344,16 @@ fn compute_tile_impl(
                     estimate_containment_bit_sliced(
                         &x.core_encoded[x_local],
                         &y.expanded_encoded[y_local],
-                        request.k,
-                        request.b_bits,
-                        request.register_limit,
+                        config.k(),
+                        config.b_bits(),
+                        config.register_count(),
                     ),
                     estimate_containment_bit_sliced(
                         &y.core_encoded[y_local],
                         &x.expanded_encoded[x_local],
-                        request.k,
-                        request.b_bits,
-                        request.register_limit,
+                        config.k(),
+                        config.b_bits(),
+                        config.register_count(),
                     ),
                 )
             } else {
@@ -1324,16 +1361,16 @@ fn compute_tile_impl(
                     estimate_containment_bit_sliced_scalar(
                         &x.core_encoded[x_local],
                         &y.expanded_encoded[y_local],
-                        request.k,
-                        request.b_bits,
-                        request.register_limit,
+                        config.k(),
+                        config.b_bits(),
+                        config.register_count(),
                     ),
                     estimate_containment_bit_sliced_scalar(
                         &y.core_encoded[y_local],
                         &x.expanded_encoded[x_local],
-                        request.k,
-                        request.b_bits,
-                        request.register_limit,
+                        config.k(),
+                        config.b_bits(),
+                        config.register_count(),
                     ),
                 )
             };
@@ -1344,16 +1381,16 @@ fn compute_tile_impl(
                     estimate_containment_bit_sliced(
                         &x.core_encoded[x_local],
                         &y.expanded_encoded[y_local],
-                        request.k,
-                        request.b_bits,
-                        request.register_limit,
+                        config.k(),
+                        config.b_bits(),
+                        config.register_count(),
                     ),
                     estimate_containment_bit_sliced(
                         &y.core_encoded[y_local],
                         &x.expanded_encoded[x_local],
-                        request.k,
-                        request.b_bits,
-                        request.register_limit,
+                        config.k(),
+                        config.b_bits(),
+                        config.register_count(),
                     ),
                 )
             };
@@ -1421,9 +1458,6 @@ mod tests {
                 y_start: 0,
                 width: 16,
                 height: 16,
-                b_bits: 14,
-                register_limit: 256,
-                k: 15,
             },
         )
         .unwrap();
@@ -1457,9 +1491,6 @@ mod tests {
                 y_start: 0,
                 width: 10,
                 height: 10,
-                b_bits: 14,
-                register_limit: 128,
-                k: 15,
             },
         )
         .unwrap();
@@ -1476,9 +1507,6 @@ mod tests {
             y_start: 0,
             width: 0,
             height: usize::MAX,
-            b_bits: 14,
-            register_limit: 128,
-            k: 15,
         };
         assert_eq!(
             compute_tile(&axis, &axis, request),
@@ -1499,6 +1527,50 @@ mod tests {
             ),
             Err(TileBuildError::IncompatibleAxes)
         );
+
+        let different_k =
+            build_axis_overview(&sequence, sequence.len(), 4, config(17, 128, 8, false)).unwrap();
+        assert_eq!(
+            compute_tile(
+                &axis,
+                &different_k,
+                TileRequest {
+                    width: 1,
+                    height: 1,
+                    ..request
+                }
+            ),
+            Err(TileBuildError::IncompatibleAxes)
+        );
+    }
+
+    #[test]
+    fn frozen_ranges_own_and_validate_scientific_and_sequence_provenance() {
+        let bases = pseudo_random_sequence(20_000);
+        let sequence = PackedSequence::from_ascii("source", &bases);
+        let scientific = config(15, 128, 8, false);
+        let first = build_axis_range(&sequence, sequence.len(), 8, 0, 4, scientific)
+            .unwrap()
+            .freeze();
+        let second = build_axis_range(&sequence, sequence.len(), 8, 4, 4, scientific)
+            .unwrap()
+            .freeze();
+        let joined = FrozenAxis::join_contiguous(vec![first.clone(), second]).unwrap();
+        assert_eq!(joined.scientific_config().identity(), scientific.identity());
+        assert_eq!(joined.sequence_identity(), sequence.identity());
+        assert_eq!(joined.sequence_name(), sequence.name());
+        assert_eq!(joined.offset(), 0);
+        assert_eq!(joined.core_encoded().len(), 8);
+
+        let different_bases = pseudo_random_sequence(20_001)[1..].to_vec();
+        let different = PackedSequence::from_ascii("source", &different_bases);
+        let incompatible = build_axis_range(&different, different.len(), 8, 4, 4, scientific)
+            .unwrap()
+            .freeze();
+        assert!(matches!(
+            FrozenAxis::join_contiguous(vec![first, incompatible]),
+            Err(TileBuildError::IncompatibleAxes)
+        ));
     }
 
     #[test]
@@ -1517,9 +1589,6 @@ mod tests {
             y_start: 0,
             width: 20,
             height: 20,
-            b_bits: 14,
-            register_limit: 256,
-            k: 15,
         };
         assert_eq!(
             compute_tile(&left_axis, &right_axis, request).unwrap(),
@@ -1546,9 +1615,6 @@ mod tests {
             y_start: 41,
             width: 29,
             height: 27,
-            b_bits: 14,
-            register_limit: 256,
-            k: 15,
         };
 
         assert_eq!(
@@ -1560,6 +1626,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "validation")]
     fn adaptive_builder_retains_only_complete_bounded_core_sets() {
         let random = PackedSequence::from_ascii("random", &pseudo_random_sequence(20_000));
         let dense =
@@ -1588,6 +1655,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "validation")]
     fn adaptive_tile_recovers_a_sparse_core_contained_in_a_large_target() {
         let x_bases = pseudo_random_sequence(1_000);
         let mut y_bases = x_bases.clone();
@@ -1610,9 +1678,6 @@ mod tests {
                 y_start: 0,
                 width: 1,
                 height: 1,
-                b_bits: 14,
-                register_limit: 2_048,
-                k: 21,
             },
             SparseCorrectionPolicy {
                 ani_floor: 0.80,

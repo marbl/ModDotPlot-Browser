@@ -9,7 +9,8 @@ application.
 ## Supported browsers
 
 Use a current desktop version of Chrome, Edge, Firefox, or Safari with WebAssembly,
-Web Workers, and WebGL2 enabled. Mobile browsers are not supported in the v0.2 beta.
+Web Workers, and WebGL2 enabled. Mobile browsers are not supported in this functional
+preview.
 
 The application must be opened from an HTTP or HTTPS address. A downloaded build will
 not work reliably by double-clicking `index.html`, because browsers restrict module

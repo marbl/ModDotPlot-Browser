@@ -71,8 +71,9 @@ no runtime API, CDN dependency, telemetry, or analytics.
 
 Rejected production candidates are not used by the browser. Git tag `v0.1.0` preserves
 the old Phase 0/minmer/MashMap-compatible code when historical inspection is needed.
-The remaining legacy-estimator and fused-projection validation APIs are deprecated in
-v0.2.1 and scheduled for removal or non-default feature isolation in v0.3.0.
+Legacy-estimator selection, fused projection, and sparse correction are available only
+through the non-default Rust `validation` feature and are absent from the ordinary
+browser and default public API.
 
 ### Wasm crate
 
@@ -85,6 +86,8 @@ v0.2.1 and scheduled for removal or non-default feature isolation in v0.3.0.
 * resource admission and memory estimates;
 * consuming tile-channel transfer methods.
 
+Preparation, exact cache identity, resource admission, composition state, and immutable
+session selection context have separate ownership modules behind the thin binding.
 It owns sequences and scientific caches. JavaScript never receives raw sequence bytes
 except short base-code spans needed for exact terminal coloring.
 
@@ -107,6 +110,10 @@ shift them. FASTA is parsed incrementally and records are committed transactiona
 An `OphSketch` temporarily stores full 64-bit winners, orientation, HLL, and observation
 count. Axis construction hashes each relevant k-mer once into half-bin sketches, then
 merges exact register winners into core and expanded cells.
+
+Each axis also owns the complete validated `ScientificConfig` and source-sequence
+identity. `FrozenAxis` storage is private; ordinary `TileRequest` values are geometric
+only, and tile parameters are derived from compatible axes before allocation.
 
 `AxisOverview::freeze` discards builders and retains only:
 

@@ -33,9 +33,6 @@ fn bbit_overview_tracks_exact_high_identity_windows() {
             y_start: 0,
             width: RESOLUTION,
             height: RESOLUTION,
-            b_bits: 14,
-            register_limit: 2_048,
-            k: K,
         },
         SparseCorrectionPolicy {
             ani_floor: config.ani_floor(),

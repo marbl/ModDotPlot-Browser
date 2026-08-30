@@ -25,7 +25,7 @@ This checklist applies to the next functional-preview release. Do not use
 - [x] Verified-winner OPH and HLL p10 are supported by the documented sweep.
 - [x] Initial terminal views enter exact mode before their first tile.
 - [x] `U/u` normalization and coordinate behavior are documented and tested.
-- [ ] Rejected estimator and fused-projection executable paths have been removed from
+- [x] Rejected estimator and fused-projection executable paths have been removed from
   default artifacts or isolated in validation-only code.
 - [x] Freeze the new release config version/digests and record them in generated
   parameters and release notes.
@@ -40,6 +40,8 @@ Run from a clean checkout:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo clippy --workspace --all-targets --features validation -- -D warnings
+cargo test --workspace --features validation
 cargo check -p moddotplot-wasm --target wasm32-unknown-unknown
 npm --prefix web ci
 npm --prefix web run verify

@@ -8,5 +8,19 @@ description = "Scientific computation core for moddotplot-rs"
 
 [dependencies]
 
+[features]
+default = []
+validation = []
+
+[[test]]
+name = "estimator_validation"
+path = "tests/estimator_validation.rs"
+required-features = ["validation"]
+
+[[test]]
+name = "statistical_accuracy"
+path = "tests/statistical_accuracy.rs"
+required-features = ["validation"]
+
 [lints]
 workspace = true
