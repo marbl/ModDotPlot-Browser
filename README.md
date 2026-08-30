@@ -49,6 +49,9 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
 * Reach an exact k-mer dotplot at terminal zoom.
 * Recolor cached results with an 80% to 100% three-anchor transfer function.
 * Stack local GC% and CpG tracks or imported plain/gzip/BGZF BED/GFF/GTF annotations along either axis.
+* Export current-view data through Save As as BEDPE by default or CSV.
+* Export the complete visible composition as PNG, SVG, or PDF; SVG and PDF keep axes,
+  labels, and tracks as vectors while embedding the heatmap as a raster.
 * Report computation progress, estimated application memory, and method provenance.
 
 See the [user guide](docs/USER_GUIDE.md) for operation and interpretation.

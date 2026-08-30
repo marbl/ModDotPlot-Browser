@@ -123,10 +123,12 @@ only, and tile parameters are derived from compatible axes before allocation.
 * register occupancy;
 * 32 fingerprint bit planes;
 * reverse and ambiguous orientation planes;
-* HLL cardinality and observation scalars;
-* optional complete sparse-core hash sets.
+* HLL cardinality and observation scalars.
 
-This prevents the previous double retention of full winners plus bit planes.
+Ordinary browser axes carry no complete k-mer sets. The non-default `validation`
+feature can additionally populate bounded sparse-core sets for controlled experiments;
+that storage and its correction kernels are outside the production path. Freezing
+prevents the previous double retention of full winners plus bit planes.
 
 ### MatrixTile
 
@@ -303,10 +305,11 @@ memory without attempting an exact all-pairs oracle.
 
 ### Export
 
-The v0.5 export represents the current viewport and its current mix of preview,
-refined, and exact renderer inputs. A future explicit publication tier may request and
-freeze an all-detailed viewport before export; that would be a usability feature, not a
-change to the current scientific configuration.
+The current export represents the active viewport and its current mix of preview,
+refined, and exact renderer inputs. v0.6.0 adds BEDPE and complete-composition
+PNG/SVG/PDF formats without changing that scientific behavior. A future explicit
+publication tier may request and freeze an all-detailed viewport before export; that
+would be a usability feature, not a change to the current scientific configuration.
 
 ### Persistence and 1 Gb operation
 

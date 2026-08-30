@@ -27,6 +27,11 @@ function requireText(relativePath, text, description) {
   if (!contents.includes(text)) failures.push(`${relativePath}: ${description}`);
 }
 
+function forbidText(relativePath, text, description) {
+  const contents = readFileSync(join(repository, relativePath), "utf8");
+  if (contents.includes(text)) failures.push(`${relativePath}: ${description}`);
+}
+
 for (const relativePath of markdown) {
   const absolutePath = join(repository, relativePath);
   const contents = readFileSync(absolutePath, "utf8");
@@ -89,6 +94,46 @@ if (contract) {
     "docs/adr/0004-validated-production-backend.md",
     "Those two former release gates are complete",
     "browser-family and chromosome-scale gates are still presented as incomplete",
+  );
+  requireText(
+    "docs/SCIENTIFIC_SPEC.md",
+    "These routines are not part of the browser protocol, Wasm surface, ordinary\nweb build, production estimator, or release accuracy contract.",
+    "validation-only sparse correction is not excluded from the production contract",
+  );
+  requireText(
+    "docs/SCIENTIFIC_SPEC.md",
+    "Sparse-correction fields are fixed\nto their disabled values in production.",
+    "production ScientificConfig does not document disabled sparse fields",
+  );
+  forbidText(
+    "docs/SCIENTIFIC_SPEC.md",
+    "and optional bounded sparse sets.",
+    "production FrozenAxis still claims optional bounded sparse sets",
+  );
+  requireText(
+    "docs/VALIDATION_CONTRACT.md",
+    "and v0.6.0 production cleanup plus export\nusability.",
+    "completed product sequence does not include v0.6.0",
+  );
+  requireText(
+    "docs/adr/0003-progressive-estimation-policy.md",
+    "Superseded by ADR 0004. This record preserves the intermediate design",
+    "superseded ADR status is ambiguous",
+  );
+  forbidText(
+    "docs/adr/0004-validated-production-backend.md",
+    "| Current contract | v0.2.0 state |",
+    "historical v0.2.0 table is mislabeled as current",
+  );
+  requireText(
+    "README.md",
+    "Export current-view data through Save As as BEDPE by default or CSV.",
+    "v0.6.0 data export is missing from the feature summary",
+  );
+  requireText(
+    "README.md",
+    "Export the complete visible composition as PNG, SVG, or PDF",
+    "v0.6.0 image export is missing from the feature summary",
   );
 
   const adr = readFileSync(

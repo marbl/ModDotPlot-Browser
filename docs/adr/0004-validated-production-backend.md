@@ -22,7 +22,7 @@ a compelling structural-recovery benefit, so the mode remains disabled by defaul
 The browser toggle described here was an intermediate experiment and is superseded by
 the v0.6.0 amendment above.
 
-| Current contract | State |
+| Historical post-v0.5.0 experiment | State |
 | --- | --- |
 | Browser sparse correction | Optional Advanced options toggle; disabled by default |
 
@@ -53,7 +53,7 @@ The original decision was accepted during the beta hardening cycle. The final v0
 release supersedes decision 5, the high-sensitivity clause of decision 9, and decision
 13 while retaining them below as historical context.
 
-| Current contract | v0.2.0 state |
+| Historical v0.2.0 contract | State |
 | --- | --- |
 | Wasm session budget | 3072 MiB (3 GiB) |
 | Imported annotation formats | BED3–12, GFF3, and GTF; plain text, gzip, and BGZF |

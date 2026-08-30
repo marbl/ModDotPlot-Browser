@@ -7,6 +7,18 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-30
+
+### Changed
+
+* Clarified in the normative scientific specification that sparse correction is
+  confined to the non-default validation feature and excluded from the production
+  estimator and release accuracy contract.
+* Updated the design, validation sequence, ADR status labels, README feature summary,
+  and release provenance to reflect the completed v0.6 series accurately.
+* Strengthened automated documentation checks for the production/validation boundary,
+  completed release sequence, historical ADR labeling, and export documentation.
+
 ## [0.6.0] - 2026-08-30
 
 ### Added

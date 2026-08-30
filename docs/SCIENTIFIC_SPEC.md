@@ -55,9 +55,12 @@ registers remain empty. Winner orientation is combined if the same canonical k-m
 observed on both source strands.
 
 The production matrix representation is `FrozenAxis`: occupancy, 32 winner fingerprint
-bit planes, orientation bit planes, observation/cardinality scalars, coordinate bounds,
-and optional bounded sparse sets. Mutable full-winner builders are discarded after
-freezing. A test-only scalar comparator checks the optimized word-parallel counters.
+bit planes, orientation bit planes, observation/cardinality scalars, and coordinate
+bounds. Ordinary browser axes do not retain complete k-mer sets. Mutable full-winner
+builders are discarded after freezing. A test-only scalar comparator checks the
+optimized word-parallel counters. Non-default validation builds may additionally retain
+bounded exact sets for controlled experiments; those sets are outside the production
+contract.
 
 For two aligned signatures:
 
@@ -124,12 +127,13 @@ containment evidence becomes sparse in this regime.
 The default palette uses the selected plot background below 85%; the 80% control is
 retained for advanced inspection, not as a promise of uniform sensitivity.
 
-The backend's optional sparse policy retains a complete canonical-hash set only
-while a core has at most 2,048 distinct hashes. If OPH match-detection probability at
-80% ANI is modeled below 99%, the eligible directed containment is rescanned exactly.
-Partial sets are discarded immediately on exceeding the cap. It remains available for
-optional repeat-window inspection but is not the default estimator and is not a
-whole-matrix exact guarantee.
+The non-default Rust `validation` feature preserves the rejected sparse-correction
+experiment solely for controlled estimator comparisons. It may retain a complete
+canonical-hash set while a core has at most 2,048 distinct hashes and rescan eligible
+directed containment when the historical match-detection model falls below 99% at an
+80% floor. These routines are not part of the browser protocol, Wasm surface, ordinary
+web build, production estimator, or release accuracy contract. The historical policy
+and its limitations are recorded in ADR 0004.
 
 ## Terminal exact mode
 
@@ -142,11 +146,14 @@ enter this mode before drawing their first tile.
 
 ## Configuration and change control
 
-Every sketch tile is governed by an immutable `ScientificConfig` containing schema
-version, `k`, hash identity/seed field, register count, comparison/verification widths,
-OPH estimator, HLL precision, expansion and ANI transforms, sparse policy, fixed-point
-scale, and missing sentinel. Validation occurs before allocation. A stable digest is
-part of worker messages, renderer cache keys, UI provenance, and numeric/image exports.
+Every production sketch tile is governed by an immutable `ScientificConfig` containing
+schema version, `k`, hash identity/seed field, register count,
+comparison/verification widths, OPH estimator, HLL precision, expansion and ANI
+transforms, fixed-point scale, and missing sentinel. Sparse-correction fields are fixed
+to their disabled values in production. Non-default validation configurations may
+populate those fields for controlled experiments. Validation occurs before allocation.
+A stable digest is part of worker messages, renderer cache keys, UI provenance, and
+numeric/image exports.
 
 Any change to numeric output requires a configuration-version decision, exact-oracle
 comparison, optimized/scalar equivalence where applicable, spatial and threshold

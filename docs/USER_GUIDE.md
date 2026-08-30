@@ -267,7 +267,7 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.6.0 remains a functional preview. Its bounded preregistered validation supports
+* v0.6.1 remains a functional preview. Its bounded preregistered validation supports
   the selected defaults but is not a universal estimator guarantee.
 * Very large records are limited by available browser memory; bounded in-memory
   sharding is implemented, but optional disk spill may still be needed before claiming

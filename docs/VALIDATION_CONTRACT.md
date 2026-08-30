@@ -107,9 +107,10 @@ application estimates are not described as complete browser-process or GPU peaks
 
 ## Product sequence
 
-The approved sequence is v0.2.1 evidence hardening, v0.3.0 core-contract refactoring,
-v0.4.0 owned browser jobs and operational scaling, and v0.5.0 display-aware scheduling
-plus scientific validation and export. v0.2.1 was manually accepted; later stages were
-authorized to proceed without pausing, provided every source and static-web checkpoint
-is retained for ordered testing. A v1.0.0 release is explicitly outside this sequence;
-additional usability work will precede any stable-release decision.
+The completed sequence is v0.2.1 evidence hardening, v0.3.0 core-contract refactoring,
+v0.4.0 owned browser jobs and operational scaling, v0.5.0 display-aware scheduling plus
+scientific validation and initial export, and v0.6.0 production cleanup plus export
+usability. v0.2.1 was manually accepted; later stages were authorized to proceed without
+pausing, provided every source and static-web checkpoint was retained for ordered
+testing. A v1.0.0 release remains explicitly outside this sequence; additional usability
+work will precede any stable-release decision.
