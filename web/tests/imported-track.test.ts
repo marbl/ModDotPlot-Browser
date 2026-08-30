@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  annotationAdmissionError,
   assignFeatureLanes,
   gffFeatureColor,
   inferFeatureFormat,
@@ -11,6 +12,12 @@ import {
 import { midpointSwapDirection } from "../src/imported-track";
 
 describe("imported feature tracks", () => {
+  it("enforces the documented annotation admission envelope", () => {
+    expect(annotationAdmissionError(512 * 1024 * 1024, 1_000_000)).toBeNull();
+    expect(annotationAdmissionError(512 * 1024 * 1024 + 1, 1)).toContain("bytes");
+    expect(annotationAdmissionError(1, 1_000_001)).toContain("matching records");
+  });
+
   it("recognizes supported text formats and UCSC itemRgb colors", () => {
     expect(inferFeatureFormat("regions.bed")).toBe("bed");
     expect(inferFeatureFormat("regions.bed.gz")).toBe("bed");

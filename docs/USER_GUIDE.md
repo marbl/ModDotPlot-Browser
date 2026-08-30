@@ -44,11 +44,16 @@ returns to the input screen and reports the problem in a dialog.
 ## Read the plot
 
 In **Similarity** mode, each pixel summarizes one interval on the X axis against one
-interval on the Y axis. Color represents a containment-derived identity estimate:
+interval on the Y axis. Color represents the containment-derived ModDotPlot score:
 
 ```text
-ANI = containment^(1/k)
+ANI_c = containment^(1/k)
 ```
+
+`ANI_c` is a display transform of k-mer containment. It is not biological average
+nucleotide identity and should not be interpreted as equivalent to alignment-derived
+`ANI_m`. The sketch is validated against exact containment from complete canonical
+k-mer sets.
 
 Containment is evaluated in both core-versus-expanded directions and the larger value
 is displayed. The expansion makes the plot less sensitive to two homologous intervals
@@ -67,7 +72,7 @@ comes from the canonical orientations of verified matching k-mers in both contai
 directions. Low-support colors are blended toward gray; this reduces visual confidence
 without weakening the underlying match intensity.
 
-Hover over the plot to see the identity estimate and exact X/Y coordinate intervals.
+Hover over the plot to see the `ANI_c` score and exact X/Y coordinate intervals.
 Areas outside a shorter selected record are blank.
 
 When available horizontal space exceeds the plot's required width, the complete plot
@@ -157,7 +162,9 @@ Drop a BED, GFF3, or GTF file on the X or Y coordinate axis, or use **Add track*
 the bottom of the Feature tracks panel. Plain-text, gzip, and BGZF versions are
 accepted. An axis is highlighted while it is a valid drop target. File drops elsewhere
 in the application are intercepted and reported instead of opening the file in the
-browser.
+browser. One file may contain at most 512 MiB of compressed or uncompressed input and
+one million records matching the selected sequence. Larger imports are rejected with
+an explanation before an unbounded completed-track graph can be retained.
 
 For a self-comparison, **Add track** associates the file with that sequence. For a
 pairwise comparison, the browser scans sequence identifiers first. A unique match is

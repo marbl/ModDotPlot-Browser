@@ -19,8 +19,14 @@ and ModDotPlot-style maximum directed containment:
 
 ```text
 C = max(containment(X core, Y expanded), containment(Y core, X expanded))
-ANI = C^(1/k)
+ANI_c = C^(1/k)
 ```
+
+`ANI_c` is the historical ModDotPlot name for this containment-derived display score.
+It is not a claim of biological average nucleotide identity or equivalence to
+alignment-derived `ANI_m`. Scientific validation tests the sketch against containment
+from complete canonical k-mer sets. See the
+[validation contract](docs/VALIDATION_CONTRACT.md).
 
 The default first view uses 256 OPH registers. Completed 256-cell blocks paint while
 the axes are still being prepared. After preview paint, only tiles whose quick result
@@ -39,7 +45,7 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
 * Render 500, 1,000, 2,000, or 4,000 overview cells per axis.
 * Paint completed quick blocks immediately and refine uncertain tiles asynchronously.
 * Pan and zoom through cached 256 by 256 tiles with coarse visual fallback.
-* Switch between containment-derived ANI and support-aware orientation coloring.
+* Switch between containment-derived `ANI_c` and support-aware orientation coloring.
 * Reach an exact k-mer dotplot at terminal zoom.
 * Recolor cached results with an 80% to 100% three-anchor transfer function.
 * Stack local GC% and CpG tracks or imported plain/gzip/BGZF BED/GFF/GTF annotations along either axis.
@@ -111,6 +117,7 @@ dependency license texts are bundled in
 * [Scientific specification](docs/SCIENTIFIC_SPEC.md)
 * [Generated current parameters](docs/CURRENT_PARAMETERS.md)
 * [Implementation status and release gates](docs/STATUS.md)
+* [Validation contract](docs/VALIDATION_CONTRACT.md)
 * [User guide](docs/USER_GUIDE.md)
 * [Contribution policy](CONTRIBUTING.md)
 * [Citation and method credits](docs/CITATIONS.md)

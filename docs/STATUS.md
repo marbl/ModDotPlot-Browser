@@ -41,6 +41,8 @@ by the named evidence; it does not imply broad research validation.
   models with distinct CDS geometry, one-to-ten-row deterministic lane packing,
   synchronous pan, feature mouseovers, midpoint-triggered direct strip reordering,
   pointer-following drag previews, and first-release drag-away disabling.
+  Annotation files are admitted up to 512 MiB and one million matching records; the
+  generated million-record parser/publication gate passes on the release host.
 * Actionable compute-worker recovery that rebuilds the engine and reloads the user's
   retained browser `File` objects after a worker crash.
 * Atomic clean build, pinned toolchains and CI actions, CycloneDX SBOM, dependency
@@ -55,6 +57,18 @@ hard-coded here. The CI commands in the README are the release contract.
 
 ## Backend validation result
 
+The v0.2.1 normal acceptance test exercises the exact sparse-disabled browser
+production path. Against complete canonical k-mer sets, the fixed production seed
+produces:
+
+| Tier | Mean absolute `ANI_c` error | P95 absolute `ANI_c` error | 0.80 crossing rate |
+| --- | ---: | ---: | ---: |
+| 256-register preview | 0.027657 | 0.225955 | 4.92% |
+| 1,024-register detailed | 0.004658 | 0.023787 | 0.88% |
+
+Both pass the preregistered gates without sparse correction. Preview is intentionally
+a fast structural approximation and has no maximum-error requirement.
+
 The ignored estimator sweep covers register counts 256/1,024/2,048; HLL precisions
 8–12; legacy collision-corrected and verified-winner OPH; production seed zero plus
 three validation-only seeded ntHash2 permutations; multiple sequence realizations;
@@ -65,7 +79,7 @@ error autocorrelation, feature-rank overlap, component-count stability; runtime;
 
 Selected observations:
 
-| Configuration | Mean absolute ANI error | P95 absolute ANI error |
+| Configuration | Mean absolute `ANI_c` error | P95 absolute `ANI_c` error |
 | --- | ---: | ---: |
 | 1,024 registers, HLL p10, legacy statistic | 0.008350 | 0.026505 |
 | 1,024 registers, HLL p10, verified winners | 0.008108 | 0.025736 |
@@ -97,9 +111,11 @@ are in the [v0.2.0-beta.1 validation record](releases/v0.2.0-beta.1/VALIDATION.m
 ## Remaining beta/research gates
 
 1. Run a broader preregistered statistical grid over sequence complexity, indels,
-   repeat classes, cardinality ratios, and many independent realizations. Report
-   threshold confusion, connected structure, continuity, local error, bias, variance,
-   and spatial error correlation.
+   repeat classes, cardinality ratios, and many independent realizations, always using
+   exact complete k-mer-set containment as the reference. Report threshold confusion,
+   connected structure, continuity, local error, bias, variance, and spatial error
+   correlation. Do not interpret `ANI_c` as biological ANI; any biological comparison
+   is limited to controlled point mutation without large indels.
 2. Add stable numeric and pixel goldens beyond the current behavioral browser suite.
 3. Implement sequence/sketch sharding and optional bounded disk spill before claiming
    robust one-billion-base operation across ordinary laptops.
@@ -107,6 +123,9 @@ are in the [v0.2.0-beta.1 validation record](releases/v0.2.0-beta.1/VALIDATION.m
 
 Until gates 1–2 are complete, releases should remain labeled functional preview or
 beta, not research-validated.
+
+The staged work stops after each version for manual validation. v1.0.0 is not part of
+the current sequence because additional usability work is planned first.
 
 ## Historical evidence
 

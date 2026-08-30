@@ -19,7 +19,8 @@ Required behavior:
    scientific code path.
 3. Show a recognizable overview as early as possible, then improve it without blocking
    pan or zoom.
-4. Preserve ModDotPlot maximum-containment semantics and display `ANI=C^(1/k)`.
+4. Preserve ModDotPlot maximum-containment semantics and display `ANI_c=C^(1/k)`,
+   without treating `ANI_c` as biological average nucleotide identity.
 5. Distinguish forward and reverse matches with evidence-aware color confidence.
 6. Generate higher-resolution matrix tiles on demand, cache reusable work, prefetch a
    one-tile halo, and reach exact k-mer resolution.
@@ -68,8 +69,10 @@ no runtime API, CDN dependency, telemetry, or analytics.
 * axis construction, frozen summaries, and numeric tiles;
 * immutable validated scientific configuration.
 
-Rejected executable candidates are not shipped. Git tag `v0.1.0` preserves the old
-Phase 0/minmer/MashMap-compatible code when historical inspection is needed.
+Rejected production candidates are not used by the browser. Git tag `v0.1.0` preserves
+the old Phase 0/minmer/MashMap-compatible code when historical inspection is needed.
+The remaining legacy-estimator and fused-projection validation APIs are deprecated in
+v0.2.1 and scheduled for removal or non-default feature isolation in v0.3.0.
 
 ### Wasm crate
 

@@ -5,13 +5,26 @@ function read(root, relativePath) {
   return readFileSync(join(root, relativePath), "utf8");
 }
 
-function byteBudget(source, name) {
-  const expression = source.match(new RegExp(`const ${name}: usize = ([^;]+);`))?.[1];
-  if (!expression) throw new Error(`missing byte budget ${name}`);
+function numericProduct(expression, name) {
+  if (!expression) throw new Error(`missing numeric constant ${name}`);
   return expression
     .split("*")
     .map((item) => Number(item.trim().replaceAll("_", "")))
     .reduce((product, factor) => product * factor, 1);
+}
+
+function byteBudget(source, name) {
+  return numericProduct(
+    source.match(new RegExp(`const ${name}: usize = ([^;]+);`))?.[1],
+    name,
+  );
+}
+
+function typescriptConstant(source, name) {
+  return numericProduct(
+    source.match(new RegExp(`export const ${name} = ([^;]+);`))?.[1],
+    name,
+  );
 }
 
 function englishList(items) {
@@ -34,7 +47,7 @@ export function currentDocumentationContract(root) {
   const main = read(root, "web/src/main.ts");
   const importedTrackTypes = read(root, "web/src/imported-track-types.ts");
   const estimatorValidation = read(root, "crates/core/tests/estimator_validation.rs");
-  const releaseValidation = read(root, "docs/releases/v0.2.0-beta.1/estimator-validation.tsv");
+  const releaseValidation = read(root, "docs/releases/v0.2.1/estimator-validation.tsv");
 
   const formatDeclaration = importedTrackTypes.match(
     /export type ImportedTrackFormat = ([^;]+);/,
@@ -97,6 +110,10 @@ export function currentDocumentationContract(root) {
       wasmSessionBytes: byteBudget(wasm, "MAX_WASM_SESSION_BYTES"),
     },
     importedAnnotationSummary: `${englishList(labels)}; plain text, gzip, and BGZF`,
+    annotationLimits: {
+      bytes: typescriptConstant(importedTrackTypes, "MAX_IMPORTED_ANNOTATION_BYTES"),
+      records: typescriptConstant(importedTrackTypes, "MAX_IMPORTED_ANNOTATION_RECORDS"),
+    },
     browserSparseCorrectionSummary:
       "Disabled; no browser control (`sparseCorrection: false`)",
     validationColumns,

@@ -1,7 +1,7 @@
 {
   "name": "moddotplot-rs-ui",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "engines": {
     "node": "25.9.0",
@@ -20,6 +20,7 @@
     "sbom": "node ../scripts/generate-sbom.mjs",
     "verify": "npm run build:release && npm run test:e2e",
     "test": "vitest run tests",
+    "test:annotation-scale": "MODDOTPLOT_ANNOTATION_SCALE=1 vitest run tests/track-parser-scale.test.ts",
     "test:e2e": "playwright test --project=chromium --project=firefox --project=webkit",
     "test:e2e:chrome": "playwright test --project=chrome",
     "test:watch": "vitest"

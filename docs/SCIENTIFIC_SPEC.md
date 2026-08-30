@@ -88,12 +88,19 @@ For core intervals `X` and `Y`, and half-window expansions `X+` and `Y+`:
 C_x = containment(X, Y+)
 C_y = containment(Y, X+)
 C   = max(C_x, C_y)
-ANI = C^(1/k)
+ANI_c = C^(1/k)
 ```
 
-The maximum containment controls identity, while direction evidence from both directed
-comparisons is pooled. Identity is stored as `round(ANI * 10000)` in `u16`; `65535`
-means missing. A self cell on the principal diagonal is exactly 10000 by invariant.
+`ANI_c` is the historical ModDotPlot label for the containment-derived display
+transform. It is not biological average nucleotide identity and is not asserted to be
+equivalent to an alignment-derived measure such as `ANI_m`. The scientific acceptance
+target is estimated containment versus exact containment of complete canonical k-mer
+sets. `ANI_c` comparisons validate only the transformed, quantized product output.
+
+The maximum containment controls the display score, while direction evidence from both
+directed comparisons is pooled. The score is stored as `round(ANI_c * 10000)` in
+`u16`; `65535` means missing. A self cell on the principal diagonal is exactly 10000 by
+invariant.
 
 Direction votes are forward when matching canonical winners have equal unambiguous
 source orientations and reverse when they differ. `Both`/unknown observations are
@@ -109,9 +116,11 @@ only when the preview has low winner support or lies near a display decision. Pr
 tiles remain the settled result elsewhere. Navigation cancels obsolete work. The
 browser UI does not expose the bounded sparse-correction mode.
 
-K-mer survival under independent substitutions is approximately `ANI^k`. At `k=21`,
-80% ANI retains only about 0.92% of exact k-mers, so neither exact k-mer containment
-nor its sketches are reliable nucleotide-identity estimators far below this regime.
+Under independent point substitutions, with large indels excluded, k-mer survival at
+unaltered-base fraction `q` is approximately `q^k`. This is the only biological
+quantity against which `ANI_c` is intended to be compared, following Figure 4 of the
+ModDotPlot paper. At `k=21`, `q=0.80` retains only about 0.92% of exact k-mers, so
+containment evidence becomes sparse in this regime.
 The default palette uses the selected plot background below 85%; the 80% control is
 retained for advanced inspection, not as a promise of uniform sensitivity.
 
@@ -142,3 +151,6 @@ part of worker messages, renderer cache keys, UI provenance, and future exports.
 Any change to numeric output requires a configuration-version decision, exact-oracle
 comparison, optimized/scalar equivalence where applicable, spatial and threshold
 metrics, and updated release evidence.
+
+The complete claim boundary, test tiers, and post-v0.2.0 gates are frozen in
+[VALIDATION_CONTRACT.md](VALIDATION_CONTRACT.md).

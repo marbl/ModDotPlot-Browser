@@ -26,6 +26,21 @@ pub const DEFAULT_IDENTITY_SCALE: u16 = 10_000;
 /// Missing-value sentinel in the unsigned identity channel.
 pub const DEFAULT_MISSING_IDENTITY: u16 = u16::MAX;
 
+/// Exact canonical identity of a validated scientific configuration.
+///
+/// This value is suitable for in-process equality, ordering, and cache keys. The
+/// shorter 64-bit digest remains the external provenance label and is not used as the
+/// sole proof that two cached scientific objects are compatible.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ScientificConfigIdentity([u8; 54]);
+
+impl ScientificConfigIdentity {
+    /// Canonical little-endian field encoding.
+    pub const fn as_bytes(&self) -> &[u8; 54] {
+        &self.0
+    }
+}
+
 /// How neighboring context is added to the target interval.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(u8)]
@@ -238,14 +253,21 @@ impl ScientificConfig {
     /// Stable FNV-1a digest covering every scientific field.
     pub fn digest(self) -> u64 {
         let mut digest = 0xcbf2_9ce4_8422_2325_u64;
-        for byte in self.canonical_bytes() {
+        for byte in self.identity().0 {
             digest ^= u64::from(byte);
             digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
         }
         digest
     }
 
-    fn canonical_bytes(self) -> Vec<u8> {
+    /// Exact canonical identity covering every scientific field.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal schema edit changes the canonical encoding width without
+    /// updating [`ScientificConfigIdentity`]. Validated runtime values cannot trigger
+    /// this invariant.
+    pub fn identity(self) -> ScientificConfigIdentity {
         let mut bytes = Vec::with_capacity(64);
         bytes.extend_from_slice(&self.version.to_le_bytes());
         bytes.push(self.k);
@@ -263,7 +285,11 @@ impl ScientificConfig {
         bytes.extend_from_slice(&self.minimum_detection_probability.to_bits().to_le_bytes());
         bytes.extend_from_slice(&self.missing_identity.to_le_bytes());
         bytes.extend_from_slice(&self.identity_scale.to_le_bytes());
-        bytes
+        ScientificConfigIdentity(
+            bytes
+                .try_into()
+                .expect("scientific configuration identity has a fixed width"),
+        )
     }
 }
 
@@ -303,6 +329,7 @@ impl Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -319,6 +346,8 @@ mod tests {
         assert_eq!(detailed.digest(), 0xbc5c_5131_ad1c_9a20);
         assert_eq!(high_sensitivity.digest(), 0x16ed_6e4e_3c23_06c8);
         assert_eq!(preview.version(), SCIENTIFIC_CONFIG_VERSION);
+        assert_eq!(preview.identity().as_bytes().len(), 54);
+        assert_ne!(preview.identity(), detailed.identity());
     }
 
     #[test]
@@ -331,5 +360,171 @@ mod tests {
             ScientificConfig::production(32, 256, 12, false),
             Err(ConfigError::KmerLength)
         );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn canonical_identity_distinguishes_every_configurable_scientific_field() {
+        let configurations = [
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                19,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                1,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                512,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                12,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                40,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::BbitCollisionCorrected,
+                10,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                11,
+                0,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                2_048,
+                0.80,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.81,
+                0.99,
+            )
+            .unwrap(),
+            ScientificConfig::new(
+                21,
+                HashAlgorithm::NtHash2,
+                0,
+                256,
+                14,
+                32,
+                OphJaccardEstimator::VerifiedWinners,
+                10,
+                0,
+                0.80,
+                0.98,
+            )
+            .unwrap(),
+        ];
+        let identities = configurations
+            .into_iter()
+            .map(ScientificConfig::identity)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(identities.len(), configurations.len());
     }
 }

@@ -20,11 +20,13 @@ This checklist applies to the next functional-preview release. Do not use
 
 - [x] Production configuration is immutable, validated, versioned, and digestible.
 - [x] Exact distinct canonical k-mers are the independent containment oracle.
-- [x] Production output, not a benchmark-only path, is the acceptance-test subject.
+- [x] The browser-default preview, detailed, and selective-composite production paths
+  have assertion-backed exact-containment acceptance tests.
 - [x] Verified-winner OPH and HLL p10 are supported by the documented sweep.
 - [x] Initial terminal views enter exact mode before their first tile.
 - [x] `U/u` normalization and coordinate behavior are documented and tested.
-- [x] Obsolete executable candidates have been removed from the release tree.
+- [ ] Rejected estimator and fused-projection executable paths have been removed from
+  default artifacts or isolated in validation-only code.
 - [x] Freeze the new release config version/digests and record them in generated
   parameters and release notes.
 - [x] Run the bounded release statistical report and attach its complete machine-readable
@@ -63,6 +65,8 @@ npm --prefix web run verify
 - [x] Confirm no monotonic live-cache growth during a fixed pan/zoom trace.
 - [x] Clearly retain the 1 Gb input value as an upper bound rather than a laptop
   performance guarantee until sharding/spill validation is complete.
+- [x] Run the generated million-record annotation parser/publication gate and enforce
+  explicit per-file byte and matching-record admission limits.
 
 ## Reproducibility and distribution gate
 

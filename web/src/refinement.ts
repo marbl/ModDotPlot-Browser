@@ -1,3 +1,9 @@
+/** Versioned separately from scientific tile configuration because it selects quality tiers. */
+export const REFINEMENT_POLICY_VERSION = 1;
+export const REFINEMENT_LOWER_IDENTITY = 8_200;
+export const REFINEMENT_UPPER_IDENTITY = 9_000;
+export const REFINEMENT_HIGH_SUPPORT = 8;
+
 export function refinementKey(resolution: number, x: number, y: number): string {
   return `${resolution}:${x}:${y}`;
 }
@@ -17,10 +23,10 @@ export function tileRefinementPriority(
     const value = identity[index]!;
     if (value === 0xffff) continue;
     const evidence = support[index]!;
-    if (value >= 8_200 && value <= 9_000) {
+    if (value >= REFINEMENT_LOWER_IDENTITY && value <= REFINEMENT_UPPER_IDENTITY) {
       score += 2 / Math.sqrt(evidence + 1);
       informative += 1;
-    } else if (value > 9_000 && evidence < 8) {
+    } else if (value > REFINEMENT_UPPER_IDENTITY && evidence < REFINEMENT_HIGH_SUPPORT) {
       score += 1 / Math.sqrt(evidence + 1);
       informative += 1;
     }

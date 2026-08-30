@@ -44,7 +44,7 @@ mkdir -p "$artifact_directory"
 source_archive="$artifact_directory/moddotplot-rs-$release_version-source.tar.gz"
 binary_archive="$artifact_directory/moddotplot-rs-$release_version-web.tar.gz"
 provenance_file="$artifact_directory/moddotplot-rs-$release_version-provenance.txt"
-checksum_file="$artifact_directory/SHA256SUMS"
+checksum_file="$artifact_directory/moddotplot-rs-$release_version-SHA256SUMS"
 
 git archive --format=tar --prefix="moddotplot-rs-$release_version-source/" HEAD | gzip -n > "$source_archive"
 

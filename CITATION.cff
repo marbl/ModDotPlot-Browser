@@ -4,8 +4,8 @@ message: >-
   preferred citation and credit the relevant method papers listed in references.
 title: "moddotplot-rs"
 type: software
-version: 0.2.0
-date-released: 2026-08-29
+version: 0.2.1
+date-released: 2026-08-30
 repository-code: "https://github.com/marbl/moddotplot-rs"
 license: MIT-0
 abstract: >-

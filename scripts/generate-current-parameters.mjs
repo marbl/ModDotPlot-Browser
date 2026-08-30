@@ -106,6 +106,8 @@ const lines = [
   `| Heatmap minimum / midpoint / maximum | ${inputValue("heatmap-min")}% / ${inputValue("heatmap-mid")}% / ${inputValue("heatmap-max")}% |`,
   `| Browser sparse correction | ${documentationContract.browserSparseCorrectionSummary} |`,
   `| Imported annotation formats | ${documentationContract.importedAnnotationSummary} |`,
+  `| Imported annotation file limit | ${formatMib(documentationContract.annotationLimits.bytes)} |`,
+  `| Imported annotation matching-record limit | ${documentationContract.annotationLimits.records.toLocaleString("en-US")} per file |`,
   `| Estimator validation schema | ${documentationContract.validationColumns.length} columns, checked against release TSV |`,
   `| Zoom-axis cache budget | ${formatMib(documentationContract.budgets.zoomAxisBytes)} |`,
   `| Prepared-axis budget | ${formatMib(documentationContract.budgets.preparedAxisBytes)} |`,

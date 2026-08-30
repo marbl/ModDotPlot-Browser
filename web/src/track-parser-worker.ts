@@ -2,6 +2,7 @@
 
 import { decompressBgzfStream, isBgzfBlob } from "./bgzf";
 import {
+  annotationAdmissionError,
   assignFeatureLanes,
   gffFeatureColor,
   inferFeatureFormat,
@@ -69,7 +70,10 @@ interface GeneRecord {
 
 workerScope.onmessage = (event: MessageEvent<TrackParserRequest>): void => {
   const request = event.data;
-  const operation = request.type === "parse" ? parseFile(request) : inspectFile(request);
+  const admissionError = annotationAdmissionError(request.file.size, 0);
+  const operation = admissionError
+    ? Promise.reject(new Error(admissionError))
+    : request.type === "parse" ? parseFile(request) : inspectFile(request);
   void operation.catch((error: unknown) => {
     post({
       type: "error",
@@ -186,6 +190,7 @@ function parseBed(state: ParseState, line: string): void {
   }
   const clipped = clipInterval(state, rawStart, rawEnd);
   if (!clipped) return;
+  admitRecord(state);
   const [start, end] = clipped;
   const name = fields[3]?.trim() || `${sequenceId}:${rawStart + 1}-${rawEnd}`;
   const strand = parseStrand(fields[5]);
@@ -219,7 +224,6 @@ function parseBed(state: ParseState, line: string): void {
   const features = state.bedTracks.get(state.bedTrackName) ?? [];
   features.push(feature);
   state.bedTracks.set(state.bedTrackName, features);
-  state.validRecords += 1;
 }
 
 function parseBedBlocks(
@@ -283,6 +287,7 @@ function parseGff(state: ParseState, line: string, format: "gff3" | "gtf"): void
   if (!["0", "1", "2", "."].includes(phase)) {
     return invalid(state, `${format.toUpperCase()} phase must be 0, 1, 2, or .`);
   }
+  admitRecord(state);
   const strand = parseStrand(strandText);
   const details = [
     source !== "." ? `source ${source}` : "",
@@ -330,7 +335,13 @@ function parseGff(state: ParseState, line: string, format: "gff3" | "gtf"): void
   } else if (parents.length === 0) {
     state.otherGff.push({ id, name, type, start, end, strand, color: gffFeatureColor(type, attributes), blocks: [start, end], lane: 0, details });
   }
-  state.validRecords += 1;
+}
+
+function admitRecord(state: ParseState): void {
+  const next = state.validRecords + 1;
+  const admissionError = annotationAdmissionError(0, next);
+  if (admissionError) throw new Error(admissionError);
+  state.validRecords = next;
 }
 
 function transcript(state: ParseState, id: string): TranscriptBuilder {

@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  REFINEMENT_POLICY_VERSION,
   refinementKey,
   selectRefinementTiles,
   tileRefinementPriority,
 } from "../src/refinement";
 
 describe("display-uncertainty refinement", () => {
+  it("has independently versioned scheduler provenance", () => {
+    expect(REFINEMENT_POLICY_VERSION).toBe(1);
+  });
   it("settles missing, blank, and strongly supported high-identity tiles", () => {
     expect(tileRefinementPriority(new Uint16Array([0xffff, 8_000]), new Uint16Array([0, 0])))
       .toBe(0);

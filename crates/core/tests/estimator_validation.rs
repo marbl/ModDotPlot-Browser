@@ -1,5 +1,7 @@
 //! Multi-seed differential and spatial validation for OPH estimator candidates.
 
+#![allow(deprecated)]
+
 use moddotplot_core::hash::HashAlgorithm;
 use moddotplot_core::{
     AxisOverview, DEFAULT_ANI_FLOOR, DEFAULT_B_BITS, DEFAULT_MATCH_DETECTION_PROBABILITY,
@@ -23,6 +25,7 @@ struct Confusion {
 struct Metrics {
     relevant_errors: Vec<f64>,
     bias_sum: f64,
+    squared_error_sum: f64,
     confusion: [Confusion; THRESHOLDS.len()],
     diagonal_holes_80: usize,
     one_pixel_holes_85: usize,
@@ -40,40 +43,63 @@ struct Metrics {
     component_count_error_sum: usize,
     spatial_matrices: usize,
     compared: usize,
+    union_occupancy_sum: f64,
+    minimum_union_occupancy: Option<f64>,
+    union_occupancy_samples: usize,
     fingerprint_collisions: u64,
     comparison_time: Duration,
 }
 
 impl Metrics {
-    fn record(&mut self, exact: f64, estimated: f64, row: usize, column: usize) {
+    fn record(&mut self, exact: f64, estimated: ApproximateScore, row: usize, column: usize) {
         self.compared += 1;
+        self.union_occupancy_sum += estimated.mean_union_occupancy;
+        self.minimum_union_occupancy = Some(
+            self.minimum_union_occupancy
+                .map_or(estimated.minimum_union_occupancy, |current| {
+                    current.min(estimated.minimum_union_occupancy)
+                }),
+        );
+        self.union_occupancy_samples += 1;
         if exact >= ANI_FLOOR {
-            let difference = estimated - exact;
+            let difference = estimated.ani_c - exact;
             self.relevant_errors.push(difference.abs());
             self.bias_sum += difference;
-            if row == column && estimated < ANI_FLOOR {
+            self.squared_error_sum += difference * difference;
+            if row == column && estimated.ani_c < ANI_FLOOR {
                 self.diagonal_holes_80 += 1;
             }
         }
         for (index, threshold) in THRESHOLDS.into_iter().enumerate() {
             self.confusion[index].false_negative +=
-                usize::from(exact >= threshold && estimated < threshold);
+                usize::from(exact >= threshold && estimated.ani_c < threshold);
             self.confusion[index].false_positive +=
-                usize::from(exact < threshold && estimated >= threshold);
+                usize::from(exact < threshold && estimated.ani_c >= threshold);
         }
     }
 
-    fn summary(&mut self) -> (f64, f64, f64) {
+    fn summary(&mut self) -> Summary {
         self.relevant_errors.sort_by(f64::total_cmp);
         if self.relevant_errors.is_empty() {
-            return (f64::NAN, f64::NAN, f64::NAN);
+            return Summary::default();
         }
         let count = self.relevant_errors.len().max(1);
         let count_float = f64::from(u32::try_from(count).expect("fixture count fits u32"));
         let mean = self.relevant_errors.iter().sum::<f64>() / count_float;
         let p95 = self.relevant_errors[(self.relevant_errors.len().saturating_sub(1) * 95) / 100];
         let bias = self.bias_sum / count_float;
-        (mean, p95, bias)
+        let variance = (self.squared_error_sum / count_float - bias * bias).max(0.0);
+        Summary {
+            mean,
+            p95,
+            bias,
+            variance,
+            mean_union_occupancy: mean_error(
+                self.union_occupancy_sum,
+                self.union_occupancy_samples,
+            ),
+            minimum_union_occupancy: self.minimum_union_occupancy.unwrap_or(f64::NAN),
+        }
     }
 
     fn record_spatial(&mut self, exact: &[Option<f64>], estimated: &[Option<f64>], width: usize) {
@@ -143,11 +169,28 @@ impl Metrics {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct Summary {
+    mean: f64,
+    p95: f64,
+    bias: f64,
+    variance: f64,
+    mean_union_occupancy: f64,
+    minimum_union_occupancy: f64,
+}
+
+#[derive(Clone, Copy)]
+struct ApproximateScore {
+    ani_c: f64,
+    mean_union_occupancy: f64,
+    minimum_union_occupancy: f64,
+}
+
 #[test]
 #[ignore = "explicit scientific benchmark; run with --release --ignored --nocapture"]
 fn report_estimator_hll_and_fingerprint_sweep() {
     println!(
-        "estimator\tregisters\thll\tmean_abs_ani\tp95_abs_ani\tbias\tfn80\tfp80\tfn85\tfp85\tfn90\tfp90\tfn95\tfp95\tdiagonal_holes80\tone_pixel_holes85\tisolated_false85\tforward_continuity85\treverse_continuity85\tlocal3_error\tlocal5_error\tneighbor_error_corr\ttop_feature_overlap\tcomponent_count_error85\tfingerprint_collisions\tcomparison_ms"
+        "estimator\tregisters\thll\tmean_abs_ani_c\tp95_abs_ani_c\tani_c_bias\tani_c_error_variance\tmean_union_occupancy\tminimum_union_occupancy\tfn80\tfp80\tfn85\tfp85\tfn90\tfp90\tfn95\tfp95\tdiagonal_holes80\tone_pixel_holes85\tisolated_false85\tforward_continuity85\treverse_continuity85\tlocal3_error\tlocal5_error\tneighbor_error_corr\ttop_feature_overlap\tcomponent_count_error85\tfingerprint_collisions\tcomparison_ms\tselected_config_gate"
     );
     for registers in [256, 1_024, 2_048] {
         for hll_precision in [8, 9, 10, 11, 12] {
@@ -169,9 +212,22 @@ fn report_estimator_hll_and_fingerprint_sweep() {
                         );
                     }
                 }
-                let (mean, p95, bias) = combined.summary();
+                let summary = combined.summary();
+                let selected_config_gate = assert_selected_configuration_gate(
+                    registers,
+                    hll_precision,
+                    estimator,
+                    &combined,
+                    summary,
+                );
                 println!(
-                    "{estimator:?}\t{registers}\t{hll_precision}\t{mean:.6}\t{p95:.6}\t{bias:.6}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{}\t{:.3}",
+                    "{estimator:?}\t{registers}\t{hll_precision}\t{:.6}\t{:.6}\t{:.6}\t{:.8}\t{:.6}\t{:.6}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{}\t{:.3}\t{selected_config_gate}",
+                    summary.mean,
+                    summary.p95,
+                    summary.bias,
+                    summary.variance,
+                    summary.mean_union_occupancy,
+                    summary.minimum_union_occupancy,
                     combined.confusion[0].false_negative,
                     combined.confusion[0].false_positive,
                     combined.confusion[1].false_negative,
@@ -304,7 +360,7 @@ fn evaluate_pair(
                 exact_moddotplot_score(&left_sets.0, &left_sets.1, &right_sets.0, &right_sets.1, K);
             let index = row * RESOLUTION + column;
             exact_matrix[index] = exact.map(|value| value.ani);
-            estimated_matrix[index] = estimated;
+            estimated_matrix[index] = estimated.map(|value| value.ani_c);
             if let (Some(exact), Some(estimated)) = (exact, estimated) {
                 metrics.record(exact.ani, estimated, row, column);
             }
@@ -472,7 +528,7 @@ fn approximate_score(
     row: usize,
     registers: usize,
     estimator: OphJaccardEstimator,
-) -> Option<f64> {
+) -> Option<ApproximateScore> {
     let left_score = estimate_containment_bit_sliced_with(
         &left.core_encoded[column],
         &right.expanded_encoded[row],
@@ -490,10 +546,57 @@ fn approximate_score(
         estimator,
     );
     match (left_score, right_score) {
-        (Some(left), Some(right)) => Some(left.ani.max(right.ani)),
-        (Some(value), None) | (None, Some(value)) => Some(value.ani),
+        (Some(left), Some(right)) => {
+            let left_occupancy = f64::from(left.registers.considered) / registers_as_f64(registers);
+            let right_occupancy =
+                f64::from(right.registers.considered) / registers_as_f64(registers);
+            Some(ApproximateScore {
+                ani_c: left.ani.max(right.ani),
+                mean_union_occupancy: f64::midpoint(left_occupancy, right_occupancy),
+                minimum_union_occupancy: left_occupancy.min(right_occupancy),
+            })
+        }
+        (Some(value), None) | (None, Some(value)) => {
+            let occupancy = f64::from(value.registers.considered) / registers_as_f64(registers);
+            Some(ApproximateScore {
+                ani_c: value.ani,
+                mean_union_occupancy: occupancy,
+                minimum_union_occupancy: occupancy,
+            })
+        }
         (None, None) => None,
     }
+}
+
+fn assert_selected_configuration_gate(
+    registers: usize,
+    hll_precision: u8,
+    estimator: OphJaccardEstimator,
+    metrics: &Metrics,
+    summary: Summary,
+) -> &'static str {
+    if hll_precision != 10 || estimator != OphJaccardEstimator::VerifiedWinners {
+        return "not_applicable";
+    }
+    let (mean_limit, p95_limit, crossing_percent) = match registers {
+        // The multi-layout aggregate includes three deliberately perturbed validation
+        // hashes. The exact browser seed has the stricter 0.050 gate in
+        // production_defaults.rs.
+        256 => (0.080, 0.300, 10),
+        1_024 => (0.010, 0.040, 5),
+        _ => return "not_applicable",
+    };
+    assert!(summary.mean <= mean_limit);
+    assert!(summary.p95 <= p95_limit);
+    let visibility_crossings =
+        metrics.confusion[0].false_negative + metrics.confusion[0].false_positive;
+    let crossing_limit = (metrics.compared * crossing_percent).div_ceil(100);
+    assert!(visibility_crossings <= crossing_limit);
+    "pass"
+}
+
+fn registers_as_f64(value: usize) -> f64 {
+    f64::from(u32::try_from(value).expect("validation value fits u32"))
 }
 
 fn fingerprint_collision_count(

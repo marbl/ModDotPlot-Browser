@@ -25,7 +25,9 @@
 | Heatmap minimum / midpoint / maximum | 85% / 92% / 100% |
 | Browser sparse correction | Disabled; no browser control (`sparseCorrection: false`) |
 | Imported annotation formats | BED3–12, GFF3, and GTF; plain text, gzip, and BGZF |
-| Estimator validation schema | 26 columns, checked against release TSV |
+| Imported annotation file limit | 512 MiB |
+| Imported annotation matching-record limit | 1,000,000 per file |
+| Estimator validation schema | 30 columns, checked against release TSV |
 | Zoom-axis cache budget | 192 MiB |
 | Prepared-axis budget | 384 MiB |
 | Wasm session budget | 3072 MiB |

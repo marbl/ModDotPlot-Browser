@@ -26,8 +26,9 @@ pub use adaptive::{
 pub use config::{
     AniTransform, AxisExpansionPolicy, ConfigError, DEFAULT_B_BITS, DEFAULT_HLL_PRECISION,
     DEFAULT_IDENTITY_SCALE, DEFAULT_MISSING_IDENTITY, DEFAULT_VERIFICATION_BITS,
-    SCIENTIFIC_CONFIG_VERSION, ScientificConfig,
+    SCIENTIFIC_CONFIG_VERSION, ScientificConfig, ScientificConfigIdentity,
 };
+#[allow(deprecated)]
 pub use containment::{
     ContainmentEstimate, DirectionEvidence, estimate_containment, estimate_containment_bit_sliced,
     estimate_containment_bit_sliced_with, estimate_containment_from_comparison,

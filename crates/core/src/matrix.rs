@@ -158,6 +158,11 @@ impl AxisOverview {
     /// Panics unless the target register count is a supported power-of-two divisor
     /// and the fingerprint width is supported by the source sketches.
     #[must_use]
+    #[allow(deprecated)]
+    #[deprecated(
+        since = "0.2.1",
+        note = "validation-only fused-projection path; scheduled for removal from the default API in v0.3.0"
+    )]
     pub fn project_registers(&self, register_count: usize, fingerprint_bits: u8) -> Self {
         let core = self
             .core
@@ -1395,6 +1400,7 @@ fn choose_score(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

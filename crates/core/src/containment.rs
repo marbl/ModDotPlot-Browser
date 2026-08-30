@@ -1,5 +1,7 @@
 //! Directed containment and orientation estimation.
 
+#![allow(deprecated)]
+
 use crate::sketch::{
     BitSlicedSignature, OphJaccardEstimator, OphSketch, RegisterComparison, verified_winner_jaccard,
 };
@@ -75,6 +77,10 @@ pub fn estimate_containment(
 }
 
 /// Estimates directed containment with an explicit OPH resemblance statistic.
+#[deprecated(
+    since = "0.2.1",
+    note = "validation-only estimator selection; use estimate_containment"
+)]
 pub fn estimate_containment_with(
     x: &OphSketch,
     y: &OphSketch,
@@ -117,6 +123,10 @@ pub fn estimate_containment_bit_sliced(
 
 /// Estimates directed containment using an explicit OPH resemblance statistic.
 #[inline]
+#[deprecated(
+    since = "0.2.1",
+    note = "validation-only estimator selection; use estimate_containment_bit_sliced"
+)]
 pub fn estimate_containment_bit_sliced_with(
     x: &BitSlicedSignature,
     y: &BitSlicedSignature,
@@ -180,6 +190,10 @@ pub fn estimate_containment_from_comparison(
 }
 
 /// Estimates containment from counters using an explicit OPH resemblance statistic.
+#[deprecated(
+    since = "0.2.1",
+    note = "validation-only estimator selection; use estimate_containment_from_comparison"
+)]
 pub fn estimate_containment_from_comparison_with(
     x_cardinality: f64,
     y_cardinality: f64,

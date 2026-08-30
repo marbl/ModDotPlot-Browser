@@ -1,11 +1,13 @@
 //! Narrow, worker-oriented WebAssembly API for moddotplot-rs.
 
+#[cfg(test)]
 use moddotplot_core::hash::HashAlgorithm;
 use moddotplot_core::{
     CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE, FastaParser,
     FrozenAxis, KmerTileRequest, MatrixTile, PackedSequence,
-    ScientificConfig as CoreScientificConfig, SparseCorrectionPolicy, TileRequest,
-    build_axis_range, compute_frozen_tile, compute_frozen_tile_adaptive, compute_kmer_tile,
+    ScientificConfig as CoreScientificConfig, ScientificConfigIdentity, SparseCorrectionPolicy,
+    TileRequest, build_axis_range, compute_frozen_tile, compute_frozen_tile_adaptive,
+    compute_kmer_tile,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -180,14 +182,24 @@ struct AxisCacheKey {
     resolution: usize,
     start: usize,
     count: usize,
-    register_count: usize,
-    sparse_cap: Option<usize>,
+    scientific_identity: ScientificConfigIdentity,
 }
 
 struct AxisCacheEntry {
     axis: Rc<FrozenAxis>,
     bytes: usize,
     last_used: u64,
+}
+
+fn validate_axis_cache_identity(
+    key: AxisCacheKey,
+    config: CoreScientificConfig,
+) -> Result<(), &'static str> {
+    if key.scientific_identity == config.identity() {
+        Ok(())
+    } else {
+        Err("zoom-axis cache key does not match its scientific configuration")
+    }
 }
 
 /// Stateful compute session owned by one dedicated browser worker.
@@ -724,7 +736,6 @@ impl ComputeSession {
         let x_index = prepared.x_index;
         let y_index = prepared.y_index;
         let domain_length = prepared.domain_length;
-        let sparse_cap = (config.sparse_core_cap() > 0).then_some(config.sparse_core_cap());
         let x_count = width.min(resolution - x_start);
         let y_count = height.min(resolution - y_start);
         let x_key = AxisCacheKey {
@@ -732,40 +743,20 @@ impl ComputeSession {
             resolution,
             start: x_start,
             count: x_count,
-            register_count: config.register_count(),
-            sparse_cap,
+            scientific_identity: config.identity(),
         };
         let y_key = AxisCacheKey {
             sequence_index: y_index,
             resolution,
             start: y_start,
             count: y_count,
-            register_count: config.register_count(),
-            sparse_cap,
+            scientific_identity: config.identity(),
         };
-        let x = self.axis_range(
-            x_key,
-            domain_length,
-            config.k(),
-            config.register_count(),
-            config.hll_precision(),
-            config.hash_algorithm(),
-            config.hash_seed(),
-            sparse_cap,
-        )?;
+        let x = self.axis_range(x_key, domain_length, config)?;
         let y = if x_key == y_key {
             Rc::clone(&x)
         } else {
-            self.axis_range(
-                y_key,
-                domain_length,
-                config.k(),
-                config.register_count(),
-                config.hll_precision(),
-                config.hash_algorithm(),
-                config.hash_seed(),
-                sparse_cap,
-            )?
+            self.axis_range(y_key, domain_length, config)?
         };
 
         let request = TileRequest {
@@ -1034,18 +1025,13 @@ impl ComputeSession {
             .collect()
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn axis_range(
         &mut self,
         key: AxisCacheKey,
         domain_length: u64,
-        k: u8,
-        register_count: usize,
-        hll_precision: u8,
-        hash_algorithm: HashAlgorithm,
-        hash_seed: u64,
-        sparse_cap: Option<usize>,
+        config: CoreScientificConfig,
     ) -> Result<Rc<FrozenAxis>, JsError> {
+        validate_axis_cache_identity(key, config).map_err(JsError::new)?;
         if let Some(entry) = self.axis_cache.get(&key) {
             let axis = Rc::clone(&entry.axis);
             self.touch_axis_cache(key);
@@ -1055,20 +1041,6 @@ impl ComputeSession {
             .sequences
             .get(key.sequence_index)
             .ok_or_else(|| JsError::new("cached axis sequence index is out of range"))?;
-        let config = CoreScientificConfig::new(
-            k,
-            hash_algorithm,
-            hash_seed,
-            register_count,
-            moddotplot_core::DEFAULT_B_BITS,
-            moddotplot_core::DEFAULT_VERIFICATION_BITS,
-            moddotplot_core::OphJaccardEstimator::VerifiedWinners,
-            hll_precision,
-            sparse_cap.unwrap_or(0),
-            moddotplot_core::DEFAULT_ANI_FLOOR,
-            moddotplot_core::DEFAULT_MATCH_DETECTION_PROBABILITY,
-        )
-        .map_err(|error| JsError::new(&error.to_string()))?;
         let admitted = estimated_frozen_axis_bytes(key.count, config);
         if admitted > MAX_CACHED_AXIS_BYTES {
             return Err(JsError::new(
@@ -1631,5 +1603,60 @@ mod tests {
             .expect_err("oversized pairwise axes must fail admission");
 
         assert!(error.contains("prepared-axis budget"));
+    }
+
+    #[test]
+    fn zoom_cache_uses_exact_scientific_identity_and_rejects_key_drift() {
+        let mut session = ComputeSession::new();
+        session.sequences.push(PackedSequence::from_ascii(
+            "cache",
+            b"ACGTACGTACGTACGTACGTACGTACGTACGT",
+        ));
+        let base = CoreScientificConfig::new(
+            3,
+            HashAlgorithm::NtHash2,
+            0,
+            4,
+            2,
+            32,
+            moddotplot_core::OphJaccardEstimator::VerifiedWinners,
+            4,
+            0,
+            0.80,
+            0.99,
+        )
+        .unwrap();
+        let changed_seed = CoreScientificConfig::new(
+            3,
+            HashAlgorithm::NtHash2,
+            1,
+            4,
+            2,
+            32,
+            moddotplot_core::OphJaccardEstimator::VerifiedWinners,
+            4,
+            0,
+            0.80,
+            0.99,
+        )
+        .unwrap();
+        let base_key = AxisCacheKey {
+            sequence_index: 0,
+            resolution: 4,
+            start: 0,
+            count: 4,
+            scientific_identity: base.identity(),
+        };
+        session.axis_range(base_key, 32, base).unwrap();
+        assert_eq!(session.axis_cache.len(), 1);
+
+        let changed_key = AxisCacheKey {
+            scientific_identity: changed_seed.identity(),
+            ..base_key
+        };
+        session.axis_range(changed_key, 32, changed_seed).unwrap();
+        assert_eq!(session.axis_cache.len(), 2);
+
+        assert!(validate_axis_cache_identity(base_key, changed_seed).is_err());
     }
 }

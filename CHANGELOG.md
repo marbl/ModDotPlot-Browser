@@ -7,8 +7,39 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-30
+
+### Added
+
+* Added assertion-backed exact-k-mer acceptance for the real sparse-disabled
+  256-register preview and 1,024-register detailed production paths, including the
+  current selective composite and direction behavior.
+* Added exact scientific identities to Wasm zoom-axis cache keys and field-sensitivity
+  tests covering every configurable scientific parameter.
+* Added variance, union-occupancy, and selected-configuration pass/fail columns to the
+  bounded estimator report.
+* Added a generated million-record annotation parse/publication gate with explicit
+  512 MiB and one-million-matching-record admission limits.
+
+### Changed
+
+* Accuracy release gates and reports now use absolute error in displayed `ANI_c`.
+  Preview mean/P95 limits are 0.05/0.30 and detailed limits are 0.01/0.04 on the fixed
+  production path; only crossing of the operational 0.80 floor is release-blocking.
+* Kept sparse correction disabled by default after both browser tiers passed the
+  accepted `ANI_c` gates without its runtime cost.
+* Deprecated the legacy estimator-selection and fused-projection APIs ahead of their
+  removal or validation-only isolation in v0.3.0.
+
 ### Documentation
 
+* Defined `ANI_c` explicitly as the historical containment-derived ModDotPlot display
+  score, not biological ANI or alignment-derived `ANI_m`; validation targets exact
+  complete k-mer-set containment, with biological comparison limited to point mutation
+  without large indels.
+* Added the post-v0.2.0 validation contract and recorded that development pauses after
+  each version for manual testing; v1.0.0 is deferred until after additional usability
+  work.
 * Amended the v0.1 review response and ADR 0004 for the final v0.2.0 memory budget,
   feature-track support, browser-exposed modes, estimator-report schema, and completed
   validation gates.
@@ -187,7 +218,8 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/marbl/moddotplot-rs/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.4...v0.2.0
 [0.2.0-beta.4]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.3...v0.2.0-beta.4
 [0.2.0-beta.3]: https://github.com/marbl/moddotplot-rs/compare/v0.2.0-beta.2...v0.2.0-beta.3

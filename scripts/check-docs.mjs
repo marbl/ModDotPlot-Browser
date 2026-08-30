@@ -57,6 +57,8 @@ if (contract) {
   const parameterRows = [
     `| Browser sparse correction | ${contract.browserSparseCorrectionSummary} |`,
     `| Imported annotation formats | ${contract.importedAnnotationSummary} |`,
+    `| Imported annotation file limit | ${formatMib(contract.annotationLimits.bytes)} |`,
+    `| Imported annotation matching-record limit | ${contract.annotationLimits.records.toLocaleString("en-US")} per file |`,
     `| Estimator validation schema | ${contract.validationColumns.length} columns, checked against release TSV |`,
     `| Zoom-axis cache budget | ${formatMib(contract.budgets.zoomAxisBytes)} |`,
     `| Prepared-axis budget | ${formatMib(contract.budgets.preparedAxisBytes)} |`,
@@ -94,14 +96,14 @@ if (contract) {
     "utf8",
   );
   const documentedColumnBlock = adr.match(
-    /Current estimator-report columns: ([\s\S]*?)\.\n\nAll-family browser automation/,
+    /Current estimator-report columns: ([\s\S]*?)\.\n\n/,
   )?.[1];
   const documentedColumns = documentedColumnBlock
     ? [...documentedColumnBlock.matchAll(/`([^`]+)`/g)].map((match) => match[1])
     : [];
   if (documentedColumns.join("\t") !== contract.validationColumns.join("\t")) {
     failures.push(
-      "docs/adr/0004-validated-production-backend.md: v0.2.0 estimator-report columns differ from the executable report schema",
+      "docs/adr/0004-validated-production-backend.md: v0.2.1 estimator-report columns differ from the executable report schema",
     );
   }
 
