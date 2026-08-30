@@ -16,9 +16,5 @@ serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
 
-[features]
-default = []
-validation = ["moddotplot-core/validation"]
-
 [lints]
 workspace = true

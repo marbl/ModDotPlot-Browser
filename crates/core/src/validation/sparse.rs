@@ -1,6 +1,7 @@
 //! Validation-only sparse-correction contract.
 
-use super::{AxisData, PackedSequence, TileBuildError};
+use crate::PackedSequence;
+use crate::matrix::{AxisData, TileBuildError};
 
 /// Statistical decision used by detailed tiles with bounded exact sparse cores.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -11,7 +12,7 @@ pub struct SparseCorrectionPolicy {
     pub minimum_detection_probability: f64,
 }
 
-pub(super) fn validate_source_sequences(
+pub(crate) fn validate_source_sequences(
     x: &impl AxisData,
     y: &impl AxisData,
     x_sequence: &PackedSequence,

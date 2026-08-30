@@ -87,29 +87,41 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   expect(unexpectedRequests).toEqual([]);
 });
 
-test("numeric and high-resolution image exports carry complete provenance", async ({ page, browserName }) => {
+test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "download payload inspection runs on the Chromium channels");
   await page.goto("/");
   await loadFasta(page, "short.fa", shortFasta);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
 
-  const dataDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
+  await expect(page.locator("#export-save-dialog")).toBeVisible();
+  await expect(page.locator("#export-format")).toHaveValue("bedpe");
+  await expect(page.locator("#export-file-name")).toHaveValue("moddotplot-chrShort-vs-chrShort.bedpe");
+  const dataDownload = page.waitForEvent("download");
+  await page.locator("#export-save-confirm").click();
   const data = await dataDownload;
-  expect(data.suggestedFilename()).toBe("moddotplot-chrShort-vs-chrShort.csv");
+  expect(data.suggestedFilename()).toBe("moddotplot-chrShort-vs-chrShort.bedpe");
   const dataPath = await data.path();
   if (!dataPath) throw new Error("numeric export has no temporary path");
-  const csv = await readFile(dataPath, "utf8");
-  expect(csv).toContain("# provenance=");
-  expect(csv).toContain("exact complete distinct canonical k-mer-set containment");
-  expect(csv).toContain("identity_fixed,identity_scale,ani_c");
+  const bedpe = await readFile(dataPath, "utf8");
+  expect(bedpe).toContain("# provenance=");
+  expect(bedpe).toContain("exact complete distinct canonical k-mer-set containment");
+  expect(bedpe).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
+
+  await page.locator(".feature-track-controls summary").click();
+  await page.locator("#gc-track-x").check();
+  await page.locator("#cpg-track-y").check();
+  await expect(page.locator("#gc-track-x-panel")).toBeVisible();
+  await expect(page.locator("#cpg-track-y-panel")).toBeVisible();
 
   const backingSize = await page.locator("#plot-canvas").evaluate((canvas) => ({
     width: (canvas as HTMLCanvasElement).width,
     height: (canvas as HTMLCanvasElement).height,
   }));
-  const imageDownload = page.waitForEvent("download");
   await page.locator("#export-image").click();
+  await expect(page.locator("#export-format")).toHaveValue("png");
+  const imageDownload = page.waitForEvent("download");
+  await page.locator("#export-save-confirm").click();
   const image = await imageDownload;
   expect(image.suggestedFilename()).toBe("moddotplot-chrShort-vs-chrShort.png");
   const imagePath = await image.path();
@@ -122,6 +134,32 @@ test("numeric and high-resolution image exports carry complete provenance", asyn
   expect(png.includes(Buffer.from("schedulerPolicyVersion"))).toBe(true);
   expect(png.includes(Buffer.from("configurations"))).toBe(true);
   expect(png.includes(Buffer.from("exact complete distinct canonical k-mer-set containment"))).toBe(true);
+
+  for (const format of ["svg", "pdf"] as const) {
+    await page.locator("#export-image").click();
+    await page.locator("#export-format").selectOption(format);
+    await expect(page.locator("#export-file-name")).toHaveValue(`moddotplot-chrShort-vs-chrShort.${format}`);
+    const download = page.waitForEvent("download");
+    await page.locator("#export-save-confirm").click();
+    const result = await download;
+    const resultPath = await result.path();
+    if (!resultPath) throw new Error(`${format} export has no temporary path`);
+    const bytes = await readFile(resultPath);
+    if (format === "svg") {
+      const svg = bytes.toString("utf8");
+      expect(svg).toContain("<image");
+      expect(svg).toContain("<text");
+      expect(svg).toContain("chrShort");
+      expect(svg).toContain("GC%");
+      expect(svg).toContain("CpG O/E");
+    } else {
+      expect(bytes.subarray(0, 8).toString("latin1")).toBe("%PDF-1.7");
+      expect(bytes.includes(Buffer.from("/Subtype /Image"))).toBe(true);
+      expect(bytes.includes(Buffer.from("chrShort"))).toBe(true);
+      expect(bytes.includes(Buffer.from("GC%"))).toBe(true);
+      expect(bytes.includes(Buffer.from("CpG O/E"))).toBe(true);
+    }
+  }
 });
 
 test("a newer load transaction wins over compressed input and clear rejects stale publication", async ({ page }) => {
@@ -235,25 +273,6 @@ test("refined overview tiles paint before detailed preparation completes", async
   await loadFasta(page, "progressive.fa", `>progressive\n${"ACGT".repeat(50_000)}\n`);
   await earlyRefinedTile;
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-});
-
-test("bounded sparse correction is an off-by-default advanced option", async ({ page }) => {
-  await page.goto("/");
-  await page.locator("#resolution").selectOption("500", { force: true });
-  await loadFasta(page, "sparse.fa", `>sparse\n${"ACGTTGCAAGTC".repeat(5_000)}\n`);
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-
-  await page.locator(".advanced-controls summary").click();
-  const correction = page.locator("#sparse-correction");
-  await expect(correction).not.toBeChecked();
-  await expect(page.locator(".checkbox-option small")).toContainText("increases runtime");
-  await correction.check();
-
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#scientific-provenance")).toHaveAttribute(
-    "title",
-    /sparse-cap=2048/,
-  );
 });
 
 test("pairwise orientation, navigation, and reset remain coherent", async ({ page }) => {
@@ -695,8 +714,6 @@ test("heatmap palette and plot background controls update without recomputation"
   await page.goto("/");
   await loadFasta(page, "short.fa", shortFasta);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
-  await expect(page.locator("#sparse-correction")).toHaveCount(1);
-  await expect(page.locator("#sparse-correction")).not.toBeChecked();
   const layout = await page.evaluate(() => {
     const xAxis = document.querySelector(".axis-panel-x")!.getBoundingClientRect();
     const yAxis = document.querySelector(".axis-panel-y")!.getBoundingClientRect();

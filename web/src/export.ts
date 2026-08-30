@@ -23,16 +23,31 @@ export interface ExportProvenance {
   sequences: unknown;
 }
 
+export type DataExportFormat = "bedpe" | "csv";
+
+export interface NumericExportContext {
+  domainLength: number;
+  baseResolution: number;
+  viewport: { x: number; y: number; width: number; height: number };
+  xName: string;
+  yName: string;
+}
+
 /** Keeps worst-case CSV construction inside the 256 MiB transient-publication plan. */
 export const MAX_NUMERIC_EXPORT_CELLS = 2_000_000;
 
-/** Builds the exact fixed-point renderer inputs plus complete machine-readable provenance. */
+/** Builds current-view renderer inputs plus complete machine-readable provenance. */
 export function createNumericExport(
   tiles: readonly NumericTileView[],
-  domainLength: number,
+  context: NumericExportContext,
   provenance: ExportProvenance,
+  format: DataExportFormat = "bedpe",
 ): Blob {
-  const cellCount = tiles.reduce((sum, tile) => sum + tile.width * tile.height, 0);
+  const visibleTiles = tiles.map((tile) => ({ tile, bounds: visibleCellBounds(tile, context) }));
+  const cellCount = visibleTiles.reduce(
+    (sum, { bounds }) => sum + Math.max(0, bounds.endX - bounds.startX) * Math.max(0, bounds.endY - bounds.startY),
+    0,
+  );
   if (cellCount > MAX_NUMERIC_EXPORT_CELLS) {
     throw new Error(
       `Numeric export contains ${cellCount.toLocaleString()} renderer cells; `
@@ -40,39 +55,68 @@ export function createNumericExport(
       + "Zoom in or select a lower Plot detail setting, then export again.",
     );
   }
-  const chunks: BlobPart[] = [
-    "# moddotplot-rs numeric tile export\n",
-    `# provenance=${JSON.stringify(provenance)}\n`,
-    "resolution,tile_x,tile_y,cell_x,cell_y,x_start,x_end,y_start,y_end,identity_fixed,identity_scale,ani_c,direction_fixed,direction_scale,direction_support,quality,config_digest\n",
-  ];
+  const chunks: BlobPart[] = format === "bedpe"
+    ? [
+        "# moddotplot-rs current-view BEDPE export\n",
+        `# provenance=${JSON.stringify(provenance)}\n`,
+        "#chrom1\tstart1\tend1\tchrom2\tstart2\tend2\tname\tscore\tstrand1\tstrand2\tani_c\tdirection\tdirection_support\tquality\tconfig_digest\n",
+      ]
+    : [
+        "# moddotplot-rs current-view numeric export\n",
+        `# provenance=${JSON.stringify(provenance)}\n`,
+        "resolution,tile_x,tile_y,cell_x,cell_y,x_start,x_end,y_start,y_end,identity_fixed,identity_scale,ani_c,direction_fixed,direction_scale,direction_support,quality,config_digest\n",
+      ];
   let buffer = "";
-  for (const tile of tiles) {
-    for (let row = 0; row < tile.height; row += 1) {
-      for (let column = 0; column < tile.width; column += 1) {
+  for (const { tile, bounds } of visibleTiles) {
+    for (let row = bounds.startY; row < bounds.endY; row += 1) {
+      for (let column = bounds.startX; column < bounds.endX; column += 1) {
         const offset = row * tile.width + column;
         const cellX = tile.x + column;
         const cellY = tile.y + row;
         const identity = tile.identity[offset]!;
         const aniC = identity === 0xffff ? "" : (identity / 10_000).toFixed(4);
-        buffer += [
-          tile.resolution,
-          tile.x,
-          tile.y,
-          cellX,
-          cellY,
-          coordinate(cellX, tile.resolution, domainLength),
-          coordinate(cellX + 1, tile.resolution, domainLength),
-          coordinate(cellY, tile.resolution, domainLength),
-          coordinate(cellY + 1, tile.resolution, domainLength),
-          identity,
-          10_000,
-          aniC,
-          tile.direction[offset]!,
-          32_767,
-          tile.directionSupport[offset]!,
-          tile.quality,
-          tile.configDigest,
-        ].join(",") + "\n";
+        const direction = tile.direction[offset]!;
+        const support = tile.directionSupport[offset]!;
+        if (format === "bedpe") {
+          if (identity === 0xffff) continue;
+          buffer += [
+            sanitizeBedName(context.xName),
+            coordinate(cellX, tile.resolution, context.domainLength),
+            coordinate(cellX + 1, tile.resolution, context.domainLength),
+            sanitizeBedName(context.yName),
+            coordinate(cellY, tile.resolution, context.domainLength),
+            coordinate(cellY + 1, tile.resolution, context.domainLength),
+            `ani_c=${aniC};quality=${tile.quality}`,
+            Math.round(identity / 10),
+            support > 0 ? "+" : ".",
+            support > 0 ? (direction < 0 ? "-" : "+") : ".",
+            aniC,
+            support > 0 ? (direction / 32_767).toFixed(6) : ".",
+            support,
+            tile.quality,
+            tile.configDigest,
+          ].join("\t") + "\n";
+        } else {
+          buffer += [
+            tile.resolution,
+            tile.x,
+            tile.y,
+            cellX,
+            cellY,
+            coordinate(cellX, tile.resolution, context.domainLength),
+            coordinate(cellX + 1, tile.resolution, context.domainLength),
+            coordinate(cellY, tile.resolution, context.domainLength),
+            coordinate(cellY + 1, tile.resolution, context.domainLength),
+            identity,
+            10_000,
+            aniC,
+            direction,
+            32_767,
+            support,
+            tile.quality,
+            tile.configDigest,
+          ].join(",") + "\n";
+        }
         if (buffer.length >= 1_048_576) {
           chunks.push(buffer);
           buffer = "";
@@ -81,7 +125,9 @@ export function createNumericExport(
     }
   }
   if (buffer) chunks.push(buffer);
-  return new Blob(chunks, { type: "text/csv;charset=utf-8" });
+  return new Blob(chunks, {
+    type: format === "bedpe" ? "text/tab-separated-values;charset=utf-8" : "text/csv;charset=utf-8",
+  });
 }
 
 /** Embeds complete UTF-8 provenance in a standards-compliant PNG iTXt chunk. */
@@ -119,6 +165,27 @@ export function exportBaseName(xName: string, yName: string): string {
 
 function coordinate(index: number, resolution: number, domainLength: number): number {
   return Math.floor(index * domainLength / resolution);
+}
+
+function visibleCellBounds(
+  tile: NumericTileView,
+  context: NumericExportContext,
+): { startX: number; endX: number; startY: number; endY: number } {
+  const toTile = tile.resolution / context.baseResolution;
+  const viewStartX = context.viewport.x * toTile;
+  const viewEndX = (context.viewport.x + context.viewport.width) * toTile;
+  const viewStartY = context.viewport.y * toTile;
+  const viewEndY = (context.viewport.y + context.viewport.height) * toTile;
+  return {
+    startX: Math.max(0, Math.floor(viewStartX - tile.x)),
+    endX: Math.min(tile.width, Math.ceil(viewEndX - tile.x)),
+    startY: Math.max(0, Math.floor(viewStartY - tile.y)),
+    endY: Math.min(tile.height, Math.ceil(viewEndY - tile.y)),
+  };
+}
+
+function sanitizeBedName(value: string): string {
+  return value.replace(/[\t\r\n]+/g, "_") || "sequence";
 }
 
 function findIend(bytes: Uint8Array): number {

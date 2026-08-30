@@ -27,8 +27,6 @@ use moddotplot_core::{
     ScientificConfig as CoreScientificConfig, ScientificConfigIdentity, TileBuildError,
     TileRequest, build_axis_range, compute_frozen_tile, compute_kmer_tile,
 };
-#[cfg(feature = "validation")]
-use moddotplot_core::{SparseCorrectionPolicy, compute_frozen_tile_adaptive};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::rc::Rc;
@@ -48,8 +46,8 @@ impl BrowserScientificConfig {
     ///
     /// Returns a JavaScript error if the k-mer length or register count is invalid.
     #[wasm_bindgen(constructor)]
-    pub fn new(k: u8, register_count: usize, sparse_correction: bool) -> Result<Self, JsError> {
-        let inner = CoreScientificConfig::production_default(k, register_count, sparse_correction)
+    pub fn new(k: u8, register_count: usize) -> Result<Self, JsError> {
+        let inner = CoreScientificConfig::production_default(k, register_count, false)
             .map_err(|error| JsError::new(&error.to_string()))?;
         Ok(Self { inner })
     }
@@ -96,12 +94,6 @@ impl BrowserScientificConfig {
         self.inner.verification_bits()
     }
 
-    /// Exact sparse-core retention cap; zero means disabled.
-    #[wasm_bindgen(getter)]
-    pub fn sparse_core_cap(&self) -> usize {
-        self.inner.sparse_core_cap()
-    }
-
     /// Stable production hash identifier.
     #[wasm_bindgen(getter)]
     pub fn hash_algorithm(&self) -> String {
@@ -118,18 +110,6 @@ impl BrowserScientificConfig {
     #[wasm_bindgen(getter)]
     pub fn estimator(&self) -> String {
         self.inner.oph_estimator().as_str().to_owned()
-    }
-
-    /// ANI floor used by optional sparse correction.
-    #[wasm_bindgen(getter)]
-    pub fn ani_floor(&self) -> f64 {
-        self.inner.ani_floor()
-    }
-
-    /// Sparse match-detection probability target.
-    #[wasm_bindgen(getter)]
-    pub fn minimum_detection_probability(&self) -> f64 {
-        self.inner.minimum_detection_probability()
     }
 
     /// Fixed-point scale of the identity channel.
@@ -1041,30 +1021,8 @@ fn compute_scientific_tile(
     config: CoreScientificConfig,
     request: TileRequest,
 ) -> Result<MatrixTile, TileBuildError> {
-    #[cfg(feature = "validation")]
-    if config.sparse_core_cap() > 0 {
-        return compute_frozen_tile_adaptive(
-            x,
-            y,
-            x_sequence,
-            y_sequence,
-            config.hash_algorithm(),
-            config.hash_seed(),
-            request,
-            sparse_policy(config),
-        );
-    }
-    #[cfg(not(feature = "validation"))]
     let _ = (x_sequence, y_sequence, config);
     compute_frozen_tile(x, y, request)
-}
-
-#[cfg(feature = "validation")]
-fn sparse_policy(config: CoreScientificConfig) -> SparseCorrectionPolicy {
-    SparseCorrectionPolicy {
-        ani_floor: config.ani_floor(),
-        minimum_detection_probability: config.minimum_detection_probability(),
-    }
 }
 
 impl Default for ComputeSession {

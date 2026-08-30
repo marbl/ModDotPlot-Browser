@@ -88,7 +88,6 @@ const result = {
     previewRegisters: 256,
     detailedRegisters: 1_024,
     k: 21,
-    sparseCorrection: false,
   },
   inputs: {
     chm13: await fileMetadata(chm13),

@@ -709,6 +709,10 @@ body.is-track-pointer-dragging * { cursor: grabbing !important; }
 }
 .track-import-dialog-actions { display: flex; justify-content: flex-end; gap: 7px; }
 #track-import-confirm { color: #fff; border-color: var(--accent); background: var(--accent); }
+.export-save-dialog form { display: grid; gap: 14px; }
+.export-save-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.export-save-dialog input { width: 100%; }
+#export-save-confirm { color: #fff; border-color: var(--accent); background: var(--accent); }
 
 .compute-progress {
   display: flex;

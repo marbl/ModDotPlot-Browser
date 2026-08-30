@@ -3,10 +3,12 @@
 #![allow(deprecated)]
 
 use moddotplot_core::hash::HashAlgorithm;
+use moddotplot_core::validation::{
+    DEFAULT_ANI_FLOOR, DEFAULT_MATCH_DETECTION_PROBABILITY, estimate_containment_bit_sliced_with,
+};
 use moddotplot_core::{
-    AxisOverview, DEFAULT_ANI_FLOOR, DEFAULT_B_BITS, DEFAULT_MATCH_DETECTION_PROBABILITY,
-    DEFAULT_VERIFICATION_BITS, ExactKmerSet, OphJaccardEstimator, PackedSequence, ScientificConfig,
-    build_axis_overview, estimate_containment_bit_sliced_with, exact_moddotplot_score,
+    AxisOverview, DEFAULT_B_BITS, DEFAULT_VERIFICATION_BITS, ExactKmerSet, OphJaccardEstimator,
+    PackedSequence, ScientificConfig, build_axis_overview, exact_moddotplot_score,
 };
 use std::time::{Duration, Instant};
 

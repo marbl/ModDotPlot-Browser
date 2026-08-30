@@ -4,13 +4,23 @@
 
 *Status: accepted for v0.2.1, with the amendments below*
 
+## v0.6.0 amendment
+
+The optional browser experiment was rejected. Sparse correction is absent from the
+browser protocol, UI, Wasm surface, and ordinary web build. Research-only policy and
+kernels are consolidated under the non-default Rust `validation` module.
+
+| Current contract | State |
+| --- | --- |
+| Browser sparse correction | Removed; retained only in the non-default Rust validation module |
+
 ## Post-v0.5.0 amendment
 
 A visual diagnostic found that bounded sparse correction primarily adjusts `ANI_c`
 inside already-visible, highly similar low-cardinality repeat blocks. It did not show
 a compelling structural-recovery benefit, so the mode remains disabled by default.
-The browser now exposes it under Advanced options for optional repeat-window inspection
-and warns that it increases runtime.
+The browser toggle described here was an intermediate experiment and is superseded by
+the v0.6.0 amendment above.
 
 | Current contract | State |
 | --- | --- |

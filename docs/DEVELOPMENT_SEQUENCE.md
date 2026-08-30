@@ -38,9 +38,10 @@ input; the maintainer decisions below are authoritative where they modify it.
 10. A post-v0.5.0 visual diagnostic showed sparse correction acts mainly in large,
     highly similar low-cardinality repeat blocks, correcting their `ANI_c` estimates
     rather than rescuing otherwise absent structure. The green diagnostic fork was
-    abandoned. Sparse correction remains off by default but is now a supported
-    Advanced option with an explicit runtime warning; this supersedes decision 7's
-    validation-only UI disposition.
+    abandoned. A subsequent browser toggle experiment was also rejected: sparse
+    correction is removed from the browser protocol and production web build. Any
+    retained research implementation belongs only in the dedicated non-default
+    validation module.
 
 The complete scientific limits and fixture rules are maintained in
 [VALIDATION_CONTRACT.md](VALIDATION_CONTRACT.md).
@@ -232,3 +233,45 @@ For each accepted version:
 
 After v0.5.0, stop. The next plan must begin with additional usability work rather than
 v1.0.0.
+
+## Completed checkpoint: v0.6.0 cleanup and export usability
+
+Goal: simplify the production surface and make current-view results directly usable in
+analysis and publication workflows.
+
+Scope:
+
+1. Remove sparse-correction policy and controls from the browser protocol and ordinary
+   web build.
+2. Move validation-only estimators, projections, and sparse kernels under one dedicated
+   non-default validation module.
+3. Further divide the remaining large browser orchestration units by responsibility.
+4. Export the current view as BEDPE by default, while retaining CSV as an alternate
+   numeric format.
+5. Export the complete visible composition, including axes, labels, and tracks, rather
+   than the heatmap alone.
+6. Support PNG, SVG, and PDF image output. SVG and PDF embed the heatmap as a raster
+   image while preserving axes, labels, and tracks as vector elements.
+7. Both export buttons open a Save As dialog with an editable default filename and a
+   format selector. BEDPE and PNG are the respective defaults.
+
+Acceptance:
+
+* Default Rust and browser artifacts expose no sparse-correction control or protocol
+  field, while validation-feature tests retain any still-useful research kernels.
+* Default-artifact symbol checks continue to exclude validation-only estimators and
+  projections.
+* BEDPE and CSV contain only cells intersecting the active viewport and preserve the
+  values supplied to the renderer.
+* PNG, SVG, and PDF include the current heatmap, both axes, sequence labels, and all
+  visible computed or imported tracks; SVG/PDF non-heatmap elements remain vectorized.
+* Export dialogs support filename changes and format selection without changing the
+  active comparison.
+* Prior source and static web release artifacts remain untouched.
+
+Completed on 2026-08-30. Sparse correction is absent from the browser protocol and
+ordinary web artifact; research-only estimators, projection, policy, and kernels share
+one validation namespace. Current-view BEDPE/CSV and complete-composition PNG/SVG/PDF
+downloads pass unit and real-browser checks, including visible computed tracks and
+PDF structural/visual inspection. Evidence is in the
+[v0.6.0 validation record](releases/v0.6.0/VALIDATION.md).

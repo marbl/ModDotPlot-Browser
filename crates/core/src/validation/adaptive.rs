@@ -1,4 +1,4 @@
-//! Statistical policy for the bounded exact sparse-window fallback.
+//! Statistical policy for validation of the bounded exact sparse-window fallback.
 
 /// ANI floor below which an occasional missed window is acceptable in the interactive plot.
 pub const DEFAULT_ANI_FLOOR: f64 = 0.80;

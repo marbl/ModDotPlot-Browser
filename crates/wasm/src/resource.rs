@@ -18,24 +18,10 @@ pub(super) fn estimated_frozen_axis_bytes(
         .saturating_mul(words)
         .saturating_mul(std::mem::size_of::<u64>())
         .saturating_add(std::mem::size_of::<moddotplot_core::BitSlicedSignature>());
-    #[cfg(feature = "validation")]
-    let sparse = if config.sparse_core_cap() == 0 {
-        0
-    } else {
-        config
-            .sparse_core_cap()
-            .saturating_mul(32)
-            .saturating_add(std::mem::size_of::<
-                Option<moddotplot_core::SparseCoreHashSet>,
-            >())
-    };
-    #[cfg(not(feature = "validation"))]
-    let sparse = 0;
     resolution
         .saturating_mul(
             one_signature
                 .saturating_mul(2)
-                .saturating_add(sparse)
                 .saturating_add(std::mem::size_of::<(u64, u64)>()),
         )
         .saturating_add(std::mem::size_of::<super::FrozenAxis>())

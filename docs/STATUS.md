@@ -32,9 +32,9 @@ by the named evidence; it does not imply broad research validation.
 * Private frozen production axes carrying complete scientific and source-sequence
   provenance; geometric-only tile requests reject incompatible composition before
   allocation. Schema-1 tile bytes match the retained v0.2.1 checkpoint exactly.
-* Legacy estimator selection and fused projection remain isolated behind the
-  non-default Rust `validation` feature. The browser distribution uses that feature
-  to offer bounded sparse correction as an off-by-default Advanced option.
+* Candidate estimators, rejected fused projection, sparse policy, and sparse kernels
+  are consolidated under the non-default Rust `validation` module. The browser
+  protocol and ordinary Wasm build contain no sparse-correction option.
 * Frozen production axes, 3 GiB session admission, prepared-axis and zoom-cache
   budgets, logarithmic recency tracking, and coordinated renderer eviction.
 * A 4 GiB cross-layer plan accounts separately for Wasm, JavaScript tiles, GPU
@@ -44,9 +44,9 @@ by the named evidence; it does not imply broad research validation.
   before output allocation and return typed errors through the Wasm boundary.
 * Consuming Wasm tile channels with no redundant JavaScript `.slice()`.
 * WebGL2 context restoration and keyboard pan/zoom/reset.
-* Numeric CSV export of exact current renderer inputs and bounded high-resolution PNG
-  re-rendering, both with complete machine-readable method and configuration
-  provenance.
+* Save As export of current-view renderer inputs as BEDPE by default or CSV, plus
+  complete-composition PNG/SVG/PDF. SVG/PDF retain vector axes, labels, and tracks and
+  embed only the heatmap as raster; all formats carry method/configuration provenance.
 * Stackable GC% and CpG observed/expected axis tracks with incremental composition
   indexing, one unsmoothed bar per sampled display column or row, overscanned pan
   caches, immediate stale-track blanking, and value mouseovers.

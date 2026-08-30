@@ -12,9 +12,9 @@ import type {
 import { transposeTile } from "./tile";
 import {
   refinementKey,
-  selectRefinementTiles,
   summarizeRefinementEvidence,
 } from "./refinement";
+import { allTileCoordinates, hasDetailedCandidates, prioritizeForRefinement } from "./tile-scheduler";
 import {
   ComparisonJob,
   DatasetSession,
@@ -131,16 +131,12 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
       if (message.parameters.previewRegisterCount < message.parameters.detailedRegisterCount) {
         comparisonJob.configurations.set(
           message.parameters.previewRegisterCount,
-          new ScientificConfig(message.parameters.k, message.parameters.previewRegisterCount, false),
+          new ScientificConfig(message.parameters.k, message.parameters.previewRegisterCount),
         );
       }
       comparisonJob.configurations.set(
         message.parameters.detailedRegisterCount,
-        new ScientificConfig(
-          message.parameters.k,
-          message.parameters.detailedRegisterCount,
-          message.parameters.sparseCorrection,
-        ),
+        new ScientificConfig(message.parameters.k, message.parameters.detailedRegisterCount),
       );
       session.retain_prepared_levels(
         message.parameters.previewRegisterCount,
@@ -398,7 +394,7 @@ async function prepareComparison(
     parameters,
     firstRegisters,
     !distinctPasses,
-    distinctPasses || !parameters.sparseCorrection,
+    true,
     firstQuality,
     null,
   );
@@ -428,6 +424,7 @@ async function prepareComparison(
       parameters.resolution,
       overviewTiles,
       "refined",
+      requireComparisonJob(),
     );
     if (detailedTiles.length > 0) {
       const detailedPrepared = await prepareOverviewLevel(
@@ -436,7 +433,7 @@ async function prepareComparison(
         parameters,
         parameters.detailedRegisterCount,
         true,
-        !parameters.sparseCorrection,
+        true,
         "refined",
         detailedTiles,
       );
@@ -543,6 +540,7 @@ async function computeLevel(
     parameters.resolution,
     allTileCoordinates(parameters.resolution, selfComparison),
     quality,
+    requireComparisonJob(),
   );
   const total = Math.max(1, coordinates.length);
   if (coordinates.length === 0) {
@@ -635,7 +633,7 @@ async function computeRequestedTiles(
   if (distinctPasses && isCurrentTileRequest(generation, requestId)) {
     await waitForPreviewPresentation(generation, requestId);
     if (!isCurrentTileRequest(generation, requestId)) return;
-    if (!hasDetailedCandidates(resolution, tiles)) {
+    if (!hasDetailedCandidates(resolution, tiles, requireComparisonJob())) {
       post({ type: "status", text: `Ready · ${resolution.toLocaleString()}-cell quick detail is visually settled` });
       post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
       return;
@@ -650,9 +648,9 @@ async function computeRequestedTiles(
         parameters,
         parameters.detailedRegisterCount,
         true,
-        !parameters.sparseCorrection,
+        true,
         "refined",
-        prioritizeForRefinement(resolution, tiles, "refined"),
+        prioritizeForRefinement(resolution, tiles, "refined", requireComparisonJob()),
       );
       if (!prepared) return;
     }
@@ -776,7 +774,12 @@ async function computeRequestedLevel(
 ): Promise<void> {
   const config = requireScientificConfig(registerLimit);
   let completed = 0;
-  const prioritizedTiles = prioritizeForRefinement(resolution, tiles, quality);
+  const prioritizedTiles = prioritizeForRefinement(
+    resolution,
+    tiles,
+    quality,
+    requireComparisonJob(),
+  );
   for (const coordinate of prioritizedTiles) {
     if (!isCurrentTileRequest(generation, requestId)) return;
     const key = `${resolution}:${coordinate.x}:${coordinate.y}:${quality}`;
@@ -843,38 +846,6 @@ function rememberRefinementPriority(
   );
 }
 
-function prioritizeForRefinement<T extends { x: number; y: number }>(
-  resolution: number,
-  tiles: T[],
-  quality: "preview" | "refined",
-): T[] {
-  if (quality === "preview") return tiles;
-  return selectRefinementTiles(
-    resolution,
-    tiles,
-    requireComparisonJob().refinementEvidence,
-    {
-      displayMinimum: requireComparisonJob().refinementDisplayMinimum,
-      refineAll: requireComparisonJob().parameters.sparseCorrection,
-    },
-  );
-}
-
-function hasDetailedCandidates<T extends { x: number; y: number }>(
-  resolution: number,
-  tiles: T[],
-): boolean {
-  return selectRefinementTiles(
-    resolution,
-    tiles,
-    requireComparisonJob().refinementEvidence,
-    {
-      displayMinimum: requireComparisonJob().refinementDisplayMinimum,
-      refineAll: requireComparisonJob().parameters.sparseCorrection,
-    },
-  ).length > 0;
-}
-
 function publishSketchTile(
   generation: number,
   resolution: number,
@@ -939,19 +910,6 @@ function parametersResolution(): number {
   return requireComparisonJob().parameters.resolution;
 }
 
-function allTileCoordinates(
-  resolution: number,
-  selfComparison: boolean,
-): Array<{ x: number; y: number }> {
-  const result: Array<{ x: number; y: number }> = [];
-  for (let y = 0; y < resolution; y += 256) {
-    for (let x = selfComparison ? y : 0; x < resolution; x += 256) {
-      result.push({ x, y });
-    }
-  }
-  return result;
-}
-
 function requireScientificConfig(registerCount: number): ScientificConfig {
   const config = requireComparisonJob().configurations.get(registerCount);
   if (!config) throw new Error(`No scientific configuration for ${registerCount} registers.`);
@@ -970,9 +928,6 @@ function configMetadata(config: ScientificConfig): ScientificConfigMetadata {
     hllPrecision: config.hll_precision,
     bBits: config.b_bits,
     verificationBits: config.verification_bits,
-    sparseCoreCap: config.sparse_core_cap,
-    aniFloor: config.ani_floor,
-    minimumDetectionProbability: config.minimum_detection_probability,
     identityScale: config.identity_scale,
     missingIdentity: config.missing_identity,
   };

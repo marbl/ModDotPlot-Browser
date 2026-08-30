@@ -158,10 +158,6 @@
               <span>K-mer length</span>
               <input id="kmer-length" type="number" min="5" max="31" step="2" value="21" />
             </label>
-            <label class="checkbox-option">
-              <span><input id="sparse-correction" type="checkbox" /> Sparse window correction</span>
-              <small>Corrects detailed low-cardinality repeat windows; increases runtime.</small>
-            </label>
             <output id="scientific-provenance" class="scientific-provenance" aria-live="polite">
               Method details appear after a comparison is prepared.
             </output>
@@ -237,6 +233,23 @@
       <div class="track-import-dialog-actions">
         <button id="sequence-load-close" type="button">Close</button>
       </div>
+    </dialog>
+    <dialog id="export-save-dialog" class="track-import-dialog export-save-dialog" aria-labelledby="export-save-title">
+      <form id="export-save-form">
+        <h2 id="export-save-title">Save export</h2>
+        <label>
+          <span>File name</span>
+          <input id="export-file-name" type="text" required autocomplete="off" />
+        </label>
+        <label>
+          <span>Format</span>
+          <select id="export-format"></select>
+        </label>
+        <div class="track-import-dialog-actions">
+          <button id="export-save-cancel" type="button">Cancel</button>
+          <button id="export-save-confirm" type="submit">Save</button>
+        </div>
+      </form>
     </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>

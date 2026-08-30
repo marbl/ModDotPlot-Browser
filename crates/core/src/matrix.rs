@@ -4,14 +4,12 @@ mod axis;
 mod frozen;
 mod ordinary;
 #[cfg(feature = "validation")]
-mod sparse;
+use crate::validation::sparse;
 
 use axis::divide_ceil;
 #[cfg(feature = "validation")]
 pub use sparse::SparseCorrectionPolicy;
 
-#[cfg(feature = "validation")]
-use crate::adaptive::needs_exact_correction;
 use crate::config::ScientificConfig;
 #[cfg(test)]
 use crate::containment::estimate_containment_bit_sliced_scalar;
@@ -21,6 +19,8 @@ use crate::dna::{PackedSequence, SequenceIdentity};
 use crate::hash::HashAlgorithm;
 use crate::hash::canonical_hashes;
 use crate::sketch::{BitSlicedSignature, OphSketch};
+#[cfg(feature = "validation")]
+use crate::validation::adaptive::needs_exact_correction;
 use std::collections::HashMap;
 
 /// Sentinel used for a matrix cell without valid k-mer evidence.
@@ -164,66 +164,6 @@ impl AxisOverview {
             core_encoded: self.core_encoded,
             expanded_encoded: self.expanded_encoded,
             sparse_core: self.sparse_core,
-        }
-    }
-
-    /// Derives an exactly equivalent coarser OPH tier without rehashing the sequence.
-    ///
-    /// This is retained for controlled fused-build benchmarks. The interactive path
-    /// still builds the preview first because time to first paint is the primary goal.
-    ///
-    /// # Panics
-    ///
-    /// Panics unless the target register count is a supported power-of-two divisor
-    /// and the fingerprint width is supported by the source sketches.
-    #[must_use]
-    #[cfg(feature = "validation")]
-    pub fn project_registers(&self, register_count: usize, fingerprint_bits: u8) -> Self {
-        let core = self
-            .core
-            .iter()
-            .map(|sketch| sketch.project_registers(register_count))
-            .collect::<Vec<_>>();
-        let expanded = self
-            .expanded
-            .iter()
-            .map(|sketch| sketch.project_registers(register_count))
-            .collect::<Vec<_>>();
-        let core_encoded = core
-            .iter()
-            .map(|sketch| sketch.bit_sliced(fingerprint_bits, register_count))
-            .collect();
-        let expanded_encoded = expanded
-            .iter()
-            .map(|sketch| sketch.bit_sliced(fingerprint_bits, register_count))
-            .collect();
-        Self {
-            scientific_config: ScientificConfig::new(
-                self.scientific_config.k(),
-                self.scientific_config.hash_algorithm(),
-                self.scientific_config.hash_seed(),
-                register_count,
-                fingerprint_bits.min(self.scientific_config.b_bits()),
-                fingerprint_bits,
-                self.scientific_config.oph_estimator(),
-                self.scientific_config.hll_precision(),
-                0,
-                self.scientific_config.ani_floor(),
-                self.scientific_config.minimum_detection_probability(),
-            )
-            .expect("a supported projection must produce a valid scientific identity"),
-            sequence_identity: self.sequence_identity,
-            sequence_name: self.sequence_name.clone(),
-            sequence_length: self.sequence_length,
-            domain_length: self.domain_length,
-            resolution: self.resolution,
-            offset: self.offset,
-            bounds: self.bounds.clone(),
-            core,
-            expanded,
-            core_encoded,
-            expanded_encoded,
-            sparse_core: Vec::new(),
         }
     }
 }
@@ -370,7 +310,7 @@ impl FrozenAxis {
     }
 }
 
-trait AxisData {
+pub(crate) trait AxisData {
     fn scientific_config(&self) -> ScientificConfig;
     #[cfg(feature = "validation")]
     fn sequence_name(&self) -> &str;

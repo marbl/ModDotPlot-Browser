@@ -95,11 +95,11 @@ export function currentDocumentationContract(root) {
 
   const sparseControl = html.match(/<input id="sparse-correction"([^>]*)>/i)?.[1];
   const sparseAssignment = /sparseCorrection:\s*sparseCorrectionInput\.checked/.test(main);
-  if (sparseControl === undefined || /\bchecked\b/i.test(sparseControl) || !sparseAssignment) {
-    throw new Error("browser sparse-correction exposure changed; update the documentation contract");
+  if (sparseControl !== undefined || sparseAssignment) {
+    throw new Error("browser sparse-correction controls or protocol fields reappeared");
   }
-  if (!webPackage.scripts?.["build:wasm"]?.includes("--features validation")) {
-    throw new Error("browser build does not include the bounded sparse-correction backend");
+  if (webPackage.scripts?.["build:wasm"]?.includes("--features validation")) {
+    throw new Error("browser build unexpectedly includes validation-only kernels");
   }
 
   const validationColumns = estimatorHeader(estimatorValidation);
@@ -119,8 +119,7 @@ export function currentDocumentationContract(root) {
       bytes: typescriptConstant(importedTrackTypes, "MAX_IMPORTED_ANNOTATION_BYTES"),
       records: typescriptConstant(importedTrackTypes, "MAX_IMPORTED_ANNOTATION_RECORDS"),
     },
-    browserSparseCorrectionSummary:
-      "Optional Advanced options toggle; disabled by default",
+    browserSparseCorrectionSummary: "Removed; retained only in the non-default Rust validation module",
     validationColumns,
   };
 }

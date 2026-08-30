@@ -1,12 +1,12 @@
 //! Assertion-backed acceptance for the exact browser-default production path.
 
+#[cfg(feature = "validation")]
+use moddotplot_core::validation::{SparseCorrectionPolicy, compute_frozen_tile_adaptive};
 use moddotplot_core::{
     DEFAULT_B_BITS, ExactKmerSet, FrozenAxis, MatrixTile, PackedSequence, ScientificConfig,
     TileRequest, build_axis_overview, compute_frozen_tile, estimate_containment_bit_sliced,
     exact_moddotplot_score,
 };
-#[cfg(feature = "validation")]
-use moddotplot_core::{SparseCorrectionPolicy, compute_frozen_tile_adaptive};
 #[cfg(feature = "validation")]
 use std::time::Instant;
 

@@ -10,7 +10,6 @@ export interface ComparisonParameters {
   resolution: number;
   previewRegisterCount: number;
   detailedRegisterCount: number;
-  sparseCorrection: boolean;
   k: number;
 }
 
@@ -25,9 +24,6 @@ export interface ScientificConfigMetadata {
   hllPrecision: number;
   bBits: number;
   verificationBits: number;
-  sparseCoreCap: number;
-  aniFloor: number;
-  minimumDetectionProbability: number;
   identityScale: number;
   missingIdentity: number;
 }

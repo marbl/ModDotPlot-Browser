@@ -12,7 +12,6 @@ const parameters = {
   resolution: 512,
   previewRegisterCount: 256,
   detailedRegisterCount: 1_024,
-  sparseCorrection: false,
   k: 21,
 };
 

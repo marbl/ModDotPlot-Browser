@@ -5,7 +5,6 @@
 //! boundary. Expensive optimized algorithms have simple reference counterparts so
 //! that scientific behavior can be tested differentially.
 
-pub mod adaptive;
 pub mod config;
 pub mod containment;
 pub mod dna;
@@ -17,12 +16,9 @@ mod matrix;
 pub mod reference;
 pub mod sketch;
 
-pub use adaptive::{
-    DEFAULT_ANI_FLOOR, DEFAULT_DETAILED_REGISTERS, DEFAULT_EXACT_CORE_CAP,
-    DEFAULT_MATCH_DETECTION_PROBABILITY, DEFAULT_PREVIEW_REGISTERS,
-    expected_matches_for_probability, expected_oph_matches, needs_exact_correction,
-    probability_of_at_least_one_match,
-};
+#[cfg(feature = "validation")]
+pub mod validation;
+
 pub use config::{
     AniTransform, AxisExpansionPolicy, ConfigError, DEFAULT_B_BITS, DEFAULT_HLL_PRECISION,
     DEFAULT_IDENTITY_SCALE, DEFAULT_MISSING_IDENTITY, DEFAULT_VERIFICATION_BITS,
@@ -32,11 +28,6 @@ pub use containment::{
     ContainmentEstimate, DirectionEvidence, estimate_containment, estimate_containment_bit_sliced,
     estimate_containment_from_comparison,
 };
-#[cfg(feature = "validation")]
-pub use containment::{
-    estimate_containment_bit_sliced_with, estimate_containment_from_comparison_with,
-    estimate_containment_with,
-};
 pub use dna::{CanonicalKmer, Orientation, PackedSequence, SequenceIdentity};
 pub use fasta::{FastaError, FastaParser, MAX_SEQUENCE_LENGTH};
 pub use gc::{CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE};
@@ -44,10 +35,6 @@ pub use kmer::{KmerTileRequest, compute_kmer_tile};
 pub use matrix::{
     AxisOverview, FrozenAxis, MatrixBuildError, MatrixTile, TileBuildError, TileRequest,
     build_axis_overview, build_axis_range, compute_frozen_tile, compute_tile,
-};
-#[cfg(feature = "validation")]
-pub use matrix::{
-    SparseCoreHashSet, SparseCorrectionPolicy, compute_frozen_tile_adaptive, compute_tile_adaptive,
 };
 pub use reference::{ExactKmerSet, ExactSimilarity, exact_moddotplot_score};
 pub use sketch::{

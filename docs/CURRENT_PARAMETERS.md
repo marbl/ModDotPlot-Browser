@@ -18,13 +18,9 @@
 | Refinement scheduler policy | 2 |
 | Default preview config digest | `58e084b7190f4d93` |
 | Default detailed config digest | `bc5c5131ad1c9a20` |
-| Sparse-correction config digest | `16ed6e4e3c2306c8` |
 | Initial overview cells per axis | 1000 |
-| Sparse exact cap | 2048 distinct hashes |
-| Sparse policy ANI floor | 80% |
-| Sparse match-detection target | 99% |
 | Heatmap minimum / midpoint / maximum | 85% / 92% / 100% |
-| Browser sparse correction | Optional Advanced options toggle; disabled by default |
+| Browser sparse correction | Removed; retained only in the non-default Rust validation module |
 | Imported annotation formats | BED3–12, GFF3, and GTF; plain text, gzip, and BGZF |
 | Imported annotation file limit | 512 MiB |
 | Imported annotation matching-record limit | 1,000,000 per file |
@@ -32,6 +28,6 @@
 | Zoom-axis cache budget | 192 MiB |
 | Prepared-axis budget | 384 MiB |
 | Wasm session budget | 3072 MiB |
-| Maximum tile edge | unknown cells |
+| Maximum tile edge | 256 cells |
 
 Exact terminal mode, user-selected alternatives, and per-tile configuration digests are described in the scientific specification.

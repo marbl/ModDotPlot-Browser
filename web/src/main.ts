@@ -2,13 +2,8 @@ import "./styles.css";
 import { AxisOverlay } from "./axes";
 import { selectDetailResolution, selectTiles } from "./detail";
 import { DnaLoader } from "./dna-loader";
-import {
-  createNumericExport,
-  downloadBlob,
-  embedPngProvenance,
-  exportBaseName,
-  type ExportProvenance,
-} from "./export";
+import { ExportController } from "./export-controller";
+import { exportBaseName, type ExportProvenance, type NumericExportContext } from "./export";
 import { formatBases, formatBytes, formatInterval } from "./format";
 import {
   FeatureTrackOverlay,
@@ -55,19 +50,26 @@ const resolutionSelect = element<HTMLSelectElement>("resolution");
 const previewRegisterSelect = element<HTMLSelectElement>("preview-register-count");
 const detailedRegisterSelect = element<HTMLSelectElement>("detailed-register-count");
 const kmerInput = element<HTMLInputElement>("kmer-length");
-const sparseCorrectionInput = element<HTMLInputElement>("sparse-correction");
 const plotDetailNote = element<HTMLElement>("plot-detail-note");
 const sketchRetentionNote = element<HTMLElement>("sketch-retention-note");
 const scientificProvenance = element<HTMLOutputElement>("scientific-provenance");
 const resetViewButton = element<HTMLButtonElement>("reset-view");
 const exportDataButton = element<HTMLButtonElement>("export-data");
 const exportImageButton = element<HTMLButtonElement>("export-image");
+const exportSaveDialog = element<HTMLDialogElement>("export-save-dialog");
+const exportSaveForm = element<HTMLFormElement>("export-save-form");
+const exportSaveTitle = element<HTMLElement>("export-save-title");
+const exportFileName = element<HTMLInputElement>("export-file-name");
+const exportFormat = element<HTMLSelectElement>("export-format");
+const exportSaveCancel = element<HTMLButtonElement>("export-save-cancel");
+const exportSaveConfirm = element<HTMLButtonElement>("export-save-confirm");
 const status = element<HTMLElement>("status");
 const retryEngineButton = element<HTMLButtonElement>("retry-engine");
 const memoryUsage = element<HTMLElement>("memory-usage");
 const hoverCard = element<HTMLElement>("hover-card");
 const plotSummary = element<HTMLElement>("plot-summary");
 const plotFrame = element<HTMLElement>("plot-frame");
+const plotShell = element<HTMLElement>("plot-shell");
 const plotLoading = element<HTMLElement>("plot-loading");
 const dnaLoader = new DnaLoader();
 plotLoading.append(dnaLoader.canvas);
@@ -363,7 +365,6 @@ for (const control of [
   previewRegisterSelect,
   detailedRegisterSelect,
   kmerInput,
-  sparseCorrectionInput,
 ]) {
   control.addEventListener("change", () => {
     normalizeRegisterControls(control);
@@ -403,8 +404,26 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-color-m
   });
 }
 resetViewButton.addEventListener("click", () => renderer.resetView());
-exportDataButton.addEventListener("click", exportNumericData);
-exportImageButton.addEventListener("click", () => void exportPlotImage());
+new ExportController({
+  dataButton: exportDataButton,
+  imageButton: exportImageButton,
+  dialog: exportSaveDialog,
+  form: exportSaveForm,
+  title: exportSaveTitle,
+  fileName: exportFileName,
+  format: exportFormat,
+  cancel: exportSaveCancel,
+  confirm: exportSaveConfirm,
+  shell: plotShell,
+  plotFrame,
+  renderer,
+  axes,
+  baseName: currentExportBaseName,
+  provenance: currentExportProvenance,
+  numericContext: currentNumericExportContext,
+  onError: showError,
+  canExport: () => comparisonReady && renderer.exportTileViews().length > 0,
+});
 clearButton.addEventListener("click", clearSession);
 retryEngineButton.addEventListener("click", restartEngine);
 renderer.onHover(showHover);
@@ -506,7 +525,6 @@ function prepareComparison(): void {
     resolution: Math.min(Number(resolutionSelect.value), Math.max(1, activeDomainLength)),
     previewRegisterCount: Number(previewRegisterSelect.value),
     detailedRegisterCount: Number(detailedRegisterSelect.value),
-    sparseCorrection: sparseCorrectionInput.checked,
     k: Number(kmerInput.value),
   };
   generation += 1;
@@ -1022,43 +1040,23 @@ function post(message: MainToWorkerMessage): void {
   worker.postMessage(message);
 }
 
-function exportNumericData(): void {
-  if (!activeParameters) return;
-  const tiles = renderer.exportTileViews();
-  if (tiles.length === 0) {
-    showError("No rendered plot data is available to export yet.");
-    return;
-  }
-  try {
-    const provenance = currentExportProvenance();
-    downloadBlob(
-      createNumericExport(tiles, activeDomainLength, provenance),
-      `${currentExportBaseName()}.csv`,
-    );
-  } catch (error: unknown) {
-    showError(error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function exportPlotImage(): Promise<void> {
-  if (!activeParameters) return;
-  exportImageButton.disabled = true;
-  try {
-    await renderer.present();
-    const provenance = currentExportProvenance();
-    const png = await embedPngProvenance(await renderer.exportPng(2), provenance);
-    downloadBlob(png, `${currentExportBaseName()}.png`);
-  } catch (error: unknown) {
-    showError(error instanceof Error ? error.message : String(error));
-  } finally {
-    exportImageButton.disabled = !comparisonReady;
-  }
-}
-
 function currentExportBaseName(): string {
   const x = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "x";
   const y = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "y";
   return exportBaseName(x, y);
+}
+
+function currentNumericExportContext(): NumericExportContext | null {
+  if (!activeParameters || !pendingView) return null;
+  const xName = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "x";
+  const yName = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "y";
+  return {
+    domainLength: activeDomainLength,
+    baseResolution: activeParameters.resolution,
+    viewport: pendingView.view,
+    xName,
+    yName,
+  };
 }
 
 function currentExportProvenance(): ExportProvenance {
@@ -1142,9 +1140,6 @@ function updateScientificProvenance(
     `comparison-bits=${selected.bBits}`,
     `verification-bits=${selected.verificationBits}`,
     `hll-precision=${selected.hllPrecision}`,
-    `sparse-cap=${selected.sparseCoreCap}`,
-    `ani-floor=${selected.aniFloor}`,
-    `match-probability=${selected.minimumDetectionProbability}`,
     `identity-scale=${selected.identityScale}`,
     `missing=${selected.missingIdentity}`,
   ].join("\n");

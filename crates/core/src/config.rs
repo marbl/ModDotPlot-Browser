@@ -1,12 +1,13 @@
 //! Versioned scientific configuration shared by native tests and browser production.
 
 use crate::DEFAULT_HASH_SEED;
-use crate::adaptive::{
-    DEFAULT_ANI_FLOOR, DEFAULT_EXACT_CORE_CAP, DEFAULT_MATCH_DETECTION_PROBABILITY,
-};
 use crate::hash::HashAlgorithm;
 use crate::sketch::OphJaccardEstimator;
 use std::fmt::{Display, Formatter};
+
+const DEFAULT_ANI_FLOOR: f64 = 0.80;
+const DEFAULT_EXACT_CORE_CAP: usize = 2_048;
+const DEFAULT_MATCH_DETECTION_PROBABILITY: f64 = 0.99;
 
 /// Current serialized scientific-contract version.
 pub const SCIENTIFIC_CONFIG_VERSION: u16 = 1;

@@ -49,7 +49,7 @@ compute Web Worker ── Wasm ComputeSession ── PackedSequence
 main thread ── immutable renderer tile cache ── WebGL2 canvas
       │
       ├─ viewport/axes/controls/provenance
-      └─ exact numeric CSV / re-rendered PNG export
+      └─ BEDPE/CSV and full-composition PNG/SVG/PDF export
 ```
 
 The main thread owns interaction and rendering only. FASTA parsing, sketch construction,
@@ -71,10 +71,9 @@ no runtime API, CDN dependency, telemetry, or analytics.
 
 Rejected production candidates are not used by the browser. Git tag `v0.1.0` preserves
 the old Phase 0/minmer/MashMap-compatible code when historical inspection is needed.
-Legacy-estimator selection and fused projection remain available only through the
-non-default Rust `validation` feature. The browser distribution compiles that feature
-solely to expose bounded sparse correction as an off-by-default Advanced option; the
-default Rust public API remains unchanged.
+Candidate estimators, fused projection, sparse policy, and sparse kernels remain
+available only through the non-default Rust `validation` module. The browser
+distribution does not compile that feature or expose sparse correction.
 
 ### Wasm crate
 
@@ -271,14 +270,12 @@ restore, the program, uniforms, geometry, fallback texture, and every GPU tile t
 are reconstructed from retained CPU arrays. Keyboard controls provide arrow-key pan,
 `+/-` zoom, and `Home` reset. The canvas remains focusable and labeled.
 
-Numeric export writes the exact fixed-point tile channels that participate in the
-current renderer viewport, including coordinate intervals, quality, and configuration
-digest. CSV construction is rejected before channel traversal above two million
-renderer cells. Image export re-renders the current plot at twice its backing
-resolution, bounded to eight million pixels, rather than enlarging a screen capture.
-The resulting PNG contains a standards-compliant `iTXt` record. Both formats carry complete software,
-method, scheduler, comparison, scientific-configuration, display, viewport, and
-sequence provenance.
+Numeric export writes current-view renderer cells as BEDPE by default or complete
+fixed-point CSV. Construction is rejected above two million participating cells.
+Image export includes the heatmap, axes, sequence labels, and visible tracks as PNG,
+SVG, or PDF. SVG/PDF embed the heatmap as raster while keeping the other components
+vectorized. All formats carry complete software, method, scheduler, comparison,
+scientific-configuration, display, viewport, and sequence provenance.
 
 ## 9. Security and privacy
 

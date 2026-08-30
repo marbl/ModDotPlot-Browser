@@ -12,6 +12,17 @@ interface AxisMetadata {
 
 type AxisName = "x" | "y";
 
+export interface AxisExportGeometry {
+  x: AxisExportRange;
+  y: AxisExportRange;
+}
+
+export interface AxisExportRange {
+  start: number;
+  end: number;
+  ticks: number[];
+}
+
 export class AxisOverlay {
   readonly #xCanvas: HTMLCanvasElement;
   readonly #yCanvas: HTMLCanvasElement;
@@ -43,6 +54,16 @@ export class AxisOverlay {
   setView(view: ViewChange): void {
     this.#view = view;
     this.#draw();
+  }
+
+  /** Coordinates and tick values used to rebuild axes as vectors during export. */
+  exportGeometry(): AxisExportGeometry {
+    const x = this.#visibleRange("x");
+    const y = this.#visibleRange("y");
+    return {
+      x: { ...x, ticks: tickValues(x.start, x.end) },
+      y: { ...y, ticks: tickValues(y.start, y.end) },
+    };
   }
 
   #resize(): void {
@@ -113,6 +134,13 @@ export function niceTickStep(span: number, targetTicks = 5): number {
   return Math.max(1, unit * magnitude);
 }
 
+function tickValues(start: number, end: number): number[] {
+  const step = niceTickStep(end - start);
+  const ticks: number[] = [];
+  for (let value = Math.ceil(start / step) * step; value <= end; value += step) ticks.push(value);
+  return ticks;
+}
+
 function drawTicksX(
   context: CanvasRenderingContext2D,
   start: number,
@@ -120,10 +148,9 @@ function drawTicksX(
   width: number,
   height: number,
 ): void {
-  const step = niceTickStep(end - start);
   context.textAlign = "center";
   context.textBaseline = "bottom";
-  for (let value = Math.ceil(start / step) * step; value <= end; value += step) {
+  for (const value of tickValues(start, end)) {
     const x = map(value, start, end, 0, width);
     context.beginPath();
     context.moveTo(x, height);
@@ -135,10 +162,9 @@ function drawTicksX(
 }
 
 function drawTicksY(context: CanvasRenderingContext2D, start: number, end: number, width: number, height: number): void {
-  const step = niceTickStep(end - start);
   context.textAlign = "center";
   context.textBaseline = "bottom";
-  for (let value = Math.ceil(start / step) * step; value <= end; value += step) {
+  for (const value of tickValues(start, end)) {
     const y = map(value, start, end, height, 0);
     const label = formatAxisCoordinate(value);
     const halfLabel = Math.min(height / 2 - 2, context.measureText(label).width / 2);

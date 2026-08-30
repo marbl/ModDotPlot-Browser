@@ -1,8 +1,9 @@
 //! Statistical acceptance tests against exact k-mer-set calculations.
 
+use moddotplot_core::validation::{SparseCorrectionPolicy, compute_tile_adaptive};
 use moddotplot_core::{
-    ExactKmerSet, PackedSequence, ScientificConfig, SparseCorrectionPolicy, TileRequest,
-    build_axis_overview, compute_tile_adaptive, exact_moddotplot_score,
+    ExactKmerSet, PackedSequence, ScientificConfig, TileRequest, build_axis_overview,
+    exact_moddotplot_score,
 };
 
 #[test]

@@ -115,8 +115,8 @@ genome-browser palette: A green, C blue, G orange, and T red.
 | Identity range | Map the palette's low, midpoint, and high colors from 80% to 100% |
 | White / Black background | Choose the color used for the plot and below-minimum cells |
 | Feature tracks | Enable sequence-derived tracks or import BED/GFF/GTF annotations, optionally gzip compressed |
-| Export data | Download exact fixed-point numeric tile inputs for the current viewport as CSV |
-| Export image | Re-render the current plot at high resolution and download it as PNG |
+| Export data | Save current-view values as BEDPE (default) or CSV |
+| Export image | Save the complete current composition as PNG (default), SVG, or PDF |
 | Reset view | Return to the full comparison and redraw the overview |
 | Clear | Remove loaded sequences and cached results |
 
@@ -149,25 +149,26 @@ parameter set.
 
 ## Export results
 
-**Export data** writes the numeric inputs currently available to the renderer for the
-visible viewport. Each CSV row includes the exact fixed-point identity, direction, and
-direction-support values; their scales; matrix and genomic coordinate intervals;
-preview/refined/exact quality; and scientific-configuration digest. Missing identity
-uses the retained `65535` sentinel and has a blank decimal `ANI_c` field.
+**Export data** opens a Save As dialog. BEDPE is the default and writes one valid
+current-view cell as an interval pair with `ANI_c`, relative direction, support,
+quality, and configuration digest. CSV is available for the complete fixed-point
+renderer channels; missing identity uses `65535` with a blank decimal `ANI_c` field.
 
-Numeric CSV construction is limited to two million participating renderer cells so it
+Numeric construction is limited to two million participating renderer cells so it
 stays within the transient-memory plan. If a full high-detail view exceeds that limit,
 zoom in or choose a lower **Plot detail** setting before exporting.
 
-**Export image** re-renders the current plot at twice its backing resolution, subject
-to an eight-million-pixel bound. It does not enlarge a screen capture. The export
-represents the current progressive state, so it may contain a mix of preview, refined,
-and exact tiles if background work is still active.
+**Export image** opens a Save As dialog for PNG, SVG, or PDF. All three include the
+heatmap, coordinate axes, sequence labels, and visible computed/imported tracks. PNG
+is a high-resolution raster. SVG and PDF embed the heatmap as a raster but reconstruct
+axes, labels, and tracks as vectors. The result represents the current progressive
+state and may mix preview, refined, and exact tiles.
 
 Both files include machine-readable provenance for the software version, method,
 scheduler policy, comparison parameters, complete scientific configurations, palette
 and display range, viewport, and selected sequences. PNG provenance is stored in an
-`iTXt` chunk; CSV provenance is a JSON preamble line beginning `# provenance=`.
+`iTXt` chunk; BEDPE/CSV use a JSON preamble; SVG uses `<metadata>`; PDF uses document
+metadata.
 
 ## Sequence feature tracks
 
@@ -266,7 +267,7 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.5.0 remains a functional preview. Its bounded preregistered validation supports
+* v0.6.0 remains a functional preview. Its bounded preregistered validation supports
   the selected defaults but is not a universal estimator guarantee.
 * Very large records are limited by available browser memory; bounded in-memory
   sharding is implemented, but optional disk spill may still be needed before claiming

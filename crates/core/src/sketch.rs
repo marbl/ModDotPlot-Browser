@@ -5,10 +5,10 @@ use crate::hash::fmix64;
 
 /// One occupied one-permutation register.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct OphRegister {
-    hash: u64,
-    orientation: Orientation,
-    occupied: bool,
+pub(crate) struct OphRegister {
+    pub(crate) hash: u64,
+    pub(crate) orientation: Orientation,
+    pub(crate) occupied: bool,
 }
 
 /// Evidence obtained by comparing aligned one-permutation registers.
@@ -183,20 +183,8 @@ impl BitSlicedSignature {
             comparison.ambiguous_matches += ambiguous.count_ones();
         }
 
-        #[cfg(feature = "validation")]
-        {
-            comparison.jaccard = collision_corrected_jaccard(
-                comparison.bbit_matches,
-                comparison.verified_matches,
-                comparison.considered,
-                b,
-            );
-        }
-        #[cfg(not(feature = "validation"))]
-        {
-            comparison.jaccard =
-                verified_winner_jaccard(comparison.verified_matches, comparison.considered);
-        }
+        comparison.jaccard =
+            verified_winner_jaccard(comparison.verified_matches, comparison.considered);
         comparison
     }
 
@@ -260,9 +248,9 @@ impl BitSlicedSignature {
 /// differential testing and collision-free direction votes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OphSketch {
-    registers: Vec<OphRegister>,
-    cardinality: HllSketch,
-    observations: u64,
+    pub(crate) registers: Vec<OphRegister>,
+    pub(crate) cardinality: HllSketch,
+    pub(crate) observations: u64,
 }
 
 impl OphSketch {
@@ -317,42 +305,6 @@ impl OphSketch {
             .capacity()
             .saturating_mul(std::mem::size_of::<OphRegister>())
             .saturating_add(self.cardinality.estimated_heap_bytes())
-    }
-
-    /// Projects a fine OPH partition into an exactly equivalent coarser partition.
-    ///
-    /// This supports benchmarking a fused detailed build. The coarse winner is the
-    /// minimum full hash across each contiguous group of fine buckets, which is
-    /// identical to inserting the same stream directly into the coarse sketch.
-    ///
-    /// # Panics
-    ///
-    /// Panics unless the requested count is a power-of-two divisor of the source
-    /// register count and is at least two.
-    #[must_use]
-    #[cfg(feature = "validation")]
-    pub fn project_registers(&self, register_count: usize) -> Self {
-        assert!(register_count >= 2 && register_count.is_power_of_two());
-        assert!(register_count <= self.registers.len());
-        assert_eq!(self.registers.len() % register_count, 0);
-        let group = self.registers.len() / register_count;
-        let registers = self
-            .registers
-            .chunks_exact(group)
-            .map(|candidates| {
-                candidates
-                    .iter()
-                    .copied()
-                    .filter(|candidate| candidate.occupied)
-                    .min_by_key(|candidate| candidate.hash)
-                    .unwrap_or_default()
-            })
-            .collect();
-        Self {
-            registers,
-            cardinality: self.cardinality.clone(),
-            observations: self.observations,
-        }
     }
 
     /// Adds one pre-hashed canonical k-mer.
@@ -438,20 +390,8 @@ impl OphSketch {
             }
         }
 
-        #[cfg(feature = "validation")]
-        {
-            comparison.jaccard = collision_corrected_jaccard(
-                comparison.bbit_matches,
-                comparison.verified_matches,
-                comparison.considered,
-                b,
-            );
-        }
-        #[cfg(not(feature = "validation"))]
-        {
-            comparison.jaccard =
-                verified_winner_jaccard(comparison.verified_matches, comparison.considered);
-        }
+        comparison.jaccard =
+            verified_winner_jaccard(comparison.verified_matches, comparison.considered);
         comparison
     }
 
@@ -498,28 +438,6 @@ impl OphSketch {
         }
         signature
     }
-}
-
-#[cfg(feature = "validation")]
-pub(crate) fn collision_corrected_jaccard(
-    matches: u32,
-    verified_matches: u32,
-    considered: u32,
-    b: u8,
-) -> Option<f64> {
-    if considered == 0 {
-        return None;
-    }
-    // ANI applies a k-th root, so even one chance b-bit collision can otherwise
-    // become a visually strong false match. The wider verification fingerprint is
-    // already required for strand evidence; use it as a conservative evidence gate.
-    // With no verified winner match, the scientifically defensible estimate is zero.
-    if verified_matches == 0 {
-        return Some(0.0);
-    }
-    let raw = f64::from(matches) / f64::from(considered);
-    let collision = 2_f64.powi(-i32::from(b));
-    Some(((raw - collision) / (1.0 - collision)).clamp(0.0, 1.0))
 }
 
 /// Estimates OPH resemblance from verified winner equality over union-occupied bins.

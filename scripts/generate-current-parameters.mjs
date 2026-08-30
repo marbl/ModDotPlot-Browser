@@ -8,8 +8,10 @@ import {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const config = readFileSync(join(root, "crates/core/src/config.rs"), "utf8");
-const adaptive = readFileSync(join(root, "crates/core/src/adaptive.rs"), "utf8");
-const wasm = readFileSync(join(root, "crates/wasm/src/lib.rs"), "utf8");
+const adaptive = readFileSync(join(root, "crates/core/src/validation/adaptive.rs"), "utf8");
+const wasm = ["lib.rs", "resource.rs"]
+  .map((name) => readFileSync(join(root, "crates/wasm/src", name), "utf8"))
+  .join("\n");
 const refinement = readFileSync(join(root, "web/src/refinement.ts"), "utf8");
 const html = readFileSync(join(root, "web/index.html"), "utf8");
 const documentationContract = currentDocumentationContract(root);
@@ -39,7 +41,7 @@ function typescriptConstant(source, name) {
   return match[1].trim().replaceAll("_", "");
 }
 
-function configDigest(registerCount, sparseCoreCap) {
+function configDigest(registerCount) {
   const bytes = [];
   const buffer = new ArrayBuffer(8);
   const view = new DataView(buffer);
@@ -59,7 +61,7 @@ function configDigest(registerCount, sparseCoreCap) {
     1, // half-window expansion
     1, // containment kth-root ANI
   );
-  view.setBigUint64(0, BigInt(sparseCoreCap), true);
+  view.setBigUint64(0, 0n, true);
   append();
   view.setFloat64(0, Number(rustConstant(adaptive, "DEFAULT_ANI_FLOOR")), true);
   append();
@@ -83,7 +85,6 @@ function configDigest(registerCount, sparseCoreCap) {
 
 const previewRegisters = Number(selectedOption("preview-register-count"));
 const detailedRegisters = Number(selectedOption("detailed-register-count"));
-const sparseCap = Number(rustConstant(adaptive, "DEFAULT_EXACT_CORE_CAP"));
 
 const lines = [
   "# Current generated parameters",
@@ -104,13 +105,9 @@ const lines = [
   `| Preview registers | ${previewRegisters} |`,
   `| Detailed registers | ${detailedRegisters} |`,
   `| Refinement scheduler policy | ${typescriptConstant(refinement, "REFINEMENT_POLICY_VERSION")} |`,
-  `| Default preview config digest | \`${configDigest(previewRegisters, 0)}\` |`,
-  `| Default detailed config digest | \`${configDigest(detailedRegisters, 0)}\` |`,
-  `| Sparse-correction config digest | \`${configDigest(detailedRegisters, sparseCap)}\` |`,
+  `| Default preview config digest | \`${configDigest(previewRegisters)}\` |`,
+  `| Default detailed config digest | \`${configDigest(detailedRegisters)}\` |`,
   `| Initial overview cells per axis | ${selectedOption("resolution")} |`,
-  `| Sparse exact cap | ${sparseCap} distinct hashes |`,
-  `| Sparse policy ANI floor | ${Number(rustConstant(adaptive, "DEFAULT_ANI_FLOOR")) * 100}% |`,
-  `| Sparse match-detection target | ${Number(rustConstant(adaptive, "DEFAULT_MATCH_DETECTION_PROBABILITY")) * 100}% |`,
   `| Heatmap minimum / midpoint / maximum | ${inputValue("heatmap-min")}% / ${inputValue("heatmap-mid")}% / ${inputValue("heatmap-max")}% |`,
   `| Browser sparse correction | ${documentationContract.browserSparseCorrectionSummary} |`,
   `| Imported annotation formats | ${documentationContract.importedAnnotationSummary} |`,

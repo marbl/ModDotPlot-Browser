@@ -7,16 +7,25 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-30
+
 ### Added
 
-* Added an off-by-default Advanced option for bounded sparse-window correction, with a
-  concise runtime warning.
+* Added current-view BEDPE export as the numeric default, with CSV as an alternate.
+* Added full-composition PNG, SVG, and PDF image export. SVG and PDF keep axes,
+  sequence labels, and visible tracks as vectors while embedding the heatmap as a
+  raster image.
+* Added Save As dialogs with editable filenames and format selectors for both export
+  actions; BEDPE and PNG are the defaults.
 
 ### Changed
 
-* Included the existing sparse-correction backend in the browser build. When enabled,
-  sketch tiles bypass ordinary progressive publication so correction is applied before
-  they are displayed.
+* Removed sparse correction from the browser protocol, UI, Wasm API, resource model,
+  and ordinary web build.
+* Consolidated candidate estimators, rejected fused projection, sparse policy, and
+  sparse kernels under the non-default Rust `validation` module.
+* Split export composition/controller responsibilities out of the main UI and moved
+  tile selection policy out of the compute-worker orchestrator.
 
 ## [0.5.0] - 2026-08-30
 
