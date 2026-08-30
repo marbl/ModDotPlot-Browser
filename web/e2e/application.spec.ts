@@ -237,6 +237,25 @@ test("refined overview tiles paint before detailed preparation completes", async
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
 });
 
+test("bounded sparse correction is an off-by-default advanced option", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#resolution").selectOption("500", { force: true });
+  await loadFasta(page, "sparse.fa", `>sparse\n${"ACGTTGCAAGTC".repeat(5_000)}\n`);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+
+  await page.locator(".advanced-controls summary").click();
+  const correction = page.locator("#sparse-correction");
+  await expect(correction).not.toBeChecked();
+  await expect(page.locator(".checkbox-option small")).toContainText("increases runtime");
+  await correction.check();
+
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#scientific-provenance")).toHaveAttribute(
+    "title",
+    /sparse-cap=2048/,
+  );
+});
+
 test("pairwise orientation, navigation, and reset remain coherent", async ({ page }) => {
   await page.goto("/");
   await page.locator("#resolution").selectOption("500", { force: true });
@@ -676,7 +695,8 @@ test("heatmap palette and plot background controls update without recomputation"
   await page.goto("/");
   await loadFasta(page, "short.fa", shortFasta);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
-  await expect(page.locator("#sparse-correction")).toHaveCount(0);
+  await expect(page.locator("#sparse-correction")).toHaveCount(1);
+  await expect(page.locator("#sparse-correction")).not.toBeChecked();
   const layout = await page.evaluate(() => {
     const xAxis = document.querySelector(".axis-panel-x")!.getBoundingClientRect();
     const yAxis = document.querySelector(".axis-panel-y")!.getBoundingClientRect();

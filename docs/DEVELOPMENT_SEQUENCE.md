@@ -35,6 +35,12 @@ input; the maintainer decisions below are authoritative where they modify it.
 9. Manual validation of v0.2.1 passed. Later versions may proceed without waiting
    between stages, but every source version and static web build must be retained so the
    maintainer can test v0.2.1, v0.3.0, v0.4.0, and v0.5.0 in order.
+10. A post-v0.5.0 visual diagnostic showed sparse correction acts mainly in large,
+    highly similar low-cardinality repeat blocks, correcting their `ANI_c` estimates
+    rather than rescuing otherwise absent structure. The green diagnostic fork was
+    abandoned. Sparse correction remains off by default but is now a supported
+    Advanced option with an explicit runtime warning; this supersedes decision 7's
+    validation-only UI disposition.
 
 The complete scientific limits and fixture rules are maintained in
 [VALIDATION_CONTRACT.md](VALIDATION_CONTRACT.md).

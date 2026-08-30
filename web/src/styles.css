@@ -189,6 +189,16 @@ summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 details[open] { display: grid; gap: 14px; }
 details[open] summary { margin-bottom: 4px; }
 .advanced-controls[open] { gap: 18px; }
+.advanced-controls .checkbox-option > span {
+  justify-content: flex-start;
+  align-items: center;
+}
+.advanced-controls .checkbox-option input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
 
 .feature-track-controls[open] { gap: 12px; }
 .feature-track-control-item {

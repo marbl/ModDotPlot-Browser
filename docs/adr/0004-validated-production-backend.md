@@ -4,6 +4,18 @@
 
 *Status: accepted for v0.2.1, with the amendments below*
 
+## Post-v0.5.0 amendment
+
+A visual diagnostic found that bounded sparse correction primarily adjusts `ANI_c`
+inside already-visible, highly similar low-cardinality repeat blocks. It did not show
+a compelling structural-recovery benefit, so the mode remains disabled by default.
+The browser now exposes it under Advanced options for optional repeat-window inspection
+and warns that it increases runtime.
+
+| Current contract | State |
+| --- | --- |
+| Browser sparse correction | Optional Advanced options toggle; disabled by default |
+
 ## v0.2.1 amendment
 
 The assertion-backed browser-default gate now tests the complete 256- and

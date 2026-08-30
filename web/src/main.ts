@@ -55,6 +55,7 @@ const resolutionSelect = element<HTMLSelectElement>("resolution");
 const previewRegisterSelect = element<HTMLSelectElement>("preview-register-count");
 const detailedRegisterSelect = element<HTMLSelectElement>("detailed-register-count");
 const kmerInput = element<HTMLInputElement>("kmer-length");
+const sparseCorrectionInput = element<HTMLInputElement>("sparse-correction");
 const plotDetailNote = element<HTMLElement>("plot-detail-note");
 const sketchRetentionNote = element<HTMLElement>("sketch-retention-note");
 const scientificProvenance = element<HTMLOutputElement>("scientific-provenance");
@@ -362,6 +363,7 @@ for (const control of [
   previewRegisterSelect,
   detailedRegisterSelect,
   kmerInput,
+  sparseCorrectionInput,
 ]) {
   control.addEventListener("change", () => {
     normalizeRegisterControls(control);
@@ -504,7 +506,7 @@ function prepareComparison(): void {
     resolution: Math.min(Number(resolutionSelect.value), Math.max(1, activeDomainLength)),
     previewRegisterCount: Number(previewRegisterSelect.value),
     detailedRegisterCount: Number(detailedRegisterSelect.value),
-    sparseCorrection: false,
+    sparseCorrection: sparseCorrectionInput.checked,
     k: Number(kmerInput.value),
   };
   generation += 1;

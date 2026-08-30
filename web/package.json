@@ -10,7 +10,7 @@
   "packageManager": "npm@11.12.1",
   "scripts": {
     "dev": "vite",
-    "build:wasm": "wasm-pack build ../crates/wasm --target web --out-dir ../../web/src/wasm --release",
+    "build:wasm": "wasm-pack build ../crates/wasm --target web --out-dir ../../web/src/wasm --release -- --features validation",
     "build:ui": "tsc --noEmit && vite build",
     "build": "npm run build:release",
     "build:release": "npm test && npm run build:wasm && npm run build:ui && npm run docs && npm run docs:check && npm run sbom",

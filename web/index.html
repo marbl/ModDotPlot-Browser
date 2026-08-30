@@ -158,6 +158,10 @@
               <span>K-mer length</span>
               <input id="kmer-length" type="number" min="5" max="31" step="2" value="21" />
             </label>
+            <label class="checkbox-option">
+              <span><input id="sparse-correction" type="checkbox" /> Sparse window correction</span>
+              <small>Corrects detailed low-cardinality repeat windows; increases runtime.</small>
+            </label>
             <output id="scientific-provenance" class="scientific-provenance" aria-live="polite">
               Method details appear after a comparison is prepared.
             </output>

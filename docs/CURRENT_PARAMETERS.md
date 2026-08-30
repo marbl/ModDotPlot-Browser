@@ -18,13 +18,13 @@
 | Refinement scheduler policy | 2 |
 | Default preview config digest | `58e084b7190f4d93` |
 | Default detailed config digest | `bc5c5131ad1c9a20` |
-| Validation-only sparse-correction config digest | `16ed6e4e3c2306c8` |
+| Sparse-correction config digest | `16ed6e4e3c2306c8` |
 | Initial overview cells per axis | 1000 |
-| Validation-only sparse exact cap | 2048 distinct hashes |
+| Sparse exact cap | 2048 distinct hashes |
 | Sparse policy ANI floor | 80% |
 | Sparse match-detection target | 99% |
 | Heatmap minimum / midpoint / maximum | 85% / 92% / 100% |
-| Browser sparse correction | Disabled; no browser control (`sparseCorrection: false`) |
+| Browser sparse correction | Optional Advanced options toggle; disabled by default |
 | Imported annotation formats | BED3–12, GFF3, and GTF; plain text, gzip, and BGZF |
 | Imported annotation file limit | 512 MiB |
 | Imported annotation matching-record limit | 1,000,000 per file |

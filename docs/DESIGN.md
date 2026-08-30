@@ -71,9 +71,10 @@ no runtime API, CDN dependency, telemetry, or analytics.
 
 Rejected production candidates are not used by the browser. Git tag `v0.1.0` preserves
 the old Phase 0/minmer/MashMap-compatible code when historical inspection is needed.
-Legacy-estimator selection, fused projection, and sparse correction are available only
-through the non-default Rust `validation` feature and are absent from the ordinary
-browser and default public API.
+Legacy-estimator selection and fused projection remain available only through the
+non-default Rust `validation` feature. The browser distribution compiles that feature
+solely to expose bounded sparse correction as an off-by-default Advanced option; the
+default Rust public API remains unchanged.
 
 ### Wasm crate
 

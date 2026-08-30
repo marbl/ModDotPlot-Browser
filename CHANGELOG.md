@@ -7,6 +7,17 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+* Added an off-by-default Advanced option for bounded sparse-window correction, with a
+  concise runtime warning.
+
+### Changed
+
+* Included the existing sparse-correction backend in the browser build. When enabled,
+  sketch tiles bypass ordinary progressive publication so correction is applied before
+  they are displayed.
+
 ## [0.5.0] - 2026-08-30
 
 ### Changed

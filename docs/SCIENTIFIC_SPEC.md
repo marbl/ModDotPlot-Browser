@@ -113,8 +113,8 @@ visual confidence therefore does not alter the scientific match value.
 The default preview uses 256 registers and is explicitly provisional. The default
 detailed tier uses 1,024 registers and HLL precision 10. Detailed tiles are requested
 only when the preview has low winner support or lies near a display decision. Preview
-tiles remain the settled result elsewhere. Navigation cancels obsolete work. The
-browser UI does not expose the bounded sparse-correction mode.
+tiles remain the settled result elsewhere. Navigation cancels obsolete work. Advanced
+options expose bounded sparse correction, disabled by default because it adds runtime.
 
 Under independent point substitutions, with large indels excluded, k-mer survival at
 unaltered-base fraction `q` is approximately `q^k`. This is the only biological
@@ -128,8 +128,8 @@ The backend's optional sparse policy retains a complete canonical-hash set only
 while a core has at most 2,048 distinct hashes. If OPH match-detection probability at
 80% ANI is modeled below 99%, the eligible directed containment is rescanned exactly.
 Partial sets are discarded immediately on exceeding the cap. It remains available for
-validation but is not enabled by the current browser controls, is not the default
-estimator, and is not a whole-matrix exact guarantee.
+optional repeat-window inspection but is not the default estimator and is not a
+whole-matrix exact guarantee.
 
 ## Terminal exact mode
 

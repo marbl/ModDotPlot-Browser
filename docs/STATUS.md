@@ -32,8 +32,9 @@ by the named evidence; it does not imply broad research validation.
 * Private frozen production axes carrying complete scientific and source-sequence
   provenance; geometric-only tile requests reject incompatible composition before
   allocation. Schema-1 tile bytes match the retained v0.2.1 checkpoint exactly.
-* Legacy estimator selection, fused projection, and sparse correction isolated behind
-  the non-default Rust `validation` feature and absent from default global symbols.
+* Legacy estimator selection and fused projection remain isolated behind the
+  non-default Rust `validation` feature. The browser distribution uses that feature
+  to offer bounded sparse correction as an off-by-default Advanced option.
 * Frozen production axes, 3 GiB session admission, prepared-axis and zoom-cache
   budgets, logarithmic recency tracking, and coordinated renderer eviction.
 * A 4 GiB cross-layer plan accounts separately for Wasm, JavaScript tiles, GPU

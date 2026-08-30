@@ -48,6 +48,7 @@ export function currentDocumentationContract(root) {
   ].join("\n");
   const html = read(root, "web/index.html");
   const main = read(root, "web/src/main.ts");
+  const webPackage = JSON.parse(read(root, "web/package.json"));
   const importedTrackTypes = read(root, "web/src/imported-track-types.ts");
   const estimatorValidation = read(root, "crates/core/tests/estimator_validation.rs");
   const releaseValidation = read(root, "docs/releases/v0.2.1/estimator-validation.tsv");
@@ -92,12 +93,13 @@ export function currentDocumentationContract(root) {
     }
   }
 
-  const sparseAssignments = [...main.matchAll(/sparseCorrection:\s*(true|false)/g)].map(
-    (match) => match[1],
-  );
-  const sparseControlExposed = /id="[^"]*(?:high-sensitivity|sparse-correction)/i.test(html);
-  if (sparseAssignments.length !== 1 || sparseAssignments[0] !== "false" || sparseControlExposed) {
+  const sparseControl = html.match(/<input id="sparse-correction"([^>]*)>/i)?.[1];
+  const sparseAssignment = /sparseCorrection:\s*sparseCorrectionInput\.checked/.test(main);
+  if (sparseControl === undefined || /\bchecked\b/i.test(sparseControl) || !sparseAssignment) {
     throw new Error("browser sparse-correction exposure changed; update the documentation contract");
+  }
+  if (!webPackage.scripts?.["build:wasm"]?.includes("--features validation")) {
+    throw new Error("browser build does not include the bounded sparse-correction backend");
   }
 
   const validationColumns = estimatorHeader(estimatorValidation);
@@ -118,7 +120,7 @@ export function currentDocumentationContract(root) {
       records: typescriptConstant(importedTrackTypes, "MAX_IMPORTED_ANNOTATION_RECORDS"),
     },
     browserSparseCorrectionSummary:
-      "Disabled; no browser control (`sparseCorrection: false`)",
+      "Optional Advanced options toggle; disabled by default",
     validationColumns,
   };
 }

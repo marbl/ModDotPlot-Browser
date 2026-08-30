@@ -398,7 +398,7 @@ async function prepareComparison(
     parameters,
     firstRegisters,
     !distinctPasses,
-    true,
+    distinctPasses || !parameters.sparseCorrection,
     firstQuality,
     null,
   );
@@ -436,7 +436,7 @@ async function prepareComparison(
         parameters,
         parameters.detailedRegisterCount,
         true,
-        true,
+        !parameters.sparseCorrection,
         "refined",
         detailedTiles,
       );
@@ -650,7 +650,7 @@ async function computeRequestedTiles(
         parameters,
         parameters.detailedRegisterCount,
         true,
-        true,
+        !parameters.sparseCorrection,
         "refined",
         prioritizeForRefinement(resolution, tiles, "refined"),
       );
