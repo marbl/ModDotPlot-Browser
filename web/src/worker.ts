@@ -13,7 +13,7 @@ import { transposeTile } from "./tile";
 import {
   refinementKey,
   selectRefinementTiles,
-  tileRefinementPriority,
+  summarizeRefinementEvidence,
 } from "./refinement";
 import {
   ComparisonJob,
@@ -47,6 +47,12 @@ context.onmessage = (event: MessageEvent<MainToWorkerMessage>): void => {
   if (message.type === "preview-presented") {
     if (comparisonJob?.canPublish(message.generation, message.requestId)) {
       comparisonJob.releasePresentation();
+    }
+    return;
+  }
+  if (message.type === "update-refinement-policy") {
+    if (message.generation === comparisonJob?.generation) {
+      comparisonJob.refinementDisplayMinimum = message.displayMinimum;
     }
     return;
   }
@@ -144,6 +150,7 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
       break;
     case "cancel-tiles":
     case "preview-presented":
+    case "update-refinement-policy":
     case "evict-tiles":
     case "cancel-feature-tracks":
     case "request-feature-tracks":
@@ -829,9 +836,10 @@ function rememberRefinementPriority(
   identity: Uint16Array,
   support: Uint16Array,
 ): void {
-  requireComparisonJob().refinementPriority.set(
+  const job = requireComparisonJob();
+  job.refinementEvidence.set(
     refinementKey(resolution, x, y),
-    tileRefinementPriority(identity, support),
+    summarizeRefinementEvidence(identity, support),
   );
 }
 
@@ -844,8 +852,11 @@ function prioritizeForRefinement<T extends { x: number; y: number }>(
   return selectRefinementTiles(
     resolution,
     tiles,
-    requireComparisonJob().refinementPriority,
-    requireComparisonJob().parameters.sparseCorrection,
+    requireComparisonJob().refinementEvidence,
+    {
+      displayMinimum: requireComparisonJob().refinementDisplayMinimum,
+      refineAll: requireComparisonJob().parameters.sparseCorrection,
+    },
   );
 }
 
@@ -856,8 +867,11 @@ function hasDetailedCandidates<T extends { x: number; y: number }>(
   return selectRefinementTiles(
     resolution,
     tiles,
-    requireComparisonJob().refinementPriority,
-    requireComparisonJob().parameters.sparseCorrection,
+    requireComparisonJob().refinementEvidence,
+    {
+      displayMinimum: requireComparisonJob().refinementDisplayMinimum,
+      refineAll: requireComparisonJob().parameters.sparseCorrection,
+    },
   ).length > 0;
 }
 

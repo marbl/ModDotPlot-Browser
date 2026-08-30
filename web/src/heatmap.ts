@@ -85,6 +85,42 @@ export function plotBackgroundRgb(dark: boolean): readonly [number, number, numb
   return hexToRgb(dark ? DARK_PLOT_BACKGROUND : LIGHT_PLOT_BACKGROUND);
 }
 
+/** CPU reference for stable pixel goldens; mirrors the similarity fragment shader. */
+export function identityColorRgba(
+  encodedIdentity: number,
+  palette: HeatmapPalette,
+  range: HeatmapRange,
+  darkBackground: boolean,
+): readonly [number, number, number, number] {
+  const background = darkBackground ? DARK_PLOT_BACKGROUND : LIGHT_PLOT_BACKGROUND;
+  if (encodedIdentity === 65_535 || encodedIdentity / 100 < range.minimum) {
+    return [...hexToRgbBytes(background), 255];
+  }
+  const identity = encodedIdentity / 100;
+  const position = identity >= range.maximum
+    ? 1
+    : identity <= range.midpoint
+      ? range.midpoint - range.minimum <= 0.001
+        ? 0.5
+        : 0.5 * (identity - range.minimum) / (range.midpoint - range.minimum)
+      : range.maximum - range.midpoint <= 0.001
+        ? 0.5
+        : 0.5 + 0.5 * (identity - range.midpoint) / (range.maximum - range.midpoint);
+  const colors = HEATMAP_PALETTES[palette].colors;
+  const scaled = Math.max(0, Math.min(1, position)) * (colors.length - 1);
+  const lower = Math.min(colors.length - 1, Math.floor(scaled));
+  const upper = Math.min(colors.length - 1, lower + 1);
+  const fraction = scaled - lower;
+  const low = hexToRgbBytes(colors[lower]!);
+  const high = hexToRgbBytes(colors[upper]!);
+  return [
+    Math.round(low[0] + (high[0] - low[0]) * fraction),
+    Math.round(low[1] + (high[1] - low[1]) * fraction),
+    Math.round(low[2] + (high[2] - low[2]) * fraction),
+    255,
+  ];
+}
+
 /** Builds the slider preview with the same piecewise-linear anchor mapping as WebGL. */
 export function heatmapGradient(
   palette: HeatmapPalette,
@@ -117,10 +153,15 @@ function formatPosition(position: number): string {
 }
 
 function hexToRgb(color: string): [number, number, number] {
+  const bytes = hexToRgbBytes(color);
+  return [bytes[0] / 255, bytes[1] / 255, bytes[2] / 255];
+}
+
+function hexToRgbBytes(color: string): [number, number, number] {
   const value = Number.parseInt(color.slice(1), 16);
   return [
-    ((value >> 16) & 0xff) / 255,
-    ((value >> 8) & 0xff) / 255,
-    (value & 0xff) / 255,
+    (value >> 16) & 0xff,
+    (value >> 8) & 0xff,
+    value & 0xff,
   ];
 }

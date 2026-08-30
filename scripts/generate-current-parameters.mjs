@@ -10,6 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const config = readFileSync(join(root, "crates/core/src/config.rs"), "utf8");
 const adaptive = readFileSync(join(root, "crates/core/src/adaptive.rs"), "utf8");
 const wasm = readFileSync(join(root, "crates/wasm/src/lib.rs"), "utf8");
+const refinement = readFileSync(join(root, "web/src/refinement.ts"), "utf8");
 const html = readFileSync(join(root, "web/index.html"), "utf8");
 const documentationContract = currentDocumentationContract(root);
 
@@ -30,6 +31,12 @@ function inputValue(id) {
   const value = html.match(new RegExp(`<input id="${id}"[^>]*value="([^"]+)"`))?.[1];
   if (!value) throw new Error(`missing input value for ${id}`);
   return value;
+}
+
+function typescriptConstant(source, name) {
+  const match = source.match(new RegExp(`export const ${name} = ([^;]+);`));
+  if (!match?.[1]) throw new Error(`missing TypeScript constant ${name}`);
+  return match[1].trim().replaceAll("_", "");
 }
 
 function configDigest(registerCount, sparseCoreCap) {
@@ -96,6 +103,7 @@ const lines = [
   `| HLL precision | ${rustConstant(config, "DEFAULT_HLL_PRECISION")} |`,
   `| Preview registers | ${previewRegisters} |`,
   `| Detailed registers | ${detailedRegisters} |`,
+  `| Refinement scheduler policy | ${typescriptConstant(refinement, "REFINEMENT_POLICY_VERSION")} |`,
   `| Default preview config digest | \`${configDigest(previewRegisters, 0)}\` |`,
   `| Default detailed config digest | \`${configDigest(detailedRegisters, 0)}\` |`,
   `| Validation-only sparse-correction config digest | \`${configDigest(detailedRegisters, sparseCap)}\` |`,

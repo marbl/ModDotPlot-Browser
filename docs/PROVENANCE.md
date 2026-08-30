@@ -12,9 +12,11 @@ than restating it, reducing the risk of attribution drift. Machine-readable auth
 software version, preferred citation, and method references are maintained in
 [`CITATION.cff`](../CITATION.cff).
 
-The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current release is `v0.4.0`.
+The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current release is `v0.5.0`.
 Every built axis carries the complete immutable scientific configuration as its exact
 in-process identity, plus a stable source-sequence identity. The shorter configuration
 digest remains the external provenance label. The browser displays the digest and
 principal parameters under Advanced options. Release builds also include a CycloneDX
-SBOM, a dependency license bundle, checksums, and build provenance.
+SBOM, a dependency license bundle, checksums, and build provenance. Numeric and PNG
+exports embed the current method, software version, complete scientific metadata,
+scheduler policy, display settings, viewport, and sequence identities.

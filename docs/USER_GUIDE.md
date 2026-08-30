@@ -93,9 +93,11 @@ assembly is centered rather than anchored to the control panel.
 * Change either sequence selector at any time to start another comparison.
 
 When entering a new level, the existing lower-resolution image is enlarged immediately.
-Quick tiles then replace it. Tiles near a display decision or with weak support receive
+Quick tiles then replace it. Tiles near the active display floor or with weak support,
+their immediate neighbors, and a small deterministic exploratory sample receive
 detailed estimates if the viewport remains current. Moving elsewhere cancels obsolete
-detailed work.
+detailed work. The exploratory sample prevents an apparently blank quick region from
+being permanently excluded from refinement.
 
 At maximum zoom, each plot position represents a base pair rather than an approximate
 window sketch. Exact canonical k-mer matches extend from each matching start through
@@ -113,6 +115,8 @@ genome-browser palette: A green, C blue, G orange, and T red.
 | Identity range | Map the palette's low, midpoint, and high colors from 80% to 100% |
 | White / Black background | Choose the color used for the plot and below-minimum cells |
 | Feature tracks | Enable sequence-derived tracks or import BED/GFF/GTF annotations, optionally gzip compressed |
+| Export data | Download exact fixed-point numeric tile inputs for the current viewport as CSV |
+| Export image | Re-render the current plot at high resolution and download it as PNG |
 | Reset view | Return to the full comparison and redraw the overview |
 | Clear | Remove loaded sequences and cached results |
 
@@ -143,7 +147,29 @@ The compact methods line below these controls reports ntHash2, the estimator, re
 tiers, HLL precision, and the scientific configuration digest. Hover it for the full
 parameter set.
 
-### Sequence feature tracks
+## Export results
+
+**Export data** writes the numeric inputs currently available to the renderer for the
+visible viewport. Each CSV row includes the exact fixed-point identity, direction, and
+direction-support values; their scales; matrix and genomic coordinate intervals;
+preview/refined/exact quality; and scientific-configuration digest. Missing identity
+uses the retained `65535` sentinel and has a blank decimal `ANI_c` field.
+
+Numeric CSV construction is limited to two million participating renderer cells so it
+stays within the transient-memory plan. If a full high-detail view exceeds that limit,
+zoom in or choose a lower **Plot detail** setting before exporting.
+
+**Export image** re-renders the current plot at twice its backing resolution, subject
+to an eight-million-pixel bound. It does not enlarge a screen capture. The export
+represents the current progressive state, so it may contain a mix of preview, refined,
+and exact tiles if background work is still active.
+
+Both files include machine-readable provenance for the software version, method,
+scheduler policy, comparison parameters, complete scientific configurations, palette
+and display range, viewport, and selected sequences. PNG provenance is stored in an
+`iTXt` chunk; CSV provenance is a JSON preamble line beginning `# provenance=`.
+
+## Sequence feature tracks
 
 Open **Feature tracks** to enable GC% or CpG observed/expected independently on either
 axis. **Both** switches the corresponding X and Y tracks together. Each enabled track
@@ -163,7 +189,7 @@ calculated, preventing an old track from appearing beside a new plot position.
 
 Hover over a GC% or CpG bar to see its value and genomic window.
 
-#### Imported annotations
+### Imported annotations
 
 Drop a BED, GFF3, or GTF file on the X or Y coordinate axis, or use **Add track** at
 the bottom of the Feature tracks panel. Plain-text, gzip, and BGZF versions are
@@ -240,15 +266,15 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.2.0 is a functional preview and has not completed the full scientific
-  release-validation plan.
-* Very large records are limited by available browser memory; sharding and disk spill
-  are planned before claiming robust 1 Gb operation.
+* v0.5.0 remains a functional preview. Its bounded preregistered validation supports
+  the selected defaults but is not a universal estimator guarantee.
+* Very large records are limited by available browser memory; bounded in-memory
+  sharding is implemented, but optional disk spill may still be needed before claiming
+  robust 1 Gb operation across ordinary laptops.
 * Identity estimates below roughly 80% are not a target operating regime and are shown
   using the plot background by default.
-* Data and high-resolution image export are not implemented yet.
-* Chromium, Firefox, and WebKit integration and WebGL recovery are automated. Stable
-  numeric and pixel goldens remain future validation work.
+* Export captures the current progressive viewport. An explicit all-detailed
+  publication tier is future usability work.
 
 For implementation evidence and open validation work, see
 [Implementation status](STATUS.md).

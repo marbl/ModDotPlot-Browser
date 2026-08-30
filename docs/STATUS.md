@@ -25,8 +25,9 @@ by the named evidence; it does not imply broad research validation.
   default detail selected by the multi-configuration validation sweep.
 * Pooled direction evidence and support-dependent chroma without identity attenuation.
 * Quick axis blocks paint as soon as compatible X/Y summaries exist. Detailed blocks
-  replace them individually as they finish; post-paint detail is uncertainty-selected,
-  and cancellable.
+  replace them individually as they finish; scheduler policy 2 selects post-paint
+  detail from display-aware identity/support histograms, immediate structural
+  neighbors, and deterministic exploration. Selection is cancellable.
   Coarse visual fallback, zoom tiling, prefetch, and exact terminal tiles are retained.
 * Private frozen production axes carrying complete scientific and source-sequence
   provenance; geometric-only tile requests reject incompatible composition before
@@ -42,6 +43,9 @@ by the named evidence; it does not imply broad research validation.
   before output allocation and return typed errors through the Wasm boundary.
 * Consuming Wasm tile channels with no redundant JavaScript `.slice()`.
 * WebGL2 context restoration and keyboard pan/zoom/reset.
+* Numeric CSV export of exact current renderer inputs and bounded high-resolution PNG
+  re-rendering, both with complete machine-readable method and configuration
+  provenance.
 * Stackable GC% and CpG observed/expected axis tracks with incremental composition
   indexing, one unsmoothed bar per sampled display column or row, overscanned pan
   caches, immediate stale-track blanking, and value mouseovers.
@@ -62,26 +66,43 @@ by the named evidence; it does not imply broad research validation.
 * Real-Wasm tests in Chromium, Firefox, WebKit, and installed Google Chrome for
   rapid-load cancellation, clear, exact entry, privacy, context loss, keyboard
   navigation, progressive detail paint, pairwise operation, worker recovery, annotation
-  importing, sequence association, UCSC colors, track reordering, and disabling.
+  importing, sequence association, UCSC colors, track reordering, disabling, and
+  provenance-bearing numeric/image downloads.
 
 The automated counts are recorded from each clean release validation rather than
 hard-coded here. The CI commands in the README are the release contract.
 
 ## Backend validation result
 
-The v0.2.1 normal acceptance test exercises the exact sparse-disabled browser
-production path. Against complete canonical k-mer sets, the fixed production seed
+The normal acceptance test exercises the exact sparse-disabled browser production
+path. Against complete canonical k-mer sets, the expanded v0.5.0 fixed-hash grid
 produces:
 
 | Tier | Mean absolute `ANI_c` error | P95 absolute `ANI_c` error | 0.80 crossing rate |
 | --- | ---: | ---: | ---: |
-| 256-register preview | 0.027657 | 0.225955 | 4.92% |
-| 1,024-register detailed | 0.004658 | 0.023787 | 0.88% |
+| 256-register preview | 0.021253 | 0.037469 | 2.62% |
+| 1,024-register detailed | 0.004064 | 0.016250 | 1.10% |
 
 Both pass the preregistered gates without sparse correction. Preview is intentionally
 a fast structural approximation and has no maximum-error requirement.
 
-The ignored estimator sweep covers register counts 256/1,024/2,048; HLL precisions
+The v0.5.0 four-layout preregistered report covers four sequence realizations and
+controlled point substitutions, periodic/tandem repeats, ambiguity, large insertion
+and deletion, inversion, coordinate offset, and 4:1 cardinality imbalance. Its
+production tiers measured:
+
+| Tier | Mean absolute `ANI_c` error | P95 absolute `ANI_c` error | 0.80 crossing rate |
+| --- | ---: | ---: | ---: |
+| 256-register preview | 0.035283 | 0.226630 | 2.86% |
+| 1,024-register detailed | 0.005333 | 0.017890 | 1.20% |
+
+It also reports bias, variance, occupancy, all four threshold confusion matrices,
+zero inflation, holes, isolated pixels, continuity, local error, neighboring-error
+correlation, top-feature overlap, component-count error, verified-winner fingerprint
+collisions, collision expectation, and comparison time. Both tiers pass. The complete
+evidence is in the [v0.5.0 scientific record](releases/v0.5.0/SCIENTIFIC_VALIDATION.md).
+
+The historical ignored estimator sweep covers register counts 256/1,024/2,048; HLL precisions
 8–12; legacy collision-corrected and verified-winner OPH; production seed zero plus
 three validation-only seeded ntHash2 permutations; multiple sequence realizations;
 80–99% random mutation; periodic repeats; cardinality imbalance; four threshold
@@ -122,19 +143,14 @@ are in the [v0.2.0-beta.1 validation record](releases/v0.2.0-beta.1/VALIDATION.m
 
 ## Remaining beta/research gates
 
-1. Run a broader preregistered statistical grid over sequence complexity, indels,
-   repeat classes, cardinality ratios, and many independent realizations, always using
-   exact complete k-mer-set containment as the reference. Report threshold confusion,
-   connected structure, continuity, local error, bias, variance, and spatial error
-   correlation. Do not interpret `ANI_c` as biological ANI; any biological comparison
-   is limited to controlled point mutation without large indels.
-2. Add stable numeric and pixel goldens beyond the current behavioral browser suite.
-3. Measure whether the new bounded sequence/axis sharding needs optional disk spill
-   before claiming robust one-billion-base operation across ordinary laptops.
-4. Add data and high-resolution image export with complete method provenance.
+1. Measure whether bounded sequence/axis sharding needs optional disk spill before
+   claiming robust one-billion-base operation across ordinary laptops.
+2. Complete the additional usability work selected for the next development plan.
 
-Until gates 1–2 are complete, releases should remain labeled functional preview or
-beta, not research-validated.
+The preregistered estimator grid, selective-mosaic characterization, stable numeric and
+pixel goldens, and provenance-bearing exports are complete. The software remains a
+functional preview: the bounded validation contract is evidence for the selected
+defaults, not a universal guarantee or a claim that `ANI_c` is biological ANI.
 
 Every staged source and web build is retained for ordered manual validation. v1.0.0 is
 not part of the current sequence because additional usability work is planned first.

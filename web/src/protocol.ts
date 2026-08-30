@@ -66,6 +66,7 @@ export type MainToWorkerMessage =
   | { type: "prepare"; generation: number; requestId: number; parameters: ComparisonParameters }
   | { type: "cancel-tiles"; generation: number; requestId: number }
   | { type: "preview-presented"; generation: number; requestId: number }
+  | { type: "update-refinement-policy"; generation: number; displayMinimum: number }
   | { type: "cancel-feature-tracks"; generation: number; requestId: number }
   | {
       type: "request-feature-tracks";

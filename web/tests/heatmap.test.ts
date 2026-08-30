@@ -3,6 +3,7 @@ import {
   addIdentitiesToHistogram,
   heatmapGradient,
   heatmapPaletteRgb,
+  identityColorRgba,
   normalizeHeatmapRange,
 } from "../src/heatmap";
 
@@ -42,5 +43,18 @@ describe("heatmap controls", () => {
     expect(gradient).toContain("#050506 25%");
     expect(gradient).toContain("#e85d39 60%");
     expect(gradient).toContain("#310e43 100%");
+  });
+
+  it("matches the stable schema-1 similarity pixel golden", () => {
+    const range = { minimum: 85, midpoint: 92, maximum: 100 };
+    expect([65_535, 8_499, 8_500, 9_200, 10_000].flatMap(
+      (identity) => identityColorRgba(identity, "sunset", range, false),
+    )).toEqual([
+      248, 247, 242, 255,
+      248, 247, 242, 255,
+      246, 236, 157, 255,
+      232, 93, 57, 255,
+      49, 14, 67, 255,
+    ]);
   });
 });

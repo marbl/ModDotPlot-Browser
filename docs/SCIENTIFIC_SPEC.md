@@ -146,7 +146,7 @@ Every sketch tile is governed by an immutable `ScientificConfig` containing sche
 version, `k`, hash identity/seed field, register count, comparison/verification widths,
 OPH estimator, HLL precision, expansion and ANI transforms, sparse policy, fixed-point
 scale, and missing sentinel. Validation occurs before allocation. A stable digest is
-part of worker messages, renderer cache keys, UI provenance, and future exports.
+part of worker messages, renderer cache keys, UI provenance, and numeric/image exports.
 
 Any change to numeric output requires a configuration-version decision, exact-oracle
 comparison, optimized/scalar equivalence where applicable, spatial and threshold

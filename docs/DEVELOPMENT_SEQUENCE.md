@@ -168,7 +168,7 @@ disabled because in-memory sharding is adequate for the supported envelope; robu
 one-billion-base operation on ordinary laptops remains conditional. Evidence is in
 [the v0.4.0 validation record](releases/v0.4.0/VALIDATION.md).
 
-## Cycle 4: v0.5.0 scheduler and scientific validation
+## Completed checkpoint: v0.5.0 scheduler and scientific validation
 
 Goal: complete the scientific and perceptual evidence needed to freeze default product
 behavior without interpreting `ANI_c` as biological ANI.
@@ -200,6 +200,14 @@ Acceptance:
 * Numeric changes require an explicit configuration schema/version and new fixtures.
 * Exported values reproduce hover and renderer input exactly; figures embed method
   provenance.
+
+Completed on 2026-08-30. The expanded fixed-hash and four-layout exact-oracle grids
+pass the agreed `ANI_c` mean, P95, and 0.80 display-floor crossing limits. Scheduler
+policy 2 uses active-floor histograms, neighbors, and deterministic exploration; its
+retained selective mosaic refines 58.3% of all-detail tiles while meeting structural
+gates. Schema-1 numeric output remains stable, a similarity-pixel golden is fixed, and
+numeric CSV plus high-resolution PNG exports carry complete provenance. Evidence is in
+[the v0.5.0 validation record](releases/v0.5.0/VALIDATION.md).
 
 ## Checkpoint and retention procedure
 

@@ -7,6 +7,40 @@ All notable changes to moddotplot-rs are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-30
+
+### Changed
+
+* Replaced fixed refinement bands with scheduler policy 2, which evaluates compact
+  per-tile identity and direction-support histograms against the active display floor.
+* Added immediate-neighbor refinement and deterministic exploration so a weak or blank
+  provisional tile cannot permanently exclude nearby detailed work.
+* Kept 256-register preview quick and provisional, 1,024-register detail as the default,
+  and sparse correction disabled outside the validation-only Rust feature.
+
+### Added
+
+* Added a preregistered four-layout exact-containment grid covering multiple sequence
+  realizations, controlled point substitutions, repeats, ambiguity, large indels,
+  inversion, coordinate offset, and 4:1 cardinality imbalance.
+* Added aggregate `ANI_c` bias, variance, occupancy, threshold confusion, spatial
+  structure, feature overlap, fingerprint-collision expectation, and runtime reporting.
+* Added a stable similarity-pixel golden while retaining the schema-1 numeric-channel
+  golden from v0.2.1.
+* Added numeric CSV and high-resolution PNG export of the current viewport. Both carry
+  complete method, software, scientific-configuration, scheduler, display, viewport,
+  and sequence provenance.
+
+### Validation
+
+* The four-layout grid measured mean/P95 absolute `ANI_c` errors of 0.035283/0.226630
+  for 256 registers and 0.005333/0.017890 for 1,024 registers. Combined 0.80 display
+  floor crossing rates were 2.8604% and 1.1987%, respectively.
+* The selective scheduler met its structural comparison limits while refining 63 of
+  108 characterization tiles, 58.3% of all-detail work.
+* No verified-winner fingerprint collision was observed; the occupancy-weighted
+  expectations were below `4.8e-7` per cell for both production tiers.
+
 ## [0.4.0] - 2026-08-30
 
 ### Changed

@@ -163,7 +163,11 @@
             </output>
           </details>
 
-          <button id="reset-view" class="quiet-button" type="button">Reset view</button>
+          <div class="plot-actions" role="group" aria-label="Plot actions">
+            <button id="reset-view" class="quiet-button" type="button">Reset view</button>
+            <button id="export-data" class="quiet-button" type="button" disabled>Export data</button>
+            <button id="export-image" class="quiet-button" type="button" disabled>Export image</button>
+          </div>
           <div class="control-footer">
             <div id="memory-usage" class="memory-usage" title="Estimated sequence, cache, JavaScript, and graphics memory">Memory —</div>
             <span id="control-version" class="app-version control-version"></span>

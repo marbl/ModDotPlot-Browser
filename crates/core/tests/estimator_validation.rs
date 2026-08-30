@@ -47,12 +47,16 @@ struct Metrics {
     minimum_union_occupancy: Option<f64>,
     union_occupancy_samples: usize,
     fingerprint_collisions: u64,
+    exact_zero_cells: usize,
+    estimated_zero_cells: usize,
     comparison_time: Duration,
 }
 
 impl Metrics {
     fn record(&mut self, exact: f64, estimated: ApproximateScore, row: usize, column: usize) {
         self.compared += 1;
+        self.exact_zero_cells += usize::from(exact == 0.0);
+        self.estimated_zero_cells += usize::from(estimated.ani_c == 0.0);
         self.union_occupancy_sum += estimated.mean_union_occupancy;
         self.minimum_union_occupancy = Some(
             self.minimum_union_occupancy
@@ -166,6 +170,102 @@ impl Metrics {
         self.component_count_error_sum +=
             component_count(&exact_mask, width).abs_diff(component_count(&estimated_mask, width));
         self.spatial_matrices += 1;
+    }
+}
+
+#[test]
+#[ignore = "preregistered v0.5 production grid; run with --release --ignored --nocapture"]
+fn report_v0_5_preregistered_production_grid() {
+    println!(
+        "registers\tmean_abs_ani_c\tp95_abs_ani_c\tani_c_bias\tani_c_error_variance\tmean_union_occupancy\tminimum_union_occupancy\tfn80\tfp80\tfn85\tfp85\tfn90\tfp90\tfn95\tfp95\tvisibility_crossings80\tcrossing_rate80\tzero_inflation\tdiagonal_holes80\tone_pixel_holes85\tisolated_false85\tforward_continuity85\treverse_continuity85\tlocal3_error\tlocal5_error\tneighbor_error_corr\ttop_feature_overlap\tcomponent_count_error85\tobserved_fingerprint_collisions\texpected_fingerprint_collisions_per_cell\texpected_fingerprint_collisions_per_12x12_matrix\tcomparison_ms\tselected_config_gate"
+    );
+    for registers in [256, 1_024] {
+        let mut combined = Metrics::default();
+        for seed in [0, 42, 7_919, 0xd6e8_feb8_6659_fd93] {
+            for (left, right) in v0_5_fixtures() {
+                evaluate_pair(
+                    &left,
+                    &right,
+                    seed,
+                    registers,
+                    10,
+                    OphJaccardEstimator::VerifiedWinners,
+                    &mut combined,
+                );
+            }
+        }
+        let summary = combined.summary();
+        let selected_config_gate = assert_selected_configuration_gate(
+            registers,
+            10,
+            OphJaccardEstimator::VerifiedWinners,
+            &combined,
+            summary,
+        );
+        let visibility_crossings =
+            combined.confusion[0].false_negative + combined.confusion[0].false_positive;
+        let expected_per_cell =
+            2.0 * registers_as_f64(registers) * summary.mean_union_occupancy.powi(2)
+                / 2_f64.powi(i32::from(DEFAULT_VERIFICATION_BITS));
+        assert_eq!(
+            combined.fingerprint_collisions, 0,
+            "the preregistered production grid observed a verified-winner fingerprint collision"
+        );
+        assert!(
+            expected_per_cell < 1.0e-6,
+            "expected verified-winner fingerprint collisions per cell were material"
+        );
+        println!(
+            "{registers}\t{:.6}\t{:.6}\t{:.6}\t{:.8}\t{:.6}\t{:.6}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{}\t{expected_per_cell:.10}\t{:.8}\t{:.3}\t{selected_config_gate}",
+            summary.mean,
+            summary.p95,
+            summary.bias,
+            summary.variance,
+            summary.mean_union_occupancy,
+            summary.minimum_union_occupancy,
+            combined.confusion[0].false_negative,
+            combined.confusion[0].false_positive,
+            combined.confusion[1].false_negative,
+            combined.confusion[1].false_positive,
+            combined.confusion[2].false_negative,
+            combined.confusion[2].false_positive,
+            combined.confusion[3].false_negative,
+            combined.confusion[3].false_positive,
+            visibility_crossings,
+            ratio(visibility_crossings, combined.compared),
+            combined
+                .estimated_zero_cells
+                .saturating_sub(combined.exact_zero_cells),
+            combined.diagonal_holes_80,
+            combined.one_pixel_holes_85,
+            combined.isolated_false_pixels,
+            ratio(
+                combined.preserved_forward_edges,
+                combined.exact_forward_edges
+            ),
+            ratio(
+                combined.preserved_reverse_edges,
+                combined.exact_reverse_edges
+            ),
+            mean_error(combined.local_3_error_sum, combined.local_3_count),
+            mean_error(combined.local_5_error_sum, combined.local_5_count),
+            mean_error(
+                combined.neighbor_error_correlation_sum,
+                combined.spatial_matrices
+            ),
+            mean_error(combined.top_feature_overlap_sum, combined.spatial_matrices),
+            ratio(
+                combined.component_count_error_sum,
+                combined.spatial_matrices
+            ),
+            combined.fingerprint_collisions,
+            expected_per_cell
+                * f64::from(
+                    u32::try_from(RESOLUTION * RESOLUTION)
+                        .expect("validation matrix cell count fits u32"),
+                ),
+            combined.comparison_time.as_secs_f64() * 1_000.0,
+        );
     }
 }
 
@@ -662,6 +762,60 @@ fn fixtures() -> Vec<(PackedSequence, PackedSequence)> {
     ]
 }
 
+fn v0_5_fixtures() -> Vec<(PackedSequence, PackedSequence)> {
+    let mut result = Vec::new();
+    for realization in [1, 0x22, 0x33, 0x44] {
+        let random = pseudo_random_sequence(48_000, realization);
+        for (label, rate, seed) in [("99", 0.01, 11), ("90", 0.10, 13), ("80", 0.20, 19)] {
+            result.push(pair(
+                &format!("point-{realization:x}-{label}"),
+                &random,
+                &mutate_at_rate(&random, rate, seed ^ realization),
+            ));
+        }
+    }
+    let random = pseudo_random_sequence(48_000, 1);
+    let periodic = (0..48_000)
+        .map(|index| b"ACGTTGCAAGTC"[index % 12])
+        .collect::<Vec<_>>();
+    let motif = pseudo_random_sequence(257, 0x7a6d);
+    let tandem = (0..48_000)
+        .map(|index| motif[index % motif.len()])
+        .collect::<Vec<_>>();
+    let mut ambiguous = mutate_at_rate(&random, 0.05, 0xa6b1);
+    for index in (97..ambiguous.len()).step_by(97) {
+        ambiguous[index] = b'N';
+    }
+    let mut deletion = random.clone();
+    deletion.drain(16_000..20_000);
+    let mut insertion = random[..24_000].to_vec();
+    insertion.extend(pseudo_random_sequence(4_000, 0x1a5e));
+    insertion.extend_from_slice(&random[24_000..]);
+    let mut inversion = random.clone();
+    inversion[16_000..32_000].copy_from_slice(&reverse_complement(&random[16_000..32_000]));
+    let mut offset = pseudo_random_sequence(4_000, 0x000f_f5e7);
+    offset.extend_from_slice(&random);
+    result.extend([
+        pair("point-85", &random, &mutate_at_rate(&random, 0.15, 17)),
+        pair(
+            "periodic-90",
+            &periodic,
+            &mutate_at_rate(&periodic, 0.10, 23),
+        ),
+        pair("tandem-90", &tandem, &mutate_at_rate(&tandem, 0.10, 29)),
+        pair("ambiguity", &random, &ambiguous),
+        pair("large-deletion", &random, &deletion),
+        pair("large-insertion", &random, &insertion),
+        pair("segment-inversion", &random, &inversion),
+        pair("coordinate-offset", &random, &offset),
+        (
+            PackedSequence::from_ascii("cardinality-long", &random),
+            PackedSequence::from_ascii("cardinality-quarter", &random[..12_000]),
+        ),
+    ]);
+    result
+}
+
 fn pair(name: &str, left: &[u8], right: &[u8]) -> (PackedSequence, PackedSequence) {
     (
         PackedSequence::from_ascii(format!("{name}-left"), left),
@@ -707,4 +861,17 @@ fn mutate(base: u8) -> u8 {
         b'G' => b'T',
         _ => b'A',
     }
+}
+
+fn reverse_complement(sequence: &[u8]) -> Vec<u8> {
+    sequence
+        .iter()
+        .rev()
+        .map(|base| match base {
+            b'A' => b'T',
+            b'C' => b'G',
+            b'G' => b'C',
+            _ => b'A',
+        })
+        .collect()
 }

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 
 const shortFasta = ">chrShort\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
@@ -84,6 +85,43 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#plot-loading")).toBeHidden();
   await expect(page.locator("#control-version")).toHaveText(landingVersion ?? "");
   expect(unexpectedRequests).toEqual([]);
+});
+
+test("numeric and high-resolution image exports carry complete provenance", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "download payload inspection runs on the Chromium channels");
+  await page.goto("/");
+  await loadFasta(page, "short.fa", shortFasta);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+
+  const dataDownload = page.waitForEvent("download");
+  await page.locator("#export-data").click();
+  const data = await dataDownload;
+  expect(data.suggestedFilename()).toBe("moddotplot-chrShort-vs-chrShort.csv");
+  const dataPath = await data.path();
+  if (!dataPath) throw new Error("numeric export has no temporary path");
+  const csv = await readFile(dataPath, "utf8");
+  expect(csv).toContain("# provenance=");
+  expect(csv).toContain("exact complete distinct canonical k-mer-set containment");
+  expect(csv).toContain("identity_fixed,identity_scale,ani_c");
+
+  const backingSize = await page.locator("#plot-canvas").evaluate((canvas) => ({
+    width: (canvas as HTMLCanvasElement).width,
+    height: (canvas as HTMLCanvasElement).height,
+  }));
+  const imageDownload = page.waitForEvent("download");
+  await page.locator("#export-image").click();
+  const image = await imageDownload;
+  expect(image.suggestedFilename()).toBe("moddotplot-chrShort-vs-chrShort.png");
+  const imagePath = await image.path();
+  if (!imagePath) throw new Error("image export has no temporary path");
+  const png = await readFile(imagePath);
+  expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  expect(png.readUInt32BE(16)).toBeGreaterThan(backingSize.width);
+  expect(png.readUInt32BE(20)).toBeGreaterThan(backingSize.height);
+  expect(png.includes(Buffer.from("iTXtmoddotplot-rs"))).toBe(true);
+  expect(png.includes(Buffer.from("schedulerPolicyVersion"))).toBe(true);
+  expect(png.includes(Buffer.from("configurations"))).toBe(true);
+  expect(png.includes(Buffer.from("exact complete distinct canonical k-mer-set containment"))).toBe(true);
 });
 
 test("a newer load transaction wins over compressed input and clear rejects stale publication", async ({ page }) => {

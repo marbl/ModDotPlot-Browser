@@ -375,6 +375,9 @@ details[open] summary { margin-bottom: 4px; }
   font-size: 12px;
 }
 .quiet-button:hover { border-color: #9c9890; }
+.quiet-button:disabled { cursor: default; opacity: 0.45; }
+.plot-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.plot-actions .quiet-button { padding-inline: 3px; font-size: 10px; white-space: nowrap; }
 
 .plot-column {
   --x-track-height: 0px;

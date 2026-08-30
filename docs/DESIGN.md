@@ -30,8 +30,7 @@ Required behavior:
    estimator contract.
 
 No mobile support or session persistence is required in the current scope. Numeric
-tiles are deliberately renderer-independent so the planned v0.5 export does not
-change the estimator.
+tiles are deliberately renderer-independent; export does not change the estimator.
 
 ## 2. System architecture
 
@@ -49,7 +48,8 @@ compute Web Worker ── Wasm ComputeSession ── PackedSequence
       ▼
 main thread ── immutable renderer tile cache ── WebGL2 canvas
       │
-      └─ viewport/axes/controls/provenance
+      ├─ viewport/axes/controls/provenance
+      └─ exact numeric CSV / re-rendered PNG export
 ```
 
 The main thread owns interaction and rendering only. FASTA parsing, sketch construction,
@@ -168,12 +168,19 @@ below it, allowing immediate recoloring down to the advanced 80% limit.
 4. Wait for the renderer's `preview-presented` acknowledgement.
 5. Build the 1,024-register detailed axes in aligned chunks and transfer each selected
    detailed block as soon as compatible X/Y chunks exist.
-6. Refine only tiles whose preview crosses a display decision or has low support, in
-   descending uncertainty order.
+6. Refine tiles whose preview is uncertain around the active display floor or has low
+   support, their immediate neighbors, and a deterministic exploratory sample, in
+   descending priority order.
 
-Uncertainty is a display scheduling heuristic based on identity near the reliable
-palette region and low verified direction support. It selects which provisional tiles
-receive the detailed estimator; it never changes either estimator's numeric result.
+Scheduler policy 2 stores 101-bin identity and low-support histograms for each preview
+tile before its transferable channels leave the worker. The current palette minimum,
+plus or minus five percentage points, defines the active decision region. Immediate
+neighbors preserve coherent structure, while a deterministic one-in-sixteen tile
+sample prevents a blank preview region from becoming a permanent exclusion rule.
+Changing the palette floor updates future selection without recomputing numeric tiles.
+
+Uncertainty is only a display scheduling heuristic. It selects which provisional tiles
+receive the detailed estimator and never changes either estimator's numeric result.
 
 ### Why quick and detailed builds remain separate
 
@@ -235,8 +242,9 @@ Memory admission happens before large allocations.
 * Complete cross-layer plan: 4 GiB.
 
 The Wasm axis cache uses a recency map with logarithmic touch/eviction and tracks
-estimated heap bytes. Renderer tile keys include resolution, coordinates, quality, and
-configuration digest; incompatible tiles cannot alias. Eviction is coordinated back to
+estimated heap bytes. Renderer tile keys include resolution, coordinates, and the
+complete configuration digest; quality ranks replacement when a key is shared, and
+incompatible tiles cannot alias. Eviction is coordinated back to
 the worker so its published-tile bookkeeping cannot grow without bound. The current
 overview plus tiles required to avoid a blank viewport are protected, so an unusually
 large active viewport can temporarily exceed the renderer's nominal cache budget.
@@ -260,8 +268,16 @@ blended toward equal-luminance gray at low support.
 On `webglcontextlost`, rendering pauses and default loss handling is prevented. On
 restore, the program, uniforms, geometry, fallback texture, and every GPU tile texture
 are reconstructed from retained CPU arrays. Keyboard controls provide arrow-key pan,
-`+/-` zoom, and `Home` reset. The canvas remains focusable and labeled; a future export
-path will provide a fully nonvisual representation of numeric results.
+`+/-` zoom, and `Home` reset. The canvas remains focusable and labeled.
+
+Numeric export writes the exact fixed-point tile channels that participate in the
+current renderer viewport, including coordinate intervals, quality, and configuration
+digest. CSV construction is rejected before channel traversal above two million
+renderer cells. Image export re-renders the current plot at twice its backing
+resolution, bounded to eight million pixels, rather than enlarging a screen capture.
+The resulting PNG contains a standards-compliant `iTXt` record. Both formats carry complete software,
+method, scheduler, comparison, scientific-configuration, display, viewport, and
+sequence provenance.
 
 ## 9. Security and privacy
 
@@ -289,10 +305,10 @@ memory without attempting an exact all-pairs oracle.
 
 ### Export
 
-Future numeric/image export should request a frozen viewport snapshot containing input
-record identifiers, coordinates, tile arrays, software version, configuration digest,
-and full configuration metadata. It may default to the completed detailed tier or a
-user-selected export tier. Export must never read colors back from the canvas.
+The v0.5 export represents the current viewport and its current mix of preview,
+refined, and exact renderer inputs. A future explicit publication tier may request and
+freeze an all-detailed viewport before export; that would be a usability feature, not a
+change to the current scientific configuration.
 
 ### Persistence and 1 Gb operation
 

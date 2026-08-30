@@ -15,6 +15,7 @@
 | HLL precision | 10 |
 | Preview registers | 256 |
 | Detailed registers | 1024 |
+| Refinement scheduler policy | 2 |
 | Default preview config digest | `58e084b7190f4d93` |
 | Default detailed config digest | `bc5c5131ad1c9a20` |
 | Validation-only sparse-correction config digest | `16ed6e4e3c2306c8` |

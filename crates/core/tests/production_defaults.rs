@@ -152,12 +152,15 @@ fn schema_1_numeric_fixture_matches_v0_2_1_bytes() {
 #[test]
 fn current_selective_composite_is_bounded_against_all_detailed_output() {
     const COMPOSITE_RESOLUTION: usize = 24;
-    const CHARACTERIZATION_TILE_EDGE: usize = 8;
+    const CHARACTERIZATION_TILE_EDGE: usize = 4;
     assert_scheduler_contract_is_current();
     let random = pseudo_random_sequence(48_000, 0xa11d);
     let periodic = (0..48_000)
         .map(|index| b"ACGTTGCAAGTC"[index % 12])
         .collect::<Vec<_>>();
+    let mut aggregate_refined_tiles = 0_usize;
+    let mut aggregate_all_detail_tiles = 0_usize;
+    let mut aggregate_last_visible_change = 0_usize;
     for (left_bases, right_bases) in [
         (random.clone(), mutate_at_rate(&random, 0.01, 0xc001)),
         (random.clone(), mutate_at_rate(&random, 0.10, 0xc002)),
@@ -169,14 +172,34 @@ fn current_selective_composite_is_bounded_against_all_detailed_output() {
         let (left_detailed, right_detailed, detailed) =
             production_tile(&left, &right, COMPOSITE_RESOLUTION, 1_024);
         let exact = exact_matrix(&left, &right, COMPOSITE_RESOLUTION);
-        let composite = selective_composite(&preview, &detailed, CHARACTERIZATION_TILE_EDGE);
+        assert_first_coherent_structure(&preview, &exact);
+        let (composite, refined_tiles, last_visible_change) =
+            selective_composite(&preview, &detailed, CHARACTERIZATION_TILE_EDGE);
         assert_composite(&composite, &detailed, &exact);
+        let total_tiles = COMPOSITE_RESOLUTION
+            .div_ceil(CHARACTERIZATION_TILE_EDGE)
+            .pow(2);
+        aggregate_refined_tiles += refined_tiles;
+        aggregate_all_detail_tiles += total_tiles;
+        aggregate_last_visible_change += last_visible_change;
+        assert!(
+            last_visible_change < refined_tiles,
+            "scheduler must finish visible corrections before its final selected tile"
+        );
 
         // Keep the complete detailed axes live through the comparison so the test
         // exercises the same frozen production representation as the browser.
         assert_eq!(left_detailed.resolution(), COMPOSITE_RESOLUTION);
         assert_eq!(right_detailed.resolution(), COMPOSITE_RESOLUTION);
     }
+    assert!(
+        aggregate_refined_tiles * 100 <= aggregate_all_detail_tiles * 80,
+        "scheduler refined {aggregate_refined_tiles}/{aggregate_all_detail_tiles} tiles"
+    );
+    eprintln!(
+        "scheduler_refined_tiles={aggregate_refined_tiles}\tall_detail_tiles={aggregate_all_detail_tiles}\twork_fraction={:.6}\tlast_visible_change_sum={aggregate_last_visible_change}",
+        count_as_f64(aggregate_refined_tiles) / count_as_f64(aggregate_all_detail_tiles),
+    );
 }
 
 #[test]
@@ -478,7 +501,7 @@ fn selective_composite(
     preview: &MatrixTile,
     detailed: &MatrixTile,
     tile_edge: usize,
-) -> MatrixTile {
+) -> (MatrixTile, usize, usize) {
     assert_eq!(
         (preview.width, preview.height),
         (detailed.width, detailed.height)
@@ -490,47 +513,155 @@ fn selective_composite(
         direction: preview.direction.clone(),
         direction_support: preview.direction_support.clone(),
     };
-    for y in (0..preview.height).step_by(tile_edge) {
-        for x in (0..preview.width).step_by(tile_edge) {
+    let tile_columns = preview.width.div_ceil(tile_edge);
+    let selected = scheduler_order(preview, tile_edge);
+    let mut refined_tiles = 0;
+    let mut last_visible_change = 0;
+    for selected_index in selected {
+        let tile_y = selected_index / tile_columns;
+        let tile_x = selected_index % tile_columns;
+        refined_tiles += 1;
+        let y = tile_y * tile_edge;
+        let x = tile_x * tile_edge;
+        let width = tile_edge.min(preview.width - x);
+        let height = tile_edge.min(preview.height - y);
+        let visible_change = (0..height).any(|row| {
+            (0..width).any(|column| {
+                let index = (y + row) * preview.width + x + column;
+                (preview.identity[index] >= 8_500) != (detailed.identity[index] >= 8_500)
+            })
+        });
+        if visible_change {
+            last_visible_change = refined_tiles;
+        }
+        for row in 0..height {
+            let start = (y + row) * preview.width + x;
+            let end = start + width;
+            composite.identity[start..end].copy_from_slice(&detailed.identity[start..end]);
+            composite.direction[start..end].copy_from_slice(&detailed.direction[start..end]);
+            composite.direction_support[start..end]
+                .copy_from_slice(&detailed.direction_support[start..end]);
+        }
+    }
+    (composite, refined_tiles, last_visible_change)
+}
+
+fn scheduler_order(preview: &MatrixTile, tile_edge: usize) -> Vec<usize> {
+    let tile_columns = preview.width.div_ceil(tile_edge);
+    let tile_rows = preview.height.div_ceil(tile_edge);
+    let mut scores = vec![0.0_f64; tile_columns * tile_rows];
+    for tile_y in 0..tile_rows {
+        for tile_x in 0..tile_columns {
+            let y = tile_y * tile_edge;
+            let x = tile_x * tile_edge;
             let width = tile_edge.min(preview.width - x);
             let height = tile_edge.min(preview.height - y);
-            let refine = (0..height).any(|row| {
-                (0..width).any(|column| {
-                    let index = (y + row) * preview.width + x + column;
-                    refinement_candidate(preview.identity[index], preview.direction_support[index])
-                })
-            });
-            if !refine {
-                continue;
-            }
+            let mut non_missing = 0_usize;
+            let mut missing = 0_usize;
+            let mut maximum_identity = 0_u16;
+            let mut identity_histogram = [0_usize; 101];
+            let mut low_support_histogram = [0_usize; 101];
             for row in 0..height {
-                let start = (y + row) * preview.width + x;
-                let end = start + width;
-                composite.identity[start..end].copy_from_slice(&detailed.identity[start..end]);
-                composite.direction[start..end].copy_from_slice(&detailed.direction[start..end]);
-                composite.direction_support[start..end]
-                    .copy_from_slice(&detailed.direction_support[start..end]);
+                for column in 0..width {
+                    let index = (y + row) * preview.width + x + column;
+                    let identity = preview.identity[index];
+                    if identity == u16::MAX {
+                        missing += 1;
+                        continue;
+                    }
+                    non_missing += 1;
+                    maximum_identity = maximum_identity.max(identity);
+                    let bin = usize::from(identity / 100).min(100);
+                    identity_histogram[bin] += 1;
+                    if preview.direction_support[index] < 8 {
+                        low_support_histogram[bin] += 1;
+                    }
+                }
+            }
+            if non_missing > 0 {
+                let decision_cells = identity_histogram[80..=90].iter().sum::<usize>();
+                let low_support_cells = low_support_histogram[80..=100].iter().sum::<usize>();
+                let decision_score = if decision_cells >= 2.max(non_missing.div_ceil(100)) {
+                    1.0 + count_as_f64(decision_cells) / count_as_f64(non_missing)
+                } else {
+                    0.0
+                };
+                let support_score =
+                    if low_support_cells >= 2.max((non_missing * 25).div_ceil(10_000)) {
+                        0.5 + count_as_f64(low_support_cells) / count_as_f64(non_missing)
+                    } else {
+                        0.0
+                    };
+                let missing_score = if maximum_identity >= 8_000 {
+                    count_as_f64(missing) / count_as_f64(non_missing + missing) * 0.25
+                } else {
+                    0.0
+                };
+                scores[tile_y * tile_columns + tile_x] =
+                    decision_score + support_score + missing_score;
             }
         }
     }
-    composite
-}
-
-fn refinement_candidate(identity: u16, support: u16) -> bool {
-    identity != u16::MAX
-        && ((8_200..=9_000).contains(&identity) || (identity > 9_000 && support < 8))
+    let direct = scores.clone();
+    for tile_y in 0..tile_rows {
+        for tile_x in 0..tile_columns {
+            let direct_score = direct[tile_y * tile_columns + tile_x];
+            if direct_score <= 0.0 {
+                continue;
+            }
+            for neighbor_y in tile_y.saturating_sub(1)..=(tile_y + 1).min(tile_rows - 1) {
+                for neighbor_x in tile_x.saturating_sub(1)..=(tile_x + 1).min(tile_columns - 1) {
+                    let index = neighbor_y * tile_columns + neighbor_x;
+                    scores[index] = scores[index].max(direct_score * 0.25);
+                }
+            }
+        }
+    }
+    for tile_y in 0..tile_rows {
+        for tile_x in 0..tile_columns {
+            if (tile_x + 3 * tile_y + preview.width).is_multiple_of(16) {
+                let index = tile_y * tile_columns + tile_x;
+                scores[index] = scores[index].max(0.05);
+            }
+        }
+    }
+    let mut selected = scores
+        .iter()
+        .enumerate()
+        .filter_map(|(index, score)| (*score > 0.0).then_some(index))
+        .collect::<Vec<_>>();
+    selected.sort_by(|left, right| {
+        scores[*right]
+            .total_cmp(&scores[*left])
+            .then_with(|| (left / tile_columns).cmp(&(right / tile_columns)))
+            .then_with(|| (left % tile_columns).cmp(&(right % tile_columns)))
+    });
+    selected
 }
 
 fn assert_scheduler_contract_is_current() {
     let implementation = include_str!("../../../web/src/refinement.ts");
     for declaration in [
-        "export const REFINEMENT_POLICY_VERSION = 1;",
-        "export const REFINEMENT_LOWER_IDENTITY = 8_200;",
-        "export const REFINEMENT_UPPER_IDENTITY = 9_000;",
-        "export const REFINEMENT_HIGH_SUPPORT = 8;",
+        "export const REFINEMENT_POLICY_VERSION = 2;",
+        "export const REFINEMENT_DISPLAY_MARGIN = 500;",
+        "export const REFINEMENT_MIN_SUPPORT = 8;",
+        "export const REFINEMENT_EXPLORATION_MODULUS = 16;",
     ] {
         assert!(implementation.contains(declaration));
     }
+}
+
+fn assert_first_coherent_structure(preview: &MatrixTile, exact: &[Option<(f64, f64)>]) {
+    let mut exact_visible = 0;
+    let mut preview_visible = 0;
+    for (index, score) in exact.iter().enumerate() {
+        if score.is_some_and(|(_, ani_c)| ani_c >= 0.85) {
+            exact_visible += 1;
+            preview_visible += usize::from(preview.identity[index] >= 8_000);
+        }
+    }
+    assert!(exact_visible > 0);
+    assert!(preview_visible * 100 >= exact_visible * 80);
 }
 
 fn assert_composite(composite: &MatrixTile, detailed: &MatrixTile, exact: &[Option<(f64, f64)>]) {
@@ -563,25 +694,57 @@ fn assert_composite(composite: &MatrixTile, detailed: &MatrixTile, exact: &[Opti
 }
 
 fn fixtures() -> Vec<(PackedSequence, PackedSequence)> {
+    let mut fixtures = Vec::new();
+    for realization in [1, 0x22, 0x33, 0x44] {
+        let random = pseudo_random_sequence(48_000, realization);
+        for (label, rate, mutation_seed) in [("99", 0.01, 11), ("90", 0.10, 13), ("80", 0.20, 19)] {
+            fixtures.push(pair(
+                &format!("point-{realization:x}-{label}"),
+                &random,
+                &mutate_at_rate(&random, rate, mutation_seed ^ realization),
+            ));
+        }
+    }
     let random = pseudo_random_sequence(48_000, 1);
     let periodic = (0..48_000)
         .map(|index| b"ACGTTGCAAGTC"[index % 12])
         .collect::<Vec<_>>();
-    vec![
-        pair("random-99", &random, &mutate_at_rate(&random, 0.01, 11)),
-        pair("random-90", &random, &mutate_at_rate(&random, 0.10, 13)),
-        pair("random-85", &random, &mutate_at_rate(&random, 0.15, 17)),
-        pair("random-80", &random, &mutate_at_rate(&random, 0.20, 19)),
+    let tandem_motif = pseudo_random_sequence(257, 0x7a6d);
+    let tandem = (0..48_000)
+        .map(|index| tandem_motif[index % tandem_motif.len()])
+        .collect::<Vec<_>>();
+    let mut ambiguous = mutate_at_rate(&random, 0.05, 0xa6b1);
+    for index in (97..ambiguous.len()).step_by(97) {
+        ambiguous[index] = b'N';
+    }
+    let mut deletion = random.clone();
+    deletion.drain(16_000..20_000);
+    let mut insertion = random[..24_000].to_vec();
+    insertion.extend(pseudo_random_sequence(4_000, 0x1a5e));
+    insertion.extend_from_slice(&random[24_000..]);
+    let mut inversion = random.clone();
+    inversion[16_000..32_000].copy_from_slice(&reverse_complement(&random[16_000..32_000]));
+    let mut offset = pseudo_random_sequence(4_000, 0x000f_f5e7);
+    offset.extend_from_slice(&random);
+    fixtures.extend([
+        pair("point-85", &random, &mutate_at_rate(&random, 0.15, 17)),
         pair(
             "periodic-90",
             &periodic,
             &mutate_at_rate(&periodic, 0.10, 23),
         ),
+        pair("tandem-90", &tandem, &mutate_at_rate(&tandem, 0.10, 29)),
+        pair("ambiguity", &random, &ambiguous),
+        pair("large-deletion", &random, &deletion),
+        pair("large-insertion", &random, &insertion),
+        pair("segment-inversion", &random, &inversion),
+        pair("coordinate-offset", &random, &offset),
         (
-            PackedSequence::from_ascii("long", &random),
-            PackedSequence::from_ascii("short", &random[..24_000]),
+            PackedSequence::from_ascii("cardinality-long", &random),
+            PackedSequence::from_ascii("cardinality-quarter", &random[..12_000]),
         ),
-    ]
+    ]);
+    fixtures
 }
 
 fn pair(name: &str, left: &[u8], right: &[u8]) -> (PackedSequence, PackedSequence) {

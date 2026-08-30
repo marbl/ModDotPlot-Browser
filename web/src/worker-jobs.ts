@@ -1,5 +1,6 @@
 import type { ScientificConfig } from "./wasm/moddotplot_wasm.js";
 import type { ComparisonParameters, SequenceMetadata } from "./protocol";
+import type { RefinementEvidence } from "./refinement";
 
 export type JobKind = "dataset" | "comparison" | "feature";
 
@@ -53,7 +54,8 @@ export class ComparisonJob extends OwnedJob {
   readonly parameters: Readonly<ComparisonParameters>;
   readonly configurations = new Map<number, ScientificConfig>();
   readonly publishedTiles = new Set<string>();
-  readonly refinementPriority = new Map<string, number>();
+  readonly refinementEvidence = new Map<string, RefinementEvidence>();
+  refinementDisplayMinimum = 8_500;
   preparationToken = 0;
   pendingPresentation: { resolve: () => void } | null = null;
   activeTileRequestId: number;

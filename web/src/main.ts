@@ -2,6 +2,13 @@ import "./styles.css";
 import { AxisOverlay } from "./axes";
 import { selectDetailResolution, selectTiles } from "./detail";
 import { DnaLoader } from "./dna-loader";
+import {
+  createNumericExport,
+  downloadBlob,
+  embedPngProvenance,
+  exportBaseName,
+  type ExportProvenance,
+} from "./export";
 import { formatBases, formatBytes, formatInterval } from "./format";
 import {
   FeatureTrackOverlay,
@@ -20,6 +27,7 @@ import {
 } from "./heatmap";
 import { ImportedTrackManager } from "./imported-track";
 import { DotplotRenderer, type HoverDatum, type ViewChange } from "./renderer";
+import { REFINEMENT_POLICY_VERSION } from "./refinement";
 import {
   decideResourceAdmission,
   totalResourceBytes,
@@ -29,6 +37,7 @@ import {
 import type {
   ComparisonParameters,
   MainToWorkerMessage,
+  ScientificConfigMetadata,
   SequenceMetadata,
   WorkerToMainMessage,
 } from "./protocol";
@@ -50,6 +59,8 @@ const plotDetailNote = element<HTMLElement>("plot-detail-note");
 const sketchRetentionNote = element<HTMLElement>("sketch-retention-note");
 const scientificProvenance = element<HTMLOutputElement>("scientific-provenance");
 const resetViewButton = element<HTMLButtonElement>("reset-view");
+const exportDataButton = element<HTMLButtonElement>("export-data");
+const exportImageButton = element<HTMLButtonElement>("export-image");
 const status = element<HTMLElement>("status");
 const retryEngineButton = element<HTMLButtonElement>("retry-engine");
 const memoryUsage = element<HTMLElement>("memory-usage");
@@ -188,6 +199,7 @@ let tileRequestId = 0;
 let featureTrackRequestId = 0;
 let comparisonReady = false;
 let activeParameters: ComparisonParameters | null = null;
+let activeConfigurations: ScientificConfigMetadata[] = [];
 let activeFeatureTrackMetadata: FeatureTrackMetadata | null = null;
 let activeDomainLength = 1;
 let pendingView: ViewChange | null = null;
@@ -236,6 +248,9 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
     case "comparison-ready":
       if (message.generation !== generation) return;
       comparisonReady = true;
+      activeConfigurations = message.configurations;
+      exportDataButton.disabled = renderer.exportTileViews().length === 0;
+      exportImageButton.disabled = renderer.exportTileViews().length === 0;
       updateScientificProvenance(message.configurations, message.parameters.k);
       plotStatusText = "Drawing quick overview";
       status.textContent = "Drawing quick overview";
@@ -258,6 +273,10 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
     case "tile":
       if (message.generation !== generation) return;
       renderer.addTile(message);
+      if (comparisonReady) {
+        exportDataButton.disabled = false;
+        exportImageButton.disabled = false;
+      }
       setPlotLoading(false);
       collectHistogram(message);
       updateMemory();
@@ -382,6 +401,8 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-color-m
   });
 }
 resetViewButton.addEventListener("click", () => renderer.resetView());
+exportDataButton.addEventListener("click", exportNumericData);
+exportImageButton.addEventListener("click", () => void exportPlotImage());
 clearButton.addEventListener("click", clearSession);
 retryEngineButton.addEventListener("click", restartEngine);
 renderer.onHover(showHover);
@@ -424,6 +445,9 @@ function loadFiles(files: File[], remember = true): void {
   sequences = [];
   comparisonReady = false;
   activeParameters = null;
+  activeConfigurations = [];
+  exportDataButton.disabled = true;
+  exportImageButton.disabled = true;
   activeFeatureTrackMetadata = null;
   pendingView = null;
   featureTrackBusy = false;
@@ -488,9 +512,12 @@ function prepareComparison(): void {
   featureTrackRequestId += 1;
   comparisonReady = false;
   featureTrackBusy = false;
-  currentMeasurement = "sketch";
+  currentMeasurement = parameters.resolution === activeDomainLength ? "kmer" : "sketch";
   overviewReadyText = "Ready";
   activeParameters = parameters;
+  activeConfigurations = [];
+  exportDataButton.disabled = true;
+  exportImageButton.disabled = true;
   activeFeatureTrackMetadata = {
     baseResolution: parameters.resolution,
     domainLength: activeDomainLength,
@@ -529,6 +556,11 @@ function prepareComparison(): void {
   status.textContent = "Building overview signatures";
   showProgress("Building overview signatures", 0);
   post({ type: "prepare", generation, requestId: tileRequestId, parameters });
+  post({
+    type: "update-refinement-policy",
+    generation,
+    displayMinimum: Math.round(heatmapRange.minimum * 100),
+  });
   updateParameterNotes();
 }
 
@@ -695,6 +727,13 @@ function updateHeatmap(changed: keyof HeatmapRange): void {
     heatmapOutputs[name].value = `${heatmapRange[name].toFixed(1)}%`;
   }
   renderer.setHeatmapRange(heatmapRange.minimum, heatmapRange.midpoint, heatmapRange.maximum);
+  if (comparisonReady) {
+    post({
+      type: "update-refinement-policy",
+      generation,
+      displayMinimum: Math.round(heatmapRange.minimum * 100),
+    });
+  }
   updateHeatmapAppearance();
 }
 
@@ -849,6 +888,9 @@ function clearSession(): void {
   comparisonReady = false;
   currentMeasurement = "sketch";
   activeParameters = null;
+  activeConfigurations = [];
+  exportDataButton.disabled = true;
+  exportImageButton.disabled = true;
   activeFeatureTrackMetadata = null;
   pendingView = null;
   featureTrackBusy = false;
@@ -941,6 +983,8 @@ function handleWorkerFailure(message: string): void {
   if (workerFailed) return;
   workerFailed = true;
   comparisonReady = false;
+  exportDataButton.disabled = true;
+  exportImageButton.disabled = true;
   featureTrackBusy = false;
   worker.terminate();
   setPlotLoading(false);
@@ -953,6 +997,9 @@ function restartEngine(): void {
   recoveryFiles = lastFiles.length > 0 ? [...lastFiles] : null;
   comparisonReady = false;
   activeParameters = null;
+  activeConfigurations = [];
+  exportDataButton.disabled = true;
+  exportImageButton.disabled = true;
   activeFeatureTrackMetadata = null;
   featureTrackRequestId += 1;
   featureTrackBusy = false;
@@ -971,6 +1018,79 @@ function restartEngine(): void {
 
 function post(message: MainToWorkerMessage): void {
   worker.postMessage(message);
+}
+
+function exportNumericData(): void {
+  if (!activeParameters) return;
+  const tiles = renderer.exportTileViews();
+  if (tiles.length === 0) {
+    showError("No rendered plot data is available to export yet.");
+    return;
+  }
+  try {
+    const provenance = currentExportProvenance();
+    downloadBlob(
+      createNumericExport(tiles, activeDomainLength, provenance),
+      `${currentExportBaseName()}.csv`,
+    );
+  } catch (error: unknown) {
+    showError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function exportPlotImage(): Promise<void> {
+  if (!activeParameters) return;
+  exportImageButton.disabled = true;
+  try {
+    await renderer.present();
+    const provenance = currentExportProvenance();
+    const png = await embedPngProvenance(await renderer.exportPng(2), provenance);
+    downloadBlob(png, `${currentExportBaseName()}.png`);
+  } catch (error: unknown) {
+    showError(error instanceof Error ? error.message : String(error));
+  } finally {
+    exportImageButton.disabled = !comparisonReady;
+  }
+}
+
+function currentExportBaseName(): string {
+  const x = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "x";
+  const y = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "y";
+  return exportBaseName(x, y);
+}
+
+function currentExportProvenance(): ExportProvenance {
+  const x = sequences.find((sequence) => sequence.index === activeParameters?.xIndex);
+  const y = sequences.find((sequence) => sequence.index === activeParameters?.yIndex);
+  const darkBackground = backgroundButtons.some(
+    (button) => button.dataset.backgroundMode === "black" && button.getAttribute("aria-pressed") === "true",
+  );
+  return {
+    software: __APP_VERSION__,
+    exportedAt: new Date().toISOString(),
+    method: "ANI_c=C^(1/k), the historical containment-derived ModDotPlot display score; exact complete distinct canonical k-mer-set containment is the validation oracle, not alignment-derived ANI_m.",
+    schedulerPolicyVersion: REFINEMENT_POLICY_VERSION,
+    comparison: activeParameters,
+    configurations: activeConfigurations.length > 0
+      ? activeConfigurations
+      : currentMeasurement === "kmer"
+        ? [{
+            mode: "exact-canonical-kmer",
+            k: activeParameters?.k,
+            identityScale: 10_000,
+            missingIdentity: 65_535,
+            digest: `exact-k${activeParameters?.k}`,
+          }]
+        : [],
+    display: {
+      measurement: currentMeasurement,
+      palette: selectedHeatmapPalette(),
+      heatmapRange,
+      background: darkBackground ? "black" : "white",
+    },
+    viewport: pendingView?.view ?? null,
+    sequences: { x: x ?? null, y: y ?? null },
+  };
 }
 
 function element<T extends Element>(id: string): T {

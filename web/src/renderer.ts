@@ -1,4 +1,5 @@
 import type { MatrixTilePayload } from "./protocol";
+import type { NumericTileView } from "./export";
 import {
   DEFAULT_HEATMAP_PALETTE,
   heatmapPaletteRgb,
@@ -263,6 +264,69 @@ export class DotplotRenderer {
       this.#frameResolvers.push(resolve);
       this.#requestRender();
     });
+  }
+
+  /** Returns the exact numeric inputs participating in the current rendered viewport. */
+  exportTileViews(): NumericTileView[] {
+    return [...this.#tiles.values()]
+      .filter((tile) => this.#isRenderableResolution(tile.resolution))
+      .filter((tile) => intersectsView(tileBounds(tile, this.#metadata.resolution), this.#view))
+      .map((tile) => ({
+        configDigest: tile.configDigest,
+        quality: tile.quality,
+        resolution: tile.resolution,
+        x: tile.x,
+        y: tile.y,
+        width: tile.width,
+        height: tile.height,
+        identity: tile.identity,
+        direction: tile.direction,
+        directionSupport: tile.directionSupport,
+      }));
+  }
+
+  /** Renders the current plot into a bounded high-resolution PNG without screen capture. */
+  async exportPng(scale = 2): Promise<Blob> {
+    if (this.#contextLost) throw new Error("The graphics context is unavailable");
+    const gl = this.#gl;
+    const previousWidth = this.#canvas.width;
+    const previousHeight = this.#canvas.height;
+    const viewportLimit = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+    let width = Math.max(1, Math.round(previousWidth * Math.max(1, scale)));
+    let height = Math.max(1, Math.round(previousHeight * Math.max(1, scale)));
+    const maximumPixels = 8_000_000;
+    const pixelScale = Math.min(1, Math.sqrt(maximumPixels / (width * height)));
+    width = Math.max(1, Math.min(viewportLimit[0] ?? width, Math.floor(width * pixelScale)));
+    height = Math.max(1, Math.min(viewportLimit[1] ?? height, Math.floor(height * pixelScale)));
+    const pixels = new Uint8Array(width * height * 4);
+    try {
+      this.#canvas.width = width;
+      this.#canvas.height = height;
+      gl.viewport(0, 0, width, height);
+      this.#render();
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    } finally {
+      this.#canvas.width = previousWidth;
+      this.#canvas.height = previousHeight;
+      gl.viewport(0, 0, previousWidth, previousHeight);
+      this.#render();
+    }
+    const output = document.createElement("canvas");
+    output.width = width;
+    output.height = height;
+    const context = output.getContext("2d");
+    if (!context) throw new Error("The browser cannot create the image export canvas");
+    const image = context.createImageData(width, height);
+    const rowBytes = width * 4;
+    for (let row = 0; row < height; row += 1) {
+      const source = (height - row - 1) * rowBytes;
+      image.data.set(pixels.subarray(source, source + rowBytes), row * rowBytes);
+    }
+    context.putImageData(image, 0, 0);
+    return new Promise((resolve, reject) => output.toBlob(
+      (blob) => blob ? resolve(blob) : reject(new Error("The browser could not encode the PNG export")),
+      "image/png",
+    ));
   }
 
   destroy(): void {
