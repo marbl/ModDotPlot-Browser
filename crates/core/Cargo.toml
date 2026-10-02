@@ -1,0 +1,26 @@
+[package]
+name = "moddotplot-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Scientific computation core for moddotplot-interactive"
+
+[dependencies]
+
+[features]
+default = []
+validation = []
+
+[[test]]
+name = "estimator_validation"
+path = "tests/estimator_validation.rs"
+required-features = ["validation"]
+
+[[test]]
+name = "statistical_accuracy"
+path = "tests/statistical_accuracy.rs"
+required-features = ["validation"]
+
+[lints]
+workspace = true
