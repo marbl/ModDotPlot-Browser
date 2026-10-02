@@ -157,7 +157,11 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
 
   await page.goto("/");
   await expect(page).toHaveTitle("ModDotPlot Browser");
-  await expect(page.locator("#landing h1")).toHaveText("ModDotPlot Browser");
+  await expect(page.locator("#landing h1")).toHaveAccessibleName("ModDotPlot Browser");
+  await expect(page.locator("#landing .landing-logo")).toHaveAttribute(
+    "src",
+    "/moddotplot-browser.gif",
+  );
   await expect(page.locator("#landing-version")).toHaveText(/^v\d/);
   await expect(page.locator(".landing-notes")).toHaveCount(0);
   await expect(page.locator("#drop-title")).toHaveText("Drop FASTA files here");
