@@ -47,7 +47,8 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
   installation; enter the plot workspace only after selecting **Explore**. Matching
   plain-FASTA/FAI and BGZF/FAI/GZI sets publish record metadata up front and load
   selected records on demand. A one-click bundled *Arabidopsis thaliana* example opens
-  its default Chr1 self plot from an approximately 256 KB precomputed refined overview.
+  its default Chr1 self plot from an approximately 256 KB precomputed refined overview,
+  then caches static 2,000- and 4,000-cell refined Chr1 zoom levels in the background.
   The full raw FASTA stays on the same static origin and is read by indexed HTTP byte
   ranges only for interactions not already covered by cached data; the centromere
   annotation is deferred into a separate post-workspace load that does not gate the
@@ -84,8 +85,9 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
 * Stack local GC% and CpG tracks or imported plain/gzip/BGZF BED/GFF/GTF annotations
   along either axis. One logical annotation track remains one row across matching
   chromosomes and automatically displays the records for each selected axis sequence.
-* Export nonzero, detailed current-view data as BEDPE by default or CSV, using the
-  native system save picker where available.
+* Export nonzero, detailed current-view data as BEDPE together with an official-CLI JSON config through
+  **Export ModDotPlot command**. The JSON records the runnable
+  `moddotplot -c name.config.json -l name.bedpe` command.
 * Export the complete visible composition as PNG, SVG, or PDF; SVG and PDF keep axes,
   labels, tracks, and an outside heatmap legend as vectors while embedding the heatmap
   as a raster. Terminal exact plots retain their categorical match legend, including

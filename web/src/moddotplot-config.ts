@@ -96,8 +96,8 @@ export function createModDotPlotCliConfig(context: ModDotPlotConfigContext): Mod
     vector: "svg",
     _moddotplot_browser: {
       version: context.appVersion,
-      command: "moddotplot -c config.json",
-      note: "Recomputes this view with the official ModDotPlot estimator. Keep this JSON beside the named FASTA files, or edit the fasta paths.",
+      command: `moddotplot -c ${outputBase}.config.json -l ${outputBase}.bedpe`,
+      note: "Recomputes this view with the official ModDotPlot estimator and loads the companion BEDPE. Keep both exports beside the named FASTA files, or edit the fasta paths.",
       requested_bp_per_cell: requestedWindow,
       exported_viewport: { ...context.viewport },
     },

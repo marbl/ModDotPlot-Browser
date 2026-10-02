@@ -62,6 +62,7 @@ let sessionSequenceIndexes = new Map<number, number>();
 let globalSequenceIndexes = new Map<number, number>();
 let activeSessionParameters: ComparisonParameters | null = null;
 let precomputedOverview: PrecomputedOverviewArtifact | null = null;
+let precomputedOverviews = new Map<string, PrecomputedOverviewArtifact>();
 const scheduler = new SerializedWorkerQueue();
 let messageQueue = Promise.resolve();
 
@@ -100,6 +101,16 @@ const engineReady = init().then((wasm) => {
 
 context.onmessage = (event: MessageEvent<MainToWorkerMessage>): void => {
   const message = event.data;
+  if (message.type === "cache-precomputed-overview") {
+    messageQueue = messageQueue.then(async () => {
+      await engineReady;
+      cachePrecomputedOverview(message.artifact, message.generation);
+    }).catch((error: unknown) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      post({ type: "error", message: errorMessage });
+    });
+    return;
+  }
   if (message.type === "preview-presented") {
     if (comparisonJob?.canPublish(message.generation, message.requestId)) {
       comparisonJob.releasePresentation();
@@ -183,6 +194,8 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     case "load-precomputed-overview":
       await loadPrecomputedOverview(message.source, message.artifact, message.generation);
       break;
+    case "cache-precomputed-overview":
+      break;
     case "prepare":
       if (!comparisonJob?.canPublish(message.generation, message.requestId)) return;
       initializeComparisonConfigurations(message.parameters);
@@ -263,6 +276,7 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
       globalSequenceIndexes.clear();
       activeSessionParameters = null;
       precomputedOverview = null;
+      precomputedOverviews.clear();
       break;
   }
 }
@@ -472,6 +486,7 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
     globalSequenceIndexes = stagedGlobalIndexes;
     activeSessionParameters = null;
     precomputedOverview = null;
+    precomputedOverviews.clear();
     datasetJob.sequences = committed;
     post({ type: "sequences", generation, sequences: datasetJob.sequences });
     post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
@@ -555,9 +570,45 @@ async function loadPrecomputedOverview(
   globalSequenceIndexes = new Map();
   activeSessionParameters = null;
   precomputedOverview = artifact;
+  precomputedOverviews = new Map([[precomputedOverviewKey(artifact), artifact]]);
   datasetJob.sequences = assignSequenceSelectionIds(metadata);
   post({ type: "sequences", generation, sequences: datasetJob.sequences });
   post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
+}
+
+function cachePrecomputedOverview(
+  artifact: PrecomputedOverviewArtifact,
+  generation: number,
+): void {
+  if (!precomputedOverview) {
+    throw new Error("Bundled detail overview arrived before the startup overview.");
+  }
+  if (artifact.fastaIndexText !== precomputedOverview.fastaIndexText) {
+    throw new Error("Bundled detail overview does not match the active FASTA index.");
+  }
+  const primaryFasta = precomputedOverview.sourceAssets.find((asset) => asset.role === "fasta");
+  const detailFasta = artifact.sourceAssets.find((asset) => asset.role === "fasta");
+  if (
+    !primaryFasta
+    || !detailFasta
+    || primaryFasta.fileName !== detailFasta.fileName
+    || primaryFasta.byteLength !== detailFasta.byteLength
+    || primaryFasta.sha256 !== detailFasta.sha256
+  ) {
+    throw new Error("Bundled detail overview does not match the active FASTA source.");
+  }
+  precomputedOverviews.set(precomputedOverviewKey(artifact), artifact);
+  post({
+    type: "precomputed-overview-cached",
+    generation,
+    resolution: artifact.comparison.resolution,
+  });
+  post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
+}
+
+function precomputedOverviewKey(artifact: PrecomputedOverviewArtifact): string {
+  const comparison = artifact.comparison;
+  return `${comparison.xIndex}:${comparison.yIndex}:${comparison.resolution}:${comparison.k}:${comparison.configDigest}`;
 }
 
 function parsedSequenceRecords(value: unknown): ParsedSequenceRecord[] {
@@ -1368,7 +1419,7 @@ function publishPrecomputedOverview(
   requestId: number,
   parameters: Readonly<ComparisonParameters>,
 ): boolean {
-  const artifact = matchingPrecomputedOverview(parameters);
+  const artifact = matchingPrecomputedOverview(parameters, parameters.resolution);
   if (!artifact || !isCurrentTileRequest(generation, requestId)) return false;
   const started = performance.now();
   activeSessionParameters = null;
@@ -1398,8 +1449,8 @@ function publishRequestedPrecomputedTiles(
   forceDetailed: boolean,
 ): boolean {
   if (mode !== "sketch" || coordinates.length === 0) return false;
-  const artifact = matchingPrecomputedOverview(requireComparisonJob().parameters);
-  if (!artifact || resolution !== artifact.comparison.resolution) return false;
+  const artifact = matchingPrecomputedOverview(requireComparisonJob().parameters, resolution);
+  if (!artifact) return false;
   const tilesByOrigin = new Map(artifact.tiles.map((tile) => [`${tile.x}:${tile.y}`, tile]));
   const selected = coordinates.map(({ x, y }) => tilesByOrigin.get(`${x}:${y}`));
   if (selected.some((tile) => tile === undefined)) return false;
@@ -1414,20 +1465,22 @@ function publishRequestedPrecomputedTiles(
 
 function matchingPrecomputedOverview(
   parameters: Readonly<ComparisonParameters>,
+  resolution: number,
 ): PrecomputedOverviewArtifact | null {
-  const artifact = precomputedOverview;
-  if (!artifact) return null;
-  const comparison = artifact.comparison;
-  if (
-    parameters.xIndex !== comparison.xIndex
-    || parameters.yIndex !== comparison.yIndex
-    || parameters.resolution !== comparison.resolution
-    || parameters.k !== comparison.k
-  ) return null;
   const runtime = requireComparisonJob().configurations.get(parameters.detailedRegisterCount);
-  const cached = artifact.configurations.find((config) => config.digest === comparison.configDigest);
-  if (!runtime || !cached || !scientificConfigMatches(configMetadata(runtime), cached)) return null;
-  return artifact;
+  if (!runtime) return null;
+  for (const artifact of precomputedOverviews.values()) {
+    const comparison = artifact.comparison;
+    if (
+      parameters.xIndex !== comparison.xIndex
+      || parameters.yIndex !== comparison.yIndex
+      || resolution !== comparison.resolution
+      || parameters.k !== comparison.k
+    ) continue;
+    const cached = artifact.configurations.find((config) => config.digest === comparison.configDigest);
+    if (cached && scientificConfigMatches(configMetadata(runtime), cached)) return artifact;
+  }
+  return null;
 }
 
 function scientificConfigMatches(
@@ -1550,13 +1603,16 @@ function forgetPublishedTile(resolution: number, x: number, y: number): void {
 }
 
 function allocatedWorkerBytes(): number {
-  const cachedOverviewBytes = precomputedOverview?.tiles.reduce(
-    (total, tile) => total
-      + tile.identity.byteLength
-      + tile.direction.byteLength
-      + tile.directionSupport.byteLength,
+  const cachedOverviewBytes = [...precomputedOverviews.values()].reduce(
+    (artifactTotal, artifact) => artifactTotal + artifact.tiles.reduce(
+      (total, tile) => total
+        + tile.identity.byteLength
+        + tile.direction.byteLength
+        + tile.directionSupport.byteLength,
+      0,
+    ),
     0,
-  ) ?? 0;
+  );
   return Math.max(session.estimated_memory_bytes(), wasmMemory.buffer.byteLength)
     + cachedOverviewBytes;
 }

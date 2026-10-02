@@ -151,22 +151,48 @@ describe("reproducible export", () => {
     expect(exportBaseName("chr 1/alt", "chr2")).toBe("moddotplot-chr_1_alt-vs-chr2");
   });
 
-  it("rejects oversized CSV work before reading tile channels", () => {
+  it("does not reject sparse views merely because their renderer bounds exceed the row limit", async () => {
+    const width = MAX_NUMERIC_EXPORT_CELLS + 1;
+    const identity = new Uint16Array(width);
+    identity[width - 1] = 9_000;
+    const result = createNumericExport([{
+      configDigest: "abc",
+      quality: "preview",
+      resolution: width,
+      x: 0,
+      y: 0,
+      width,
+      height: 1,
+      identity,
+      direction: new Int16Array(width),
+      directionSupport: new Uint16Array(width),
+    }], {
+      ...context,
+      domainLength: width,
+      baseResolution: width,
+      viewport: { x: 0, y: 0, width, height: 1 },
+    }, provenance, "csv");
+    expect(await result.text()).toContain(`chr1,${width - 1},${width},chr2,0,1,0.9000,,0`);
+  });
+
+  it("rejects only when the number of nonzero export rows exceeds the safety limit", () => {
+    const width = MAX_NUMERIC_EXPORT_CELLS + 1;
     expect(() => createNumericExport([{
       configDigest: "abc",
       quality: "preview",
-      resolution: MAX_NUMERIC_EXPORT_CELLS + 1,
+      resolution: width,
       x: 0,
       y: 0,
-      width: MAX_NUMERIC_EXPORT_CELLS + 1,
+      width,
       height: 1,
-      identity: new Uint16Array(),
-      direction: new Int16Array(),
-      directionSupport: new Uint16Array(),
+      identity: new Uint16Array(width).fill(9_000),
+      direction: new Int16Array(width),
+      directionSupport: new Uint16Array(width),
     }], {
       ...context,
-      baseResolution: MAX_NUMERIC_EXPORT_CELLS + 1,
-      viewport: { x: 0, y: 0, width: MAX_NUMERIC_EXPORT_CELLS + 1, height: 1 },
+      domainLength: width,
+      baseResolution: width,
+      viewport: { x: 0, y: 0, width, height: 1 },
     }, provenance, "csv")).toThrow("Zoom in or select a lower Plot resolution setting");
   });
 });

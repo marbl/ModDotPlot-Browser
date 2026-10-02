@@ -166,6 +166,20 @@
               <span>max <output id="heatmap-max-value">100.0%</output></span>
             </div>
           </div>
+          <div class="plot-window-size-control">
+            <div class="plot-window-size-heading">
+              <span>Plot window size</span>
+              <span
+                class="plot-window-size-help"
+                role="img"
+                tabindex="0"
+                aria-label="About plot window size"
+                aria-describedby="plot-window-size-note"
+              >?</span>
+              <span id="plot-window-size-note" class="plot-window-size-tooltip" role="tooltip">Available after sequence selection</span>
+            </div>
+            <output id="plot-window-size" class="control-output" aria-live="polite">—</output>
+          </div>
           <dialog
             id="palette-color-editor"
             class="palette-color-editor"
@@ -229,11 +243,6 @@
               </select>
               <small id="plot-resolution-note">1,000,000 similarity cells before zoom refinement</small>
             </label>
-            <label>
-              <span>Plot window size</span>
-              <output id="plot-window-size" class="control-output" aria-live="polite">—</output>
-              <small id="plot-window-size-note">Genomic interval represented by each cell at the current zoom level</small>
-            </label>
             <fieldset class="cursor-guide-controls">
               <legend>Cursor guides</legend>
               <label class="checkbox-option">
@@ -288,7 +297,7 @@
 
           <div id="plot-actions" class="plot-actions" role="group" aria-label="Plot actions">
             <button id="reset-view" class="quiet-button" type="button">Reset view</button>
-            <button id="export-data" class="quiet-button" type="button" disabled>Export data</button>
+            <button id="export-data" class="quiet-button" type="button" disabled>Export ModDotPlot command</button>
             <button id="export-image" class="quiet-button" type="button" disabled>Export image</button>
           </div>
           <div class="control-footer">

@@ -33,7 +33,7 @@ export interface NumericExportContext {
   yName: string;
 }
 
-/** Keeps worst-case CSV construction inside the 256 MiB transient-publication plan. */
+/** Keeps worst-case tabular construction inside the 256 MiB transient-publication plan. */
 export const MAX_NUMERIC_EXPORT_CELLS = 2_000_000;
 
 /** Builds current-view renderer inputs plus complete machine-readable provenance. */
@@ -44,16 +44,21 @@ export function createNumericExport(
   format: DataExportFormat = "bedpe",
 ): Blob {
   const visibleTiles = tiles.map((tile) => ({ tile, bounds: visibleCellBounds(tile, context) }));
-  const cellCount = visibleTiles.reduce(
-    (sum, { bounds }) => sum + Math.max(0, bounds.endX - bounds.startX) * Math.max(0, bounds.endY - bounds.startY),
-    0,
-  );
-  if (cellCount > MAX_NUMERIC_EXPORT_CELLS) {
-    throw new Error(
-      `Numeric export contains ${cellCount.toLocaleString()} renderer cells; `
-      + `the local limit is ${MAX_NUMERIC_EXPORT_CELLS.toLocaleString()}. `
-      + "Zoom in or select a lower Plot resolution setting, then export again.",
-    );
+  let exportedCellCount = 0;
+  for (const { tile, bounds } of visibleTiles) {
+    for (let row = bounds.startY; row < bounds.endY; row += 1) {
+      for (let column = bounds.startX; column < bounds.endX; column += 1) {
+        const identity = tile.identity[row * tile.width + column]!;
+        if (identity === 0 || identity === 0xffff) continue;
+        exportedCellCount += 1;
+        if (exportedCellCount > MAX_NUMERIC_EXPORT_CELLS) {
+          throw new Error(
+            `Numeric export contains more than ${MAX_NUMERIC_EXPORT_CELLS.toLocaleString()} nonzero data rows. `
+            + "Zoom in or select a lower Plot resolution setting, then export again.",
+          );
+        }
+      }
+    }
   }
   const chunks: BlobPart[] = format === "bedpe"
     ? [

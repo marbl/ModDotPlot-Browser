@@ -197,12 +197,14 @@ pass before publication. At worker admission, a newly constructed current
 `ScientificConfig` must match the artifact's complete canonical identity and digest.
 The digest remains readable provenance; the full identity is the compatibility key.
 
-The checked-in v1 artifact covers the default 1,000-by-1,000 Chr1 self comparison with
-`k=21` and 1,024 registers. Its 16 clipped 256-cell tiles contain 1,000,000 cells and
-compress from 6,003,800 bytes to 255,582 bytes.
+The checked-in v1 startup artifact covers the default 1,000-by-1,000 Chr1 self
+comparison with `k=21` and 1,024 registers. Its 16 clipped 256-cell tiles contain
+1,000,000 cells and compress from 6,003,800 bytes to 255,580 bytes. Matching static
+2,000- and 4,000-cell artifacts are cached after first paint and use the same validated
+envelope and scientific identity.
 
 Some static servers infer `Content-Encoding: gzip` from the `.gz` suffix, causing the
-Fetch API to expose the 6,003,800-byte decoded envelope even though only 255,582 bytes
+Fetch API to expose the 6,003,800-byte decoded envelope even though only 255,580 bytes
 crossed the network. The example loader recognizes both exact representations. It
 pins and verifies the compressed size/SHA-256 and the decoded size/SHA-256 separately,
 then enters the decoder at the matching layer. Arbitrary decompressed or recompressed

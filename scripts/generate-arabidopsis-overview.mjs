@@ -9,8 +9,8 @@ import { encodePrecomputedOverview } from "../web/src/precomputed-overview.ts";
 import { transposeTile } from "../web/src/tile.ts";
 import { initSync, ComputeSession, ScientificConfig } from "../web/src/wasm/moddotplot_wasm.js";
 
-const SCRIPT_VERSION = 1;
-const RESOLUTION = 1_000;
+const SCRIPT_VERSION = 2;
+const RESOLUTIONS = [1_000, 2_000, 4_000];
 const K = 21;
 const REGISTER_COUNT = 1_024;
 const TILE_EDGE = 256;
@@ -25,8 +25,16 @@ const paths = {
   fai: resolve(examplesDirectory, "Col-CEN_v1.2.fasta.fai"),
   annotation: resolve(examplesDirectory, "ColCEN_CEN180.gff3"),
   wasm: resolve(wasmDirectory, "moddotplot_wasm_bg.wasm"),
-  output: resolve(examplesDirectory, "Col-CEN_v1.2.Chr1.mdp-overview-v1.gz"),
 };
+
+function outputPath(resolution) {
+  return resolve(
+    examplesDirectory,
+    resolution === 1_000
+      ? "Col-CEN_v1.2.Chr1.mdp-overview-v1.gz"
+      : `Col-CEN_v1.2.Chr1.${resolution}.mdp-overview-v1.gz`,
+  );
+}
 
 const checkOnly = process.argv.slice(2).includes("--check");
 const unknownArguments = process.argv.slice(2).filter((argument) => argument !== "--check");
@@ -56,57 +64,62 @@ try {
     throw new Error("The bundled overview contract requires Chr1 to be FASTA record zero");
   }
 
-  session.begin_prepare_scientific(0, 0, RESOLUTION, config, false);
-  let progress = 0;
-  while (progress < 1) progress = session.prepare_comparison_chunk(PREPARATION_CHUNK_BINS);
-
-  const tileMap = computeWorkerEquivalentSelfTiles(session, config);
   const configMetadata = scientificMetadata(config);
-  const artifact = {
-    schemaVersion: 1,
-    generator: `moddotplot-interactive/generate-arabidopsis-overview@${SCRIPT_VERSION}`,
-    sourceAssets: [
-      sourceAsset("fasta", paths.fasta, fastaBytes),
-      sourceAsset("fai", paths.fai, faiBytes),
-      sourceAsset("annotation", paths.annotation, annotationBytes),
-    ],
-    fastaIndexText: faiText,
-    sequences: faiRecords.map((record, index) => ({
-      index,
-      name: record.name,
-      description: "",
-      length: record.length,
-      sourceFile: basename(paths.fasta),
-    })),
-    comparison: {
-      xIndex: 0,
-      yIndex: 0,
-      resolution: RESOLUTION,
-      k: K,
-      configDigest: configMetadata.digest,
-    },
-    configurations: [configMetadata],
-    tiles: [...tileMap.values()].sort((left, right) => left.y - right.y || left.x - right.x),
-  };
-  const encoded = encodePrecomputedOverview(artifact);
-  const compressed = deterministicGzip(encoded);
+  for (const resolution of RESOLUTIONS) {
+    session.begin_prepare_scientific(0, 0, resolution, config, false);
+    let progress = 0;
+    while (progress < 1) progress = session.prepare_comparison_chunk(PREPARATION_CHUNK_BINS);
 
-  if (checkOnly) {
-    if (!existsSync(paths.output)) throw new Error(`Missing generated artifact: ${paths.output}`);
-    const checkedIn = readFileSync(paths.output);
-    if (!checkedIn.equals(compressed)) {
-      throw new Error(
-        `Generated overview is stale: run '${process.execPath} scripts/generate-arabidopsis-overview.mjs'`,
-      );
+    const tileMap = computeWorkerEquivalentSelfTiles(session, config, resolution);
+    const artifact = {
+      schemaVersion: 1,
+      generator: `moddotplot-interactive/generate-arabidopsis-overview@${SCRIPT_VERSION}`,
+      sourceAssets: [
+        sourceAsset("fasta", paths.fasta, fastaBytes),
+        sourceAsset("fai", paths.fai, faiBytes),
+        sourceAsset("annotation", paths.annotation, annotationBytes),
+      ],
+      fastaIndexText: faiText,
+      sequences: faiRecords.map((record, index) => ({
+        index,
+        name: record.name,
+        description: "",
+        length: record.length,
+        sourceFile: basename(paths.fasta),
+      })),
+      comparison: {
+        xIndex: 0,
+        yIndex: 0,
+        resolution,
+        k: K,
+        configDigest: configMetadata.digest,
+      },
+      configurations: [configMetadata],
+      tiles: [...tileMap.values()].sort((left, right) => left.y - right.y || left.x - right.x),
+    };
+    const encoded = encodePrecomputedOverview(artifact);
+    const compressed = deterministicGzip(encoded);
+    const output = outputPath(resolution);
+
+    if (checkOnly) {
+      if (!existsSync(output)) throw new Error(`Missing generated artifact: ${output}`);
+      const checkedIn = readFileSync(output);
+      if (!checkedIn.equals(compressed)) {
+        throw new Error(
+          `Generated overview is stale: run '${process.execPath} scripts/generate-arabidopsis-overview.mjs'`,
+        );
+      }
+      console.log(`Precomputed ${resolution.toLocaleString()} overview is reproducible (${compressed.byteLength.toLocaleString()} bytes)`);
+    } else {
+      writeFileSync(output, compressed);
+      console.log(`Wrote ${output}`);
+      console.log(`  resolution: ${resolution.toLocaleString()}`);
+      console.log(`  raw:  ${encoded.byteLength.toLocaleString()} bytes`);
+      console.log(`  gzip: ${compressed.byteLength.toLocaleString()} bytes`);
+      console.log(`  sha256: ${sha256(compressed)}`);
+      console.log(`  decoded-sha256: ${sha256(encoded)}`);
+      console.log(`  config: ${configMetadata.digest} (${configMetadata.identity})`);
     }
-    console.log(`Precomputed overview is reproducible (${compressed.byteLength.toLocaleString()} bytes)`);
-  } else {
-    writeFileSync(paths.output, compressed);
-    console.log(`Wrote ${paths.output}`);
-    console.log(`  raw:  ${encoded.byteLength.toLocaleString()} bytes`);
-    console.log(`  gzip: ${compressed.byteLength.toLocaleString()} bytes`);
-    console.log(`  sha256: ${sha256(compressed)}`);
-    console.log(`  config: ${configMetadata.digest} (${configMetadata.identity})`);
   }
 } finally {
   config.free();
@@ -164,15 +177,15 @@ function assertRecordsMatchFai(records, fai) {
   }
 }
 
-function computeWorkerEquivalentSelfTiles(target, scientificConfig) {
+function computeWorkerEquivalentSelfTiles(target, scientificConfig, resolution) {
   const tiles = new Map();
-  for (let y = 0; y < RESOLUTION; y += TILE_EDGE) {
-    for (let x = y; x < RESOLUTION; x += TILE_EDGE) {
+  for (let y = 0; y < resolution; y += TILE_EDGE) {
+    for (let x = y; x < resolution; x += TILE_EDGE) {
       const wasmTile = target.compute_tile_scientific(x, y, TILE_EDGE, TILE_EDGE, scientificConfig);
       const tile = {
         quality: "refined",
         configDigest: scientificConfig.digest,
-        resolution: RESOLUTION,
+        resolution,
         x,
         y,
         width: wasmTile.width,
@@ -204,7 +217,7 @@ function computeWorkerEquivalentSelfTiles(target, scientificConfig) {
       }
     }
   }
-  const tilesPerAxis = Math.ceil(RESOLUTION / TILE_EDGE);
+  const tilesPerAxis = Math.ceil(resolution / TILE_EDGE);
   if (tiles.size !== tilesPerAxis * tilesPerAxis) {
     throw new Error(`Expected ${tilesPerAxis * tilesPerAxis} full-matrix tiles, generated ${tiles.size}`);
   }

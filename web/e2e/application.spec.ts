@@ -282,6 +282,10 @@ test("the bundled Arabidopsis overview reaches Ready before FASTA or annotations
     await new Promise((resolve) => setTimeout(resolve, 100));
     await route.continue();
   });
+  await page.route(/\/examples\/Col-CEN_v1\.2\.Chr1\.(?:2000|4000)\.mdp-overview-v1\.gz$/, async (route) => {
+    requestedAssets.push(route.request().url().includes(".2000.") ? "overview-2000" : "overview-4000");
+    await route.continue();
+  });
   await page.route(/\/examples\/ColCEN_CEN180\.gff3$/, async (route) => {
     requestedAssets.push("gff3");
     await annotationGate;
@@ -321,6 +325,23 @@ test("the bundled Arabidopsis overview reaches Ready before FASTA or annotations
     const pixels = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
     return pixels?.filter((channel, index) => index % 4 === 3 && channel !== 0).length ?? 0;
   })).toBeGreaterThan(0);
+
+  await expect.poll(() => requestedAssets.filter((asset) => asset.startsWith("overview-")).sort())
+    .toEqual(["overview-2000", "overview-4000"]);
+  await expect(page.locator("body")).toHaveAttribute("data-bundled-detail-cache", "ready", {
+    timeout: 15_000,
+  });
+  const plotCanvas = page.locator("#plot-canvas");
+  await plotCanvas.focus();
+  await page.keyboard.press("+");
+  await expect(page.locator("#status")).toHaveText("Ready · bundled overview cached", {
+    timeout: 15_000,
+  });
+  expect(fastaRequests).toEqual([]);
+  await page.keyboard.press("Home");
+  await expect(page.locator("#status")).toHaveText("Ready · bundled overview cached", {
+    timeout: 15_000,
+  });
 
   const firstRangeResponse = page.waitForResponse((response) => (
     response.url().endsWith("/examples/Col-CEN_v1.2.fasta")
@@ -503,6 +524,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#export-data-format")).toHaveCount(0);
   await expect(page.locator("#export-image-format")).toHaveCount(0);
+  await expect(page.locator("#export-data")).toHaveText("Export ModDotPlot command");
   await expect(page.locator("#heatmap-palette")).toHaveValue("Spectral");
   await expect(page.locator("#heatmap-color-count")).toHaveValue("11");
   await expect(page.locator("#heatmap-color-count")).toHaveAttribute("min", "3");
@@ -534,7 +556,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   const saveOptions = await page.evaluate(() =>
     (window as unknown as { __saveOptions?: { startIn?: string; types?: unknown[] } }).__saveOptions);
   expect(saveOptions?.startIn).toBe("downloads");
-  expect(saveOptions?.types).toHaveLength(2);
+  expect(saveOptions?.types).toHaveLength(1);
   const configPath = await configArtifact.path();
   if (!configPath) throw new Error("CLI config export has no temporary path");
   const cliConfig = JSON.parse(await readFile(configPath, "utf8"));
@@ -547,6 +569,9 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
     palette: "Spectral_11",
     colors: expect.any(Array),
     breakpoints: expect.any(Array),
+    _moddotplot_browser: {
+      command: "moddotplot -c moddotplot-chrShort_short-vs-chrShort_short.config.json -l moddotplot-chrShort_short-vs-chrShort_short.bedpe",
+    },
   });
   expect(cliConfig.colors).toHaveLength(11);
   expect(cliConfig.breakpoints).toHaveLength(12);
@@ -704,7 +729,7 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
     (window as unknown as { __detailedSave: typeof state }).__detailedSave = state;
     (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
       .showSaveFilePicker = async (options) => ({
-        name: options.suggestedName.replace(/\.bedpe$/i, ".csv"),
+        name: options.suggestedName,
         createWritable: async () => ({
           write: async (blob: Blob) => {
             state.contents = await blob.text();
@@ -730,10 +755,10 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
   const contents = await page.evaluate(() =>
     (window as unknown as { __detailedSave: { contents: string } }).__detailedSave.contents);
-  expect(contents).toContain("x_seq_id,x_start,x_end,y_seq_id,y_start,y_end,ani_c,direction,direction_support");
-  const rows = contents.split("\n").filter((row) => /^detailed,/.test(row));
+  expect(contents).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
+  const rows = contents.split("\n").filter((row) => /^detailed\t/.test(row));
   expect(rows.length).toBeGreaterThan(0);
-  expect(rows.every((row) => row.split(",").length === 9)).toBe(true);
+  expect(rows.every((row) => row.split("\t").length === 13)).toBe(true);
   expect(contents).not.toContain("identity_fixed");
   expect(contents).not.toContain("config_digest");
   const configArtifact = await configDownload;
@@ -1373,15 +1398,22 @@ test("responsive controls keep Clear separate and report the current plot window
   }
 
   await page.setViewportSize({ width: 1_000, height: 900 });
-  await page.locator(".advanced-controls summary").click();
   await expect(page.locator(".advanced-controls label:has(#resolution) > span"))
     .toHaveText("Plot resolution");
   await expect(page.locator("#plot-window-size")).toHaveText("48 bp per cell");
+  await expect(page.locator(".advanced-controls #plot-window-size")).toHaveCount(0);
+  await page.locator(".plot-window-size-help").hover();
+  await expect(page.locator("#plot-window-size-note")).toHaveText(
+    "Each pixel represents a genomic interval of 48 bases",
+  );
+  await expect(page.locator("#plot-window-size-note")).toBeVisible();
   const canvas = page.locator("#plot-canvas");
   await canvas.focus();
   await page.keyboard.press("+");
   await expect(page.locator("#plot-window-size")).toHaveText("24 bp per cell");
-  await expect(page.locator("#plot-window-size-note")).toContainText("1,000 cells per axis");
+  await expect(page.locator("#plot-window-size-note")).toHaveText(
+    "Each pixel represents a genomic interval of 24 bases",
+  );
   await page.keyboard.press("Home");
   await expect(page.locator("#plot-window-size")).toHaveText("48 bp per cell");
   if (process.env.MODDOTPLOT_V082_QA) {
