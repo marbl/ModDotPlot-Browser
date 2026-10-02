@@ -4,11 +4,11 @@ import {
   createNumericExport,
   downloadBlob,
   embedPngProvenance,
-  type DataExportFormat,
   type ExportProvenance,
   type NumericExportContext,
 } from "./export";
 import type { DotplotRenderer } from "./renderer";
+import { createZipArchive } from "./zip";
 
 type ExportKind = "data" | "image";
 
@@ -32,14 +32,14 @@ interface ExportControllerOptions {
 }
 
 interface FormatOption {
-  value: DataExportFormat | ImageExportFormat;
+  value: ImageExportFormat | "zip";
   label: string;
   mime: string;
 }
 
 const FORMAT_OPTIONS: Record<ExportKind, FormatOption[]> = {
   data: [
-    { value: "bedpe", label: "BEDPE", mime: "text/tab-separated-values" },
+    { value: "zip", label: "ModDotPlot command package", mime: "application/zip" },
   ],
   image: [
     { value: "png", label: "PNG", mime: "image/png" },
@@ -78,7 +78,7 @@ export class ExportController {
   async #save(kind: ExportKind): Promise<void> {
     if (!this.#options.canExport()) return;
     const button = kind === "data" ? this.#options.dataButton : this.#options.imageButton;
-    let format: string = kind === "data" ? "bedpe" : "png";
+    let format: string = kind === "data" ? "zip" : "png";
     let handle: NativeFileHandle | null = null;
     const picker = (window as unknown as { showSaveFilePicker?: NativeSavePicker }).showSaveFilePicker;
     if (picker) {
@@ -108,7 +108,8 @@ export class ExportController {
     try {
       reportProgress("Checking detailed tiles");
       await this.#options.prepareDetailedExport(reportProgress);
-      const fileName = withExtension(this.#options.baseName(), format);
+      const baseName = this.#options.baseName();
+      const fileName = withExtension(baseName, format);
       const provenance = this.#options.provenance();
       let output: Blob;
       let configOutput: Blob | null = null;
@@ -117,9 +118,14 @@ export class ExportController {
         const context = this.#options.numericContext();
         const tiles = this.#options.renderer.exportTileViews(true);
         if (!context || tiles.length === 0) throw new Error("No rendered plot data is available to export yet.");
-        output = createNumericExport(tiles, context, provenance, format as DataExportFormat);
+        const bedpeOutput = createNumericExport(tiles, context, provenance, "bedpe");
         configOutput = this.#options.cliConfig();
         if (!configOutput) throw new Error("No active comparison is available for the ModDotPlot CLI config.");
+        reportProgress("Packaging BEDPE and config");
+        output = await createZipArchive([
+          { name: `${baseName}.bedpe`, data: bedpeOutput },
+          { name: `${baseName}.config.json`, data: configOutput },
+        ]);
       } else {
         reportProgress("Rendering image");
         const plot = await this.#options.renderer.exportPng(2);
@@ -141,10 +147,6 @@ export class ExportController {
       } else {
         downloadBlob(output, fileName);
       }
-      if (configOutput) {
-        const configName = `${this.#options.baseName()}.config.json`;
-        downloadBlob(configOutput, configName);
-      }
     } catch (error: unknown) {
       this.#options.onError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -164,6 +166,6 @@ export function formatFromFileName(
 }
 
 function withExtension(value: string, extension: string): string {
-  const trimmed = value.trim().replace(/\.(bedpe|csv|png|svg|pdf)$/i, "") || "moddotplot";
+  const trimmed = value.trim().replace(/\.(bedpe|csv|zip|png|svg|pdf)$/i, "") || "moddotplot";
   return `${trimmed}.${extension}`;
 }

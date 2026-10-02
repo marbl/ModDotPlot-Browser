@@ -7,6 +7,16 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-10-02
+
+### Fixed
+
+* Download **Export ModDotPlot command** as one ZIP package so browser multi-download
+  protection cannot discard either artifact. The package contains both the current-view
+  BEDPE and its companion JSON config.
+* Configure the official CLI with `"load": ["./<name>.bedpe"]` instead of a source
+  `fasta` entry, allowing the extracted config to load the exported BEDPE directly.
+
 ## [0.9.4] - 2026-10-02
 
 ### Added
@@ -679,7 +689,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.1...v0.9.2

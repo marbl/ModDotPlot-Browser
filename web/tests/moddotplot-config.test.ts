@@ -13,7 +13,7 @@ const sequences: SequenceMetadata[] = [
 
 function context(): ModDotPlotConfigContext {
   return {
-    appVersion: "0.9.4",
+    appVersion: "0.9.5",
     baseName: "moddotplot-Chr1-vs-Chr2",
     plotMode: "pairwise" as const,
     sequences,
@@ -41,7 +41,8 @@ function context(): ModDotPlotConfigContext {
 describe("official ModDotPlot CLI config export", () => {
   it("maps pairwise sequence, viewport, cell size, and display settings", () => {
     const config = createModDotPlotCliConfig(context());
-    expect(config.fasta).toEqual(["./plant.fa"]);
+    expect(config.load).toEqual(["./moddotplot-Chr1-vs-Chr2.bedpe"]);
+    expect(config).not.toHaveProperty("fasta");
     expect(config.sequence).toEqual(["Chr1", "Chr2"]);
     expect(config.region).toEqual(["Chr1:101-600", "Chr2:201-500"]);
     expect(config.window).toBe(21);
@@ -67,13 +68,13 @@ describe("official ModDotPlot CLI config export", () => {
     expect(config.compare_only).toBe(false);
   });
 
-  it("preserves grid ordering and uses every source FASTA once", () => {
+  it("preserves grid ordering and references the companion BEDPE", () => {
     const input = context();
     input.plotMode = "grid";
     input.gridSequenceIndices = [1, 0];
     const config = createModDotPlotCliConfig(input);
     expect(config.sequence).toEqual(["Chr2", "Chr1"]);
-    expect(config.fasta).toEqual(["./plant.fa"]);
+    expect(config.load).toEqual(["./moddotplot-Chr1-vs-Chr2.bedpe"]);
     expect(config.region).toBeUndefined();
     expect(config.grid_only).toBe(true);
   });

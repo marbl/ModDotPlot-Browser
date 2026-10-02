@@ -85,8 +85,9 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
 * Stack local GC% and CpG tracks or imported plain/gzip/BGZF BED/GFF/GTF annotations
   along either axis. One logical annotation track remains one row across matching
   chromosomes and automatically displays the records for each selected axis sequence.
-* Export nonzero, detailed current-view data as BEDPE together with an official-CLI JSON config through
-  **Export ModDotPlot command**. The JSON records the runnable
+* Export nonzero, detailed current-view BEDPE and an official-CLI JSON config in one ZIP
+  package through **Export ModDotPlot command**. The config loads its companion BEDPE,
+  and its metadata records the runnable
   `moddotplot -c name.config.json -l name.bedpe` command.
 * Export the complete visible composition as PNG, SVG, or PDF; SVG and PDF keep axes,
   labels, tracks, and an outside heatmap legend as vectors while embedding the heatmap
