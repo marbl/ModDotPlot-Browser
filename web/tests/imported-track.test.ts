@@ -5,7 +5,9 @@ import {
   gffFeatureColor,
   inferFeatureFormat,
   parseItemRgb,
+  resolveTrackSequenceIdentifier,
   sequenceIdentifierMatch,
+  trackCollectionAxisEligible,
   trackAxisEligible,
   type ImportedFeature,
 } from "../src/imported-track-types";
@@ -39,6 +41,28 @@ describe("imported feature tracks", () => {
     expect(sequenceIdentifierMatch("chr10", "chr1")).toBeNull();
   });
 
+  it("resolves batch identifiers to exactly one sequence with exact matches preferred", () => {
+    const candidates = [
+      { axis: "x" as const, index: 0, name: "chr1", length: 100 },
+      { axis: "y" as const, index: 1, name: "1", length: 100 },
+      { axis: "y" as const, index: 2, name: "MT", length: 100 },
+      { axis: "y" as const, index: 3, name: "M", length: 100 },
+    ];
+    expect(resolveTrackSequenceIdentifier("chr1", candidates)).toMatchObject({
+      kind: "match",
+      candidate: { index: 0 },
+      matchKind: "exact",
+    });
+    expect(resolveTrackSequenceIdentifier("chr2", [
+      { axis: "x", index: 4, name: "2", length: 100 },
+    ])).toMatchObject({ kind: "match", candidate: { index: 4 }, matchKind: "alias" });
+    expect(resolveTrackSequenceIdentifier("chrMT", candidates)).toMatchObject({
+      kind: "ambiguous",
+      candidates: [{ index: 2 }, { index: 3 }],
+    });
+    expect(resolveTrackSequenceIdentifier("unplaced", candidates)).toEqual({ kind: "none" });
+  });
+
   it("assigns the requested GFF gene-category colors", () => {
     expect(gffFeatureColor("gene", { gene_biotype: "protein_coding" })).toBe("#173f73");
     expect(gffFeatureColor("pseudogene", {})).toBe("#4f78a8");
@@ -51,6 +75,13 @@ describe("imported feature tracks", () => {
     expect(trackAxisEligible(2, "y", 2, 5)).toBe(false);
     expect(trackAxisEligible(2, "x", 2, 2)).toBe(true);
     expect(trackAxisEligible(2, "y", 2, 2)).toBe(true);
+  });
+
+  it("applies one logical track to every matching sequence selected on either axis", () => {
+    const matchingSequences = new Set([2, 4, 7]);
+    expect(trackCollectionAxisEligible(matchingSequences, "x", 4, 9)).toBe(true);
+    expect(trackCollectionAxisEligible(matchingSequences, "y", 4, 7)).toBe(true);
+    expect(trackCollectionAxisEligible(matchingSequences, "y", 4, 9)).toBe(false);
   });
 
   it("packs overlapping features into stable greedy lanes", () => {

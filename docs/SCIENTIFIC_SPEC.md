@@ -130,9 +130,12 @@ unaltered-base fraction `q` is approximately `q^k`. This is the only biological
 quantity against which `ANI_c` is intended to be compared, following Figure 4 of the
 ModDotPlot paper. At `k=21`, `q=0.80` retains only about 0.92% of exact k-mers, so
 containment evidence becomes sparse in this regime.
-The default display uses Viridis on a black plot background, with the background shown
-below 85%; the 80% control is retained for advanced inspection, not as a promise of
-uniform sensitivity.
+The default display uses the reversed 11-class ColorBrewer Spectral palette on a white
+plot background: lower displayed identity begins at the purple end and higher identity
+reaches the red end. The background is shown below 85%; the 80% control is retained for
+advanced inspection, not as a promise of uniform sensitivity. Palette direction and
+individual display colors affect presentation only, not numeric tiles or estimator
+semantics.
 
 The non-default Rust `validation` feature preserves the rejected sparse-correction
 experiment solely for controlled estimator comparisons. It may retain a complete
@@ -145,11 +148,22 @@ and its limitations are recorded in ADR 0004.
 ## Terminal exact mode
 
 When the view reaches one matrix position per base, sketches stop. Equal valid
-canonical k-mers match exactly and paint their complete k-base footprint. Opposite
-canonical orientations paint the corresponding reverse diagonal. Unequal valid k-mer
-starts mismatch; ambiguity-overlapping and padded starts are missing unless another
-valid exact match covers the position. Initial views already at terminal resolution
-enter this mode before drawing their first tile.
+canonical k-mers match exactly. The exact renderer paints each
+match across its complete k-base alignment: equal canonical orientations paint a
+forward diagonal and opposite orientations paint the corresponding reverse diagonal.
+
+For even-k reverse-complement-palindromic k-mers, canonical orientation is ambiguous.
+The footprint represents both possible diagonals with neutral direction evidence.
+Unequal valid k-mer starts mismatch. Ambiguity-overlapping and padded starts are
+missing unless another valid exact match covers the position. Missing evidence remains
+numerically distinct from identity zero and uses a separate display shade. Initial
+views already at terminal resolution enter this mode before drawing their first tile.
+
+Exact similarity coloring is independently selectable. **Bases** is the default and
+colors a matched cell by the corresponding base from the X sequence; **Identity** uses the configured similarity
+palette. The exact visualization mode and fixed full-footprint geometry are recorded
+in display provenance. Visualization changes redraw cached textures without changing
+the exact numeric tile.
 
 ## Configuration and change control
 

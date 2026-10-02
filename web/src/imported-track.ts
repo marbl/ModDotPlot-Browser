@@ -1,6 +1,7 @@
 import { formatInterval } from "./format";
 import {
-  trackAxisEligible,
+  trackCollectionAxisEligible,
+  type BatchTrackImportResult,
   type ImportedFeature,
   type ImportedLogicalTrack,
   type TrackImportReport,
@@ -17,18 +18,29 @@ const LANE_SIZE = 9;
 const MIN_IMPORTED_TRACK_SIZE = 18;
 const MAX_LANES = 10;
 
-interface ImportedTrackState extends ImportedLogicalTrack {
-  id: number;
+interface ImportedSequenceTrackData extends ImportedLogicalTrack {
   sequenceIndex: number;
   sequenceName: string;
+  format: TrackImportReport["format"];
+  prefixMaximumEnds: number[];
+}
+
+interface ImportedTrackState {
+  id: number;
+  sourceId: number | null;
+  name: string;
+  fileName: string;
+  format: TrackImportReport["format"];
+  sequenceData: Map<number, ImportedSequenceTrackData>;
   lanes: number;
   enabled: Record<FeatureTrackAxis, boolean>;
   inputs: Record<FeatureTrackAxis, HTMLInputElement>;
+  bothInput: HTMLInputElement;
   panels: Record<FeatureTrackAxis, HTMLElement>;
   canvases: Record<FeatureTrackAxis, HTMLCanvasElement>;
-  prefixMaximumEnds: number[];
   hitTargets: Record<FeatureTrackAxis, FeatureHit[]>;
   row: HTMLElement;
+  detail: HTMLElement;
 }
 
 interface FeatureHit {
@@ -39,9 +51,16 @@ interface FeatureHit {
   feature: ImportedFeature;
 }
 
+interface BatchAliasConfirmation {
+  sourceId: number;
+  results: BatchTrackImportResult[];
+  ambiguousRecords: number;
+  ambiguousIdentifiers: string[];
+}
+
 type PendingImport =
   | { kind: "parse"; axis: FeatureTrackAxis; sequence: SequenceTarget }
-  | { kind: "inspect"; file: File; candidates: TrackSequenceCandidate[] };
+  | { kind: "batch"; sourceId: number };
 
 type SequenceTarget = Pick<SequenceMetadata, "index" | "name" | "length">;
 
@@ -63,6 +82,7 @@ export interface ImportedTrackManagerOptions {
   dialogClose: HTMLButtonElement;
   tooltip: HTMLElement;
   getSequence(axis: FeatureTrackAxis): SequenceMetadata | null;
+  getSequences(): readonly SequenceMetadata[];
   onLayoutChange(): void;
   onStatus(text: string, progress?: number): void;
   onIdle(): void;
@@ -77,8 +97,11 @@ export class ImportedTrackManager {
   readonly #resizeObserver: ResizeObserver;
   #nextRequestId = 0;
   #nextTrackId = 0;
+  #nextSourceId = 0;
   #metadata: FeatureTrackMetadata | null = null;
   #view: ViewChange | null = null;
+  readonly #batchAliasConfirmations: BatchAliasConfirmation[] = [];
+  #batchAliasConfirmationActive = false;
 
   constructor(options: ImportedTrackManagerOptions) {
     this.#options = options;
@@ -94,6 +117,10 @@ export class ImportedTrackManager {
     this.#wireDrops(options.yDropTargets, "y");
     this.#wireGlobalFileDropGuard();
     options.dialogClose.addEventListener("click", () => options.dialog.close());
+    options.dialog.addEventListener("close", () => {
+      this.#batchAliasConfirmationActive = false;
+      queueMicrotask(() => this.#showNextBatchAliasConfirmation());
+    });
   }
 
   setView(metadata: FeatureTrackMetadata, view: ViewChange): void {
@@ -137,10 +164,32 @@ export class ImportedTrackManager {
   }
 
   estimatedBytes(): number {
-    return this.#tracks.reduce((total, track) => total + track.features.reduce(
-      (featureTotal, feature) => featureTotal + 160 + feature.blocks.length * 8 + feature.details.join("").length * 2,
+    return this.#tracks.reduce((total, track) => total + [...track.sequenceData.values()].reduce(
+      (sequenceTotal, sequence) => sequenceTotal + sequence.features.reduce(
+        (featureTotal, feature) => featureTotal + 160 + feature.blocks.length * 8 + feature.details.join("").length * 2,
+        0,
+      ),
       0,
     ), 0);
+  }
+
+  /** Imports files using the same sequence-matching flow as the Add track picker. */
+  importFiles(files: readonly File[]): void {
+    if (files.length > 0) this.#autoImportFiles([...files]);
+  }
+
+  /** Matches launch-screen annotations against every record in the loaded FASTA set. */
+  importFilesForSequences(files: readonly File[], sequences: readonly SequenceMetadata[]): void {
+    if (files.length === 0 || sequences.length === 0) return;
+    const x = this.#options.getSequence("x");
+    const candidates: TrackSequenceCandidate[] = sequences.map((sequence) => ({
+      axis: sequence.index === x?.index ? "x" : "y",
+      index: sequence.index,
+      name: sequence.name,
+      length: sequence.length,
+    }));
+    for (const file of files) this.#startBatchParse(file, candidates);
+    this.#options.onStatus(`Reading ${files[0]?.name ?? "feature track"}`);
   }
 
   clear(): void {
@@ -160,6 +209,9 @@ export class ImportedTrackManager {
       this.#worker.postMessage(request);
     }
     this.#pending.clear();
+    this.#batchAliasConfirmations.length = 0;
+    if (this.#batchAliasConfirmationActive && this.#options.dialog.open) this.#options.dialog.close();
+    this.#batchAliasConfirmationActive = false;
     this.#options.emptyMessage.hidden = false;
     this.#options.tooltip.hidden = true;
     this.#options.onLayoutChange();
@@ -170,7 +222,7 @@ export class ImportedTrackManager {
     this.#options.input.addEventListener("change", () => {
       const files = [...(this.#options.input.files ?? [])];
       this.#options.input.value = "";
-      if (files.length > 0) this.#autoImportFiles(files);
+      this.importFiles(files);
     });
   }
 
@@ -218,27 +270,30 @@ export class ImportedTrackManager {
   }
 
   #autoImportFiles(files: File[]): void {
-    const x = this.#options.getSequence("x");
-    const y = this.#options.getSequence("y");
-    if (!x || !y) {
+    const sequences = this.#options.getSequences();
+    if (sequences.length === 0) {
       this.#showReport("Track import unavailable", "Load a FASTA sequence before importing a feature track.", []);
       return;
     }
+    const x = this.#options.getSequence("x");
+    const y = this.#options.getSequence("y");
+    const candidates: TrackSequenceCandidate[] = sequences.map((sequence) => ({
+      axis: sequence.index === y?.index && sequence.index !== x?.index ? "y" : "x",
+      index: sequence.index,
+      name: sequence.name,
+      length: sequence.length,
+    }));
     for (const file of files) {
-      if (x.index === y.index) {
-        this.#startParse(file, "x", x);
-        continue;
-      }
-      const requestId = ++this.#nextRequestId;
-      const candidates: TrackSequenceCandidate[] = [
-        { axis: "x", index: x.index, name: x.name, length: x.length },
-        { axis: "y", index: y.index, name: y.name, length: y.length },
-      ];
-      this.#pending.set(requestId, { kind: "inspect", file, candidates });
-      const request: TrackParserRequest = { type: "inspect", requestId, file, candidates };
-      this.#parserWorker().postMessage(request);
+      this.#startBatchParse(file, candidates);
     }
     this.#options.onStatus(`Matching ${files[0]?.name ?? "feature track"}`);
+  }
+
+  #startBatchParse(file: File, candidates: TrackSequenceCandidate[]): void {
+    const requestId = ++this.#nextRequestId;
+    this.#pending.set(requestId, { kind: "batch", sourceId: ++this.#nextSourceId });
+    const request: TrackParserRequest = { type: "parse-batch", requestId, file, candidates };
+    this.#parserWorker().postMessage(request);
   }
 
   #importFiles(files: File[], axis: FeatureTrackAxis): void {
@@ -291,7 +346,38 @@ export class ImportedTrackManager {
       return;
     }
     if (message.type === "inspection-complete") {
-      if (pending.kind === "inspect") this.#finishInspection(pending, message.identifiers, message.matches);
+      if (this.#pending.size === 0) this.#options.onIdle();
+      return;
+    }
+    if (message.type === "batch-complete") {
+      if (pending.kind === "batch") {
+        const exactResults = message.results.filter(({ report }) => report.matchKind === "exact");
+        const aliasResults = message.results.filter(({ report }) => report.matchKind === "alias");
+        for (const { candidate, report } of exactResults) {
+          this.#addReport(
+            report,
+            { kind: "parse", axis: candidate.axis, sequence: candidate },
+            pending.sourceId,
+          );
+        }
+        if (aliasResults.length > 0) {
+          this.#confirmBatchAliases(
+            aliasResults,
+            message.ambiguousRecords,
+            message.ambiguousIdentifiers,
+            pending.sourceId,
+          );
+        } else if (message.ambiguousRecords > 0) {
+          this.#showReport(
+            "Some annotation records were skipped",
+            `${message.ambiguousRecords.toLocaleString()} records had aliases matching more than one loaded FASTA sequence.`,
+            [
+              "Ambiguous records were not duplicated.",
+              `Identifiers: ${message.ambiguousIdentifiers.slice(0, 12).join(", ")}`,
+            ],
+          );
+        }
+      }
       if (this.#pending.size === 0) this.#options.onIdle();
       return;
     }
@@ -305,49 +391,49 @@ export class ImportedTrackManager {
     if (this.#pending.size === 0) this.#options.onIdle();
   }
 
-  #finishInspection(
-    pending: Extract<PendingImport, { kind: "inspect" }>,
-    identifiers: string[],
-    matches: Array<TrackSequenceCandidate & { identifier: string; matchKind: "exact" | "alias" }>,
+  #confirmBatchAliases(
+    results: BatchTrackImportResult[],
+    ambiguousRecords: number,
+    ambiguousIdentifiers: string[],
+    sourceId: number,
   ): void {
-    const exactMatches = matches.filter((match) => match.matchKind === "exact");
-    const preferred = exactMatches.length > 0 ? exactMatches : matches;
-    if (preferred.length === 1) {
-      const match = preferred[0];
-      if (match) this.#startParse(pending.file, match.axis, match);
-      return;
-    }
-    if (preferred.length === 0) {
-      this.#showReport(
-        "Track import failed",
-        "No feature sequence identifier matched either displayed sequence.",
-        identifiers.length > 0 ? [`Found: ${identifiers.slice(0, 12).join(", ")}`] : [],
-      );
-      return;
-    }
-    this.#chooseAxis(pending.file, preferred);
+    this.#batchAliasConfirmations.push({ sourceId, results, ambiguousRecords, ambiguousIdentifiers });
+    this.#showNextBatchAliasConfirmation();
   }
 
-  #chooseAxis(file: File, matches: TrackSequenceCandidate[]): void {
-    const x = matches.find((match) => match.axis === "x");
-    const y = matches.find((match) => match.axis === "y");
-    if (!x || !y) return;
+  #showNextBatchAliasConfirmation(): void {
+    if (this.#batchAliasConfirmationActive || this.#options.dialog.open) return;
+    const confirmation = this.#batchAliasConfirmations.shift();
+    if (!confirmation) return;
+    const { sourceId, results, ambiguousRecords, ambiguousIdentifiers } = confirmation;
+    const details = results.slice(0, 12).map(({ candidate, report }) => (
+      `${report.matchedIdentifier} → ${candidate.name} · ${report.validRecords.toLocaleString()} records`
+    ));
+    if (ambiguousRecords > 0) {
+      details.push(
+        `${ambiguousRecords.toLocaleString()} ambiguous records were skipped, not duplicated: ${ambiguousIdentifiers.slice(0, 8).join(", ")}`,
+      );
+    }
     this.#showReport(
-      "Choose a track axis",
-      `${file.name} contains records matching both displayed sequences.`,
-      ["Choose which sequence this imported track should be associated with."],
+      "Confirm sequence aliases",
+      `${results.length.toLocaleString()} sequence associations use unique conservative chromosome aliases. Import them?`,
+      details,
     );
-    this.#options.dialogConfirm.hidden = false;
-    this.#options.dialogConfirm.textContent = `X · ${x.name}`;
-    this.#options.dialogConfirm.onclick = () => {
+    this.#batchAliasConfirmationActive = true;
+    const confirm = this.#options.dialogConfirm;
+    confirm.hidden = false;
+    confirm.textContent = "Import alias matches";
+    confirm.onclick = () => {
+      confirm.hidden = true;
+      confirm.onclick = null;
       this.#options.dialog.close();
-      this.#startParse(file, "x", x);
-    };
-    this.#options.dialogSecondary.hidden = false;
-    this.#options.dialogSecondary.textContent = `Y · ${y.name}`;
-    this.#options.dialogSecondary.onclick = () => {
-      this.#options.dialog.close();
-      this.#startParse(file, "y", y);
+      for (const { candidate, report } of results) {
+        this.#addReport(
+          report,
+          { kind: "parse", axis: candidate.axis, sequence: candidate },
+          sourceId,
+        );
+      }
     };
     this.#options.dialogClose.textContent = "Cancel";
   }
@@ -369,15 +455,36 @@ export class ImportedTrackManager {
     this.#options.dialogClose.textContent = "Cancel";
   }
 
-  #addReport(report: TrackImportReport, pending: Extract<PendingImport, { kind: "parse" }>): void {
-    for (const logicalTrack of report.tracks) this.#addTrack(logicalTrack, report, pending);
+  #addReport(
+    report: TrackImportReport,
+    pending: Extract<PendingImport, { kind: "parse" }>,
+    sourceId: number | null = null,
+  ): void {
+    for (const logicalTrack of report.tracks) this.#addTrack(logicalTrack, report, pending, sourceId);
   }
 
   #addTrack(
     logicalTrack: ImportedLogicalTrack,
     report: TrackImportReport,
     pending: Extract<PendingImport, { kind: "parse" }>,
+    sourceId: number | null,
   ): void {
+    const sequenceData: ImportedSequenceTrackData = {
+      ...logicalTrack,
+      sequenceIndex: pending.sequence.index,
+      sequenceName: pending.sequence.name,
+      format: report.format,
+      prefixMaximumEnds: prefixMaximumEnds(logicalTrack.features),
+    };
+    const existing = sourceId === null ? undefined : this.#tracks.find(
+      (track) => track.sourceId === sourceId && track.name === logicalTrack.name,
+    );
+    if (existing) {
+      existing.sequenceData.set(sequenceData.sequenceIndex, sequenceData);
+      this.#updateTrackSummary(existing);
+      this.#updateEligibilityAndDraw();
+      return;
+    }
     const id = ++this.#nextTrackId;
     const row = document.createElement("div");
     row.className = "imported-track-control";
@@ -386,9 +493,10 @@ export class ImportedTrackManager {
     const name = document.createElement("strong");
     name.className = "imported-track-control-name";
     name.textContent = logicalTrack.name;
-    name.title = `${report.fileName} · ${pending.sequence.name}`;
+    name.title = report.fileName;
     const xInput = axisCheckbox("X", `imported-track-${id}-x`);
     const yInput = axisCheckbox("Y", `imported-track-${id}-y`);
+    const bothInput = axisCheckbox("Both", `imported-track-${id}-both`);
     const laneControl = document.createElement("span");
     laneControl.className = "track-lane-control";
     const decrease = smallButton("−", "Use fewer feature rows");
@@ -400,29 +508,34 @@ export class ImportedTrackManager {
     laneControl.append(decrease, laneValue, increase);
     const remove = smallButton("Delete", `Delete ${logicalTrack.name} data`);
     remove.classList.add("track-delete-button");
-    header.append(xInput.label, yInput.label, laneControl, remove);
+    header.append(xInput.label, yInput.label, bothInput.label, laneControl, remove);
     const detail = document.createElement("small");
-    detail.textContent = `${pending.sequence.name} · ${report.format.toUpperCase()} · ${logicalTrack.features.length.toLocaleString()} displayed features`;
     row.append(name, header, detail);
 
     const xView = createTrackPanel(logicalTrack.name, "x", id);
     const yView = createTrackPanel(logicalTrack.name, "y", id);
     const track: ImportedTrackState = {
-      ...logicalTrack,
       id,
-      sequenceIndex: pending.sequence.index,
-      sequenceName: pending.sequence.name,
+      sourceId,
+      name: logicalTrack.name,
+      fileName: report.fileName,
+      format: report.format,
+      sequenceData: new Map([[sequenceData.sequenceIndex, sequenceData]]),
       lanes: 1,
-      enabled: { x: pending.axis === "x", y: pending.axis === "y" },
+      enabled: sourceId === null
+        ? { x: pending.axis === "x", y: pending.axis === "y" }
+        : { x: true, y: true },
       inputs: { x: xInput.input, y: yInput.input },
+      bothInput: bothInput.input,
       panels: { x: xView.panel, y: yView.panel },
       canvases: { x: xView.canvas, y: yView.canvas },
-      prefixMaximumEnds: prefixMaximumEnds(logicalTrack.features),
       hitTargets: { x: [], y: [] },
       row,
+      detail,
     };
     xInput.input.checked = track.enabled.x;
     yInput.input.checked = track.enabled.y;
+    this.#syncBothInput(track);
     this.#tracks.push(track);
     this.#options.list.append(row);
     this.#options.xStack.append(xView.panel);
@@ -432,6 +545,7 @@ export class ImportedTrackManager {
       const input = track.inputs[axis];
       input.addEventListener("change", () => {
         track.enabled[axis] = input.checked;
+        this.#syncBothInput(track);
         this.#updateTrackVisibility(track, axis);
         this.#options.onLayoutChange();
       });
@@ -442,9 +556,19 @@ export class ImportedTrackManager {
       this.#makeDraggable(track.panels[axis], axis, () => {
         track.enabled[axis] = false;
         track.inputs[axis].checked = false;
+        this.#syncBothInput(track);
         this.#updateTrackVisibility(track, axis);
       });
     }
+    track.bothInput.addEventListener("change", () => {
+      const checked = track.bothInput.checked;
+      track.enabled.x = checked;
+      track.enabled.y = checked;
+      track.inputs.x.checked = checked;
+      track.inputs.y.checked = checked;
+      track.bothInput.indeterminate = false;
+      this.#updateEligibilityAndDraw();
+    });
     decrease.addEventListener("click", () => {
       track.lanes = Math.max(1, track.lanes - 1);
       laneValue.value = String(track.lanes);
@@ -458,6 +582,7 @@ export class ImportedTrackManager {
       this.#updateEligibilityAndDraw();
     });
     remove.addEventListener("click", () => this.#deleteTrack(track));
+    this.#updateTrackSummary(track);
     this.#updateEligibilityAndDraw();
   }
 
@@ -479,6 +604,7 @@ export class ImportedTrackManager {
     for (const track of this.#tracks) {
       this.#updateTrackVisibility(track, "x");
       this.#updateTrackVisibility(track, "y");
+      this.#syncBothInput(track);
     }
     this.#options.onLayoutChange();
   }
@@ -486,10 +612,10 @@ export class ImportedTrackManager {
   #updateTrackVisibility(track: ImportedTrackState, axis: FeatureTrackAxis): void {
     const metadata = this.#metadata;
     const eligible = metadata
-      ? trackAxisEligible(track.sequenceIndex, axis, metadata.xIndex, metadata.yIndex)
+      ? trackCollectionAxisEligible(track.sequenceData.keys(), axis, metadata.xIndex, metadata.yIndex)
       : false;
     track.inputs[axis].disabled = !eligible;
-    track.inputs[axis].title = eligible ? "" : `This track is associated with ${track.sequenceName}`;
+    track.inputs[axis].title = eligible ? "" : "This track has no features for the selected sequence";
     const visible = eligible && track.enabled[axis];
     track.panels[axis].hidden = !visible;
     track.panels[axis].dataset.trackSize = String(importedTrackSize(track.lanes));
@@ -504,6 +630,9 @@ export class ImportedTrackManager {
     const canvas = track.canvases[axis];
     const context = canvas.getContext("2d");
     if (!metadata || !view || track.panels[axis].hidden || !context) return;
+    const sequenceIndex = axis === "x" ? metadata.xIndex : metadata.yIndex;
+    const sequenceData = track.sequenceData.get(sequenceIndex);
+    if (!sequenceData) return;
     resizeCanvas(canvas);
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -516,11 +645,11 @@ export class ImportedTrackManager {
     const visibleEnd = Math.min(length, visibleStart + visibleSpan);
     if (visibleSpan <= 0 || visibleEnd <= visibleStart) return;
     const hits: FeatureHit[] = [];
-    const first = firstOverlappingIndex(track.prefixMaximumEnds, visibleStart);
+    const first = firstOverlappingIndex(sequenceData.prefixMaximumEnds, visibleStart);
     const dpr = canvas.width / Math.max(1, canvas.clientWidth);
     const laneSize = LANE_SIZE * dpr;
-    for (let index = first; index < track.features.length; index += 1) {
-      const feature = track.features[index];
+    for (let index = first; index < sequenceData.features.length; index += 1) {
+      const feature = sequenceData.features[index];
       if (!feature) continue;
       if (feature.start >= visibleEnd) break;
       if (feature.end <= visibleStart) continue;
@@ -534,6 +663,25 @@ export class ImportedTrackManager {
       if (hit) hits.push(hit);
     }
     track.hitTargets[axis] = hits;
+  }
+
+  #syncBothInput(track: ImportedTrackState): void {
+    track.bothInput.checked = track.enabled.x && track.enabled.y;
+    track.bothInput.indeterminate = track.enabled.x !== track.enabled.y;
+    track.bothInput.disabled = track.inputs.x.disabled && track.inputs.y.disabled;
+  }
+
+  #updateTrackSummary(track: ImportedTrackState): void {
+    const sequences = [...track.sequenceData.values()];
+    const featureCount = sequences.reduce((total, sequence) => total + sequence.features.length, 0);
+    const sequenceSummary = sequences.length === 1
+      ? sequences[0]?.sequenceName ?? "1 matching sequence"
+      : `${sequences.length.toLocaleString()} matching sequences`;
+    track.detail.textContent = `${sequenceSummary} · ${track.format.toUpperCase()} · ${featureCount.toLocaleString()} displayed features`;
+    track.row.querySelector<HTMLElement>(".imported-track-control-name")!.title = [
+      track.fileName,
+      ...sequences.map((sequence) => sequence.sequenceName),
+    ].join(" · ");
   }
 
   #showFeatureHover(track: ImportedTrackState, axis: FeatureTrackAxis, event: PointerEvent): void {

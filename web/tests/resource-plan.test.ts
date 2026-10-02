@@ -35,7 +35,7 @@ describe("cross-layer resource admission", () => {
     const nearlyFull = { ...empty, wasm: RESOURCE_BUDGETS.total - 512 };
     const rejected = decideResourceAdmission(nearlyFull, "featureTracks", 1024);
     expect(rejected.action).toBe("reject");
-    expect(rejected.fallback).toContain("Reduce plot detail");
+    expect(rejected.fallback).toContain("Reduce plot resolution");
   });
 
   it("keeps representative haploid and diploid human envelopes inside the total plan", () => {

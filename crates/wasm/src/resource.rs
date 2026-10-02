@@ -28,15 +28,10 @@ pub(super) fn estimated_frozen_axis_bytes(
         .saturating_add(1_024)
 }
 
-pub(super) fn estimated_sequence_bytes(sequences: &[PackedSequence], capacity: usize) -> usize {
+pub(super) fn estimated_sequence_bytes(sequence_heap_bytes: usize, capacity: usize) -> usize {
     std::mem::size_of::<ComputeSession>()
         .saturating_add(capacity.saturating_mul(std::mem::size_of::<PackedSequence>()))
-        .saturating_add(
-            sequences
-                .iter()
-                .map(PackedSequence::estimated_heap_bytes)
-                .sum::<usize>(),
-        )
+        .saturating_add(sequence_heap_bytes)
 }
 
 pub(super) fn validate_prepared_axis_admission(
@@ -50,12 +45,12 @@ pub(super) fn validate_prepared_axis_admission(
         .ok_or("prepared-axis estimate overflowed")?;
     if admitted > MAX_PREPARED_AXIS_BYTES {
         return Err(
-            "This quality tier exceeds the 384 MiB prepared-axis budget; lower plot detail or sketch accuracy.",
+            "This quality tier exceeds the 384 MiB prepared-axis budget; lower plot resolution or sketch accuracy.",
         );
     }
     if current_session_bytes.saturating_add(admitted) > MAX_WASM_SESSION_BYTES {
         return Err(
-            "This comparison exceeds the Wasm session memory budget; lower plot detail or sketch accuracy.",
+            "This comparison exceeds the Wasm session memory budget; lower plot resolution or sketch accuracy.",
         );
     }
     Ok(admitted)

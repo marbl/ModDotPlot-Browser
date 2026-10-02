@@ -1,12 +1,16 @@
 import type { MatrixTilePayload, TileCoordinate } from "./protocol";
 import type { NumericTileView } from "./export";
+import { paletteDefaultColorCount } from "./palettes";
 import {
+  DEFAULT_HEATMAP_COLOR_COUNT,
   DEFAULT_HEATMAP_PALETTE,
   heatmapPaletteRgb,
+  normalizeHeatmapColors,
   plotBackgroundRgb,
   type HeatmapPalette,
 } from "./heatmap";
 import {
+  genomicMinimumViewportSize,
   initialViewport,
   panBy,
   remapViewportDomain,
@@ -17,6 +21,22 @@ import { selectTileEvictionCandidate } from "./cache";
 
 const MISSING_IDENTITY = 65_535;
 const MAX_TILE_CACHE_BYTES = 192 * 1024 * 1024;
+const MAX_DEVICE_PIXEL_RATIO = 3;
+
+/** Selects how exact one-base tiles are colored without changing their scientific values. */
+export type ExactVisualizationMode = "identity" | "bases";
+export type ExactBase = "A" | "C" | "G" | "T" | "N";
+export const DEFAULT_EXACT_VISUALIZATION_MODE: ExactVisualizationMode = "bases";
+
+export interface CanvasPixelSize {
+  width: number;
+  height: number;
+}
+
+interface DevicePixelContentSize {
+  inlineSize: number;
+  blockSize: number;
+}
 
 export interface PlotMetadata {
   resolution: number;
@@ -36,6 +56,8 @@ export interface HoverDatum {
   direction: number | null;
   directionSupport: number;
   quality: "preview" | "refined" | "exact";
+  /** X-sequence base represented by an exact tile, when its base channel is available. */
+  xBase?: ExactBase | null;
 }
 
 export interface ViewChange {
@@ -65,8 +87,10 @@ interface Uniforms {
   heatmapMid: WebGLUniformLocation;
   heatmapMax: WebGLUniformLocation;
   palette: WebGLUniformLocation;
+  paletteSize: WebGLUniformLocation;
   background: WebGLUniformLocation;
   exact: WebGLUniformLocation;
+  exactVisualization: WebGLUniformLocation;
 }
 
 export class DotplotRenderer {
@@ -82,7 +106,10 @@ export class DotplotRenderer {
   #mode: "similarity" | "direction" = "similarity";
   #heatmap = { min: 0.85, midpoint: 0.92, max: 1.00 };
   #palette: HeatmapPalette = DEFAULT_HEATMAP_PALETTE;
+  #paletteColorCount = DEFAULT_HEATMAP_COLOR_COUNT;
+  #paletteColors = normalizeHeatmapColors(DEFAULT_HEATMAP_PALETTE, DEFAULT_HEATMAP_COLOR_COUNT);
   #darkBackground = false;
+  #exactVisualization: ExactVisualizationMode = DEFAULT_EXACT_VISUALIZATION_MODE;
   #activeResolution = 1;
   #cachedTileBytes = 0;
   #useCounter = 0;
@@ -104,15 +131,22 @@ export class DotplotRenderer {
       depth: false,
       preserveDrawingBuffer: false,
     });
-    if (!gl) throw new Error("WebGL2 is required by moddotplot-rs");
+    if (!gl) throw new Error("WebGL2 is required by ModDotPlot Browser");
     this.#gl = gl;
     this.#program = null as unknown as WebGLProgram;
     this.#uniforms = null as unknown as Uniforms;
     this.#fallbackBaseTexture = null as unknown as WebGLTexture;
     this.#initializeWebGL();
     this.#bindInteractions();
-    this.#resizeObserver = new ResizeObserver(() => this.#resize());
-    this.#resizeObserver.observe(canvas);
+    this.#resizeObserver = new ResizeObserver((entries) => {
+      this.#resize(entries.find((entry) => entry.target === canvas));
+    });
+    try {
+      this.#resizeObserver.observe(canvas, { box: "device-pixel-content-box" });
+    } catch {
+      // Older Safari versions reject this option; their callback still uses the DPR fallback.
+      this.#resizeObserver.observe(canvas);
+    }
     this.#resize();
   }
 
@@ -121,10 +155,13 @@ export class DotplotRenderer {
     this.clearTiles();
     this.#metadata = metadata;
     this.#activeResolution = metadata.resolution;
-    const oneBase = Math.min(metadata.resolution, metadata.resolution / metadata.domainLength);
+    const minimumSize = genomicMinimumViewportSize(
+      metadata.resolution,
+      metadata.domainLength,
+    );
     this.#view = preserveViewport
-      ? remapViewportDomain(previousView, metadata.resolution, oneBase)
-      : initialViewport(metadata.resolution, oneBase);
+      ? remapViewportDomain(previousView, metadata.resolution, minimumSize)
+      : initialViewport(metadata.resolution, minimumSize);
     this.#requestRender();
     this.#notifyViewChange();
   }
@@ -194,6 +231,29 @@ export class DotplotRenderer {
     this.#requestRender();
   }
 
+  /** Removes one-base detail after its display geometry changes, retaining sketch fallbacks. */
+  clearExactTiles(): void {
+    const evicted = new Set<string>();
+    for (const [key, tile] of this.#tiles) {
+      if (tile.quality !== "exact") continue;
+      this.#deleteTextures(tile);
+      this.#tiles.delete(key);
+      this.#cachedTileBytes -= tile.storageBytes;
+      evicted.add(`${tile.resolution}:${tile.x}:${tile.y}`);
+    }
+    this.#cachedTileBytes = Math.max(0, this.#cachedTileBytes);
+    for (const coordinate of evicted) {
+      const [resolution, x, y] = coordinate.split(":").map(Number);
+      if (resolution !== undefined && x !== undefined && y !== undefined) {
+        this.#evictionListener?.({ resolution, x, y });
+      }
+    }
+    this.#requestRender();
+    if (this.#lastHoverEvent) {
+      this.#hoverListener?.(this.#hoverAt(this.#lastHoverEvent), this.#lastHoverEvent);
+    }
+  }
+
   setColorMode(mode: "similarity" | "direction"): void {
     this.#mode = mode;
     this.#requestRender();
@@ -210,13 +270,24 @@ export class DotplotRenderer {
     this.#requestRender();
   }
 
-  setHeatmapPalette(palette: HeatmapPalette): void {
+  setHeatmapPalette(
+    palette: HeatmapPalette,
+    colorCount = paletteDefaultColorCount(palette),
+    colors?: readonly string[],
+  ): void {
     this.#palette = palette;
+    this.#paletteColorCount = colorCount;
+    this.#paletteColors = normalizeHeatmapColors(palette, colorCount, colors);
     this.#requestRender();
   }
 
   setDarkBackground(dark: boolean): void {
     this.#darkBackground = dark;
+    this.#requestRender();
+  }
+
+  setExactVisualizationMode(mode: ExactVisualizationMode): void {
+    this.#exactVisualization = mode;
     this.#requestRender();
   }
 
@@ -394,7 +465,7 @@ export class DotplotRenderer {
 
   #initializeWebGL(): void {
     const gl = this.#gl;
-    this.#program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER);
+    this.#program = createProgram(gl, VERTEX_SHADER, RENDERER_FRAGMENT_SHADER_SOURCE);
     this.#uniforms = {
       tile: requiredUniform(gl, this.#program, "u_tile"),
       view: requiredUniform(gl, this.#program, "u_view"),
@@ -407,8 +478,10 @@ export class DotplotRenderer {
       heatmapMid: requiredUniform(gl, this.#program, "u_heatmap_mid"),
       heatmapMax: requiredUniform(gl, this.#program, "u_heatmap_max"),
       palette: requiredUniform(gl, this.#program, "u_palette[0]"),
+      paletteSize: requiredUniform(gl, this.#program, "u_palette_size"),
       background: requiredUniform(gl, this.#program, "u_background"),
       exact: requiredUniform(gl, this.#program, "u_exact"),
+      exactVisualization: requiredUniform(gl, this.#program, "u_exact_visualization"),
     };
     this.#fallbackBaseTexture = createIntegerTexture(
       gl,
@@ -566,13 +639,20 @@ export class DotplotRenderer {
       direction: directionSupport === 0 ? null : encodedDirection / 32_767,
       directionSupport,
       quality: tile.quality,
+      xBase: tile.quality === "exact"
+        ? decodeExactBase(tile.bases?.[xIndex - tile.x])
+        : undefined,
     };
   }
 
-  #resize(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    const width = Math.max(1, Math.round(this.#canvas.clientWidth * dpr));
-    const height = Math.max(1, Math.round(this.#canvas.clientHeight * dpr));
+  #resize(entry?: ResizeObserverEntry): void {
+    const rect = this.#canvas.getBoundingClientRect();
+    const { width, height } = resolveCanvasPixelSize(
+      rect.width,
+      rect.height,
+      window.devicePixelRatio,
+      resizeObserverDevicePixelSize(entry),
+    );
     if (this.#canvas.width !== width || this.#canvas.height !== height) {
       this.#canvas.width = width;
       this.#canvas.height = height;
@@ -606,8 +686,16 @@ export class DotplotRenderer {
     gl.uniform1f(this.#uniforms.heatmapMin, this.#heatmap.min);
     gl.uniform1f(this.#uniforms.heatmapMid, this.#heatmap.midpoint);
     gl.uniform1f(this.#uniforms.heatmapMax, this.#heatmap.max);
-    gl.uniform3fv(this.#uniforms.palette, heatmapPaletteRgb(this.#palette));
+    gl.uniform3fv(
+      this.#uniforms.palette,
+      heatmapPaletteRgb(this.#palette, this.#paletteColorCount, this.#paletteColors),
+    );
+    gl.uniform1i(this.#uniforms.paletteSize, this.#paletteColorCount);
     gl.uniform3f(this.#uniforms.background, background[0], background[1], background[2]);
+    gl.uniform1i(
+      this.#uniforms.exactVisualization,
+      this.#exactVisualization === "bases" ? 1 : 0,
+    );
 
     const tiles = [...this.#tiles.values()].sort((left, right) =>
       left.resolution - right.resolution || qualityRank(left.quality) - qualityRank(right.quality)
@@ -754,6 +842,70 @@ function createIntegerTexture(
   return texture;
 }
 
+/**
+ * Resolves the canvas backing-store size. A device-pixel ResizeObserver measurement avoids
+ * fractional-CSS-pixel rounding where supported; the rect/DPR path keeps older browsers sound.
+ */
+export function resolveCanvasPixelSize(
+  cssWidth: number,
+  cssHeight: number,
+  devicePixelRatio: number,
+  devicePixels?: DevicePixelContentSize | null,
+): CanvasPixelSize {
+  const dpr = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+    ? Math.min(devicePixelRatio, MAX_DEVICE_PIXEL_RATIO)
+    : 1;
+  const fallbackWidth = Math.max(1, Math.round(Math.max(0, cssWidth) * dpr));
+  const fallbackHeight = Math.max(1, Math.round(Math.max(0, cssHeight) * dpr));
+  if (
+    !devicePixels
+    || !Number.isFinite(devicePixels.inlineSize)
+    || !Number.isFinite(devicePixels.blockSize)
+    || devicePixels.inlineSize <= 0
+    || devicePixels.blockSize <= 0
+  ) {
+    return { width: fallbackWidth, height: fallbackHeight };
+  }
+
+  // Device-pixel content boxes use the uncapped browser DPR. Scale them down only when the
+  // renderer's memory guard caps that ratio; otherwise retain their exact integer measurement.
+  const browserDpr = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+    ? devicePixelRatio
+    : 1;
+  const capScale = Math.min(1, MAX_DEVICE_PIXEL_RATIO / browserDpr);
+  return {
+    width: Math.max(1, Math.round(devicePixels.inlineSize * capScale)),
+    height: Math.max(1, Math.round(devicePixels.blockSize * capScale)),
+  };
+}
+
+function resizeObserverDevicePixelSize(
+  entry?: ResizeObserverEntry,
+): DevicePixelContentSize | null {
+  const boxes = entry?.devicePixelContentBoxSize;
+  if (!boxes) return null;
+  // Chromium exposes a frozen array; early implementations exposed a single size object.
+  const size = Array.isArray(boxes)
+    ? boxes[0]
+    : (boxes as unknown as ResizeObserverSize);
+  if (!size) return null;
+  return { inlineSize: size.inlineSize, blockSize: size.blockSize };
+}
+
+function decodeExactBase(encoded: number | undefined): ExactBase | null {
+  return encoded === 0
+    ? "A"
+    : encoded === 1
+      ? "C"
+      : encoded === 2
+        ? "G"
+        : encoded === 3
+          ? "T"
+          : encoded === 4
+            ? "N"
+            : null;
+}
+
 function requiredUniform(
   gl: WebGL2RenderingContext,
   program: WebGLProgram,
@@ -808,7 +960,8 @@ void main() {
   v_uv = a_position;
 }`;
 
-const FRAGMENT_SHADER = `#version 300 es
+/** WebGL fragment program, exported so renderer contracts can be checked without a GPU. */
+export const RENDERER_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
@@ -824,8 +977,10 @@ uniform int u_exact;
 uniform float u_heatmap_min;
 uniform float u_heatmap_mid;
 uniform float u_heatmap_max;
-uniform vec3 u_palette[11];
+uniform vec3 u_palette[12];
+uniform int u_palette_size;
 uniform vec3 u_background;
+uniform int u_exact_visualization;
 out vec4 out_color;
 
 float palette_position(float value) {
@@ -844,10 +999,10 @@ float palette_position(float value) {
 }
 
 vec3 similarity_palette(float position) {
-  float scaled = clamp(position, 0.0, 1.0) * 10.0;
-  int lower = min(10, int(floor(scaled)));
-  int upper = min(10, lower + 1);
-  return mix(u_palette[lower], u_palette[upper], fract(scaled));
+  int last = max(0, u_palette_size - 1);
+  float scaled = clamp(position, 0.0, 1.0) * float(u_palette_size);
+  int selected = min(last, int(floor(scaled)));
+  return u_palette[selected];
 }
 
 vec3 base_palette(uint base) {
@@ -859,7 +1014,13 @@ vec3 base_palette(uint base) {
 }
 
 void main() {
-  uint encoded = texture(u_identity, v_uv).r;
+  ivec2 identity_size = textureSize(u_identity, 0);
+  ivec2 texel = clamp(
+    ivec2(floor(v_uv * vec2(identity_size))),
+    ivec2(0),
+    identity_size - ivec2(1)
+  );
+  uint encoded = texelFetch(u_identity, texel, 0).r;
   if (encoded == 65535u) {
     out_color = vec4(u_background, 1.0);
     return;
@@ -873,14 +1034,15 @@ void main() {
 
   vec3 color;
   if (u_mode == 0) {
-    color = identity > u_heatmap_max
-      ? similarity_palette(1.0)
-      : u_exact == 1
-        ? base_palette(texture(u_bases, vec2(v_uv.x, 0.5)).r)
-        : similarity_palette(position);
+    if (u_exact == 1 && u_exact_visualization == 1) {
+      int base_x = clamp(texel.x, 0, textureSize(u_bases, 0).x - 1);
+      color = base_palette(texelFetch(u_bases, ivec2(base_x, 0), 0).r);
+    } else {
+      color = similarity_palette(identity > u_heatmap_max ? 1.0 : position);
+    }
   } else {
-    uint support = texture(u_support, v_uv).r;
-    float direction = float(texture(u_direction, v_uv).r) / 32767.0;
+    uint support = texelFetch(u_support, texel, 0).r;
+    float direction = float(texelFetch(u_direction, texel, 0).r) / 32767.0;
     vec3 forward_color = vec3(0.055, 0.455, 0.624);
     vec3 reverse_color = vec3(0.795, 0.225, 0.350);
     vec3 neutral_color = vec3(0.47, 0.45, 0.48);

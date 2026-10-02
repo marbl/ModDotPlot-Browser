@@ -7,6 +7,24 @@ export interface ViewportState {
   minSize: number;
 }
 
+/** Smallest genomic interval the interactive plot may expose along either axis. */
+export const MINIMUM_GENOMIC_VIEWPORT_BASES = 100;
+
+/** Converts the genomic zoom floor into the renderer's matrix-coordinate system. */
+export function genomicMinimumViewportSize(
+  matrixDomain: number,
+  genomicDomainLength: number,
+  minimumBases = MINIMUM_GENOMIC_VIEWPORT_BASES,
+): number {
+  const safeMatrixDomain = Math.max(0, matrixDomain);
+  const safeGenomicDomain = Math.max(Number.EPSILON, genomicDomainLength);
+  const visibleBases = Math.min(safeGenomicDomain, Math.max(0, minimumBases));
+  return Math.min(
+    safeMatrixDomain,
+    safeMatrixDomain / safeGenomicDomain * visibleBases,
+  );
+}
+
 export function initialViewport(domain: number, minSize = 1): ViewportState {
   return { x: 0, y: 0, width: domain, height: domain, domain, minSize };
 }

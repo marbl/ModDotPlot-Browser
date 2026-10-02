@@ -1,4 +1,4 @@
-//! Browser-independent scientific algorithms for moddotplot-rs.
+//! Browser-independent scientific algorithms for moddotplot-interactive.
 //!
 //! Coordinates are zero-based and half-open throughout the core. The web interface
 //! may present one-based inclusive labels, but conversions happen only at the UI
@@ -31,7 +31,7 @@ pub use containment::{
 pub use dna::{CanonicalKmer, Orientation, PackedSequence, SequenceIdentity};
 pub use fasta::{FastaError, FastaParser, MAX_SEQUENCE_LENGTH};
 pub use gc::{CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE};
-pub use kmer::{KmerTileRequest, compute_kmer_tile};
+pub use kmer::{KmerTileGeometry, KmerTileRequest, compute_kmer_tile};
 pub use matrix::{
     AxisOverview, FrozenAxis, MatrixBuildError, MatrixTile, TileBuildError, TileRequest,
     build_axis_overview, build_axis_range, compute_frozen_tile, compute_tile,

@@ -33,6 +33,36 @@ function collectLicenseText(label, packageDirectory) {
   }
 }
 
+addComponent({
+  type: "library",
+  name: "ColorBrewer color schemes",
+  version: "2.0",
+  purl: "pkg:generic/colorbrewer@2.0",
+  licenses: [{ license: { id: "Apache-2.0" } }],
+  externalReferences: [
+    { type: "website", url: "https://colorbrewer2.org/" },
+    { type: "vcs", url: "https://github.com/axismaps/colorbrewer" },
+  ],
+});
+licenseSections.push(
+  `===== ColorBrewer 2 :: Apache-2.0 =====\n${readFileSync(join(root, "COLORBREWER_LICENSE.txt"), "utf8").trim()}`,
+);
+
+addComponent({
+  type: "library",
+  name: "d3-scale-chromatic",
+  version: "3.1.0",
+  purl: "pkg:npm/d3-scale-chromatic@3.1.0",
+  licenses: [{ license: { id: "ISC" } }],
+  externalReferences: [
+    { type: "website", url: "https://d3js.org/d3-scale-chromatic/" },
+    { type: "vcs", url: "https://github.com/d3/d3-scale-chromatic" },
+  ],
+});
+licenseSections.push(
+  `===== d3-scale-chromatic 3.1.0 :: LICENSE =====\n${readFileSync(join(root, "D3_SCALE_CHROMATIC_LICENSE.txt"), "utf8").trim()}`,
+);
+
 const cargo = JSON.parse(execFileSync("cargo", ["metadata", "--format-version", "1", "--locked"], {
   cwd: root,
   encoding: "utf8",
@@ -87,12 +117,12 @@ const bom = {
   metadata: {
     component: {
       type: "application",
-      name: "moddotplot-rs",
+      name: "moddotplot-interactive",
       version: applicationVersion,
       licenses: [{ license: { id: "MIT-0" } }],
       properties: [
-        { name: "moddotplot-rs:dependency-fingerprint", value: dependencyFingerprint },
-        { name: "moddotplot-rs:generator", value: "scripts/generate-sbom.mjs" },
+        { name: "moddotplot-interactive:dependency-fingerprint", value: dependencyFingerprint },
+        { name: "moddotplot-interactive:generator", value: "scripts/generate-sbom.mjs" },
       ],
     },
   },

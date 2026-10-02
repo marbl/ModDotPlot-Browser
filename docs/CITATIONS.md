@@ -4,7 +4,7 @@
 
 ## Preferred citation
 
-Users of moddotplot-rs are requested to cite the original ModDotPlot paper:
+Users of ModDotPlot Browser are requested to cite the original ModDotPlot paper:
 
 Sweeten AP, Schatz MC, Phillippy AM. ModDotPlot-rapid and interactive visualization of
 tandem repeats. *Bioinformatics*. 2024;40(8):btae493.
@@ -16,7 +16,7 @@ The structured version of this request is the `preferred-citation` entry in
 
 ## Scientific methods and reference implementations
 
-moddotplot-rs relies on or was validated against the following methods and reference
+ModDotPlot Browser relies on or was validated against the following methods and reference
 implementations. Cite the relevant works when publishing analyses that depend on those
 components.
 
@@ -77,11 +77,19 @@ The structured metadata also credits the original
 [ntHash](https://github.com/bcgsc/ntHash) source commit pinned in the test fixtures,
 and the historically consulted SMHasher/MurmurHash3 reference implementation.
 
+Similarity color schemes use [ColorBrewer 2](https://colorbrewer2.org/), created by
+Cynthia Brewer, Mark Harrower, and The Pennsylvania State University. Viridis color
+data are adapted from
+[d3-scale-chromatic 3.1.0](https://github.com/d3/d3-scale-chromatic/blob/main/src/sequential-multi/viridis.js),
+Copyright 2010-2024 Mike Bostock. The application stores these color tables locally and
+makes no runtime request to either source.
+
 ## Source-level licensing
 
 The Rust ntHash2 implementation is a clean implementation of the published method and
-constants. Its provenance and upstream license are recorded in
-[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md). moddotplot-rs itself is released
-under MIT-0. The complete locked dependency inventory and discovered license texts are
+constants. Its provenance and upstream license, along with the ColorBrewer and
+d3-scale-chromatic notices, are recorded in
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md). ModDotPlot Browser itself is
+released under MIT-0. The complete locked dependency inventory and discovered license texts are
 generated as [`SBOM.cdx.json`](../SBOM.cdx.json) and
 [`THIRD_PARTY_LICENSES.txt`](../THIRD_PARTY_LICENSES.txt).

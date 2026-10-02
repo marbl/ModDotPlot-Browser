@@ -8,7 +8,7 @@ if [ -n "$(git -C "$repository_root" status --porcelain)" ]; then
 fi
 
 scratch_parent=${TMPDIR:-/tmp}
-scratch_root=$(mktemp -d "${scratch_parent%/}/moddotplot-reproducibility.XXXXXX")
+scratch_root=$(mktemp -d "${scratch_parent%/}/moddotplot-interactive-reproducibility.XXXXXX")
 trap 'rm -rf "$scratch_root"' EXIT INT TERM
 
 for clone_name in first second; do

@@ -2,10 +2,15 @@ import { formatAxisCoordinate } from "./format";
 import type { AxisExportGeometry, AxisExportRange } from "./axes";
 import type { ExportProvenance } from "./export";
 import {
-  HEATMAP_PALETTES,
+  isPaletteId,
+  paletteDefaultColorCount,
+} from "./palettes";
+import {
+  LIGHT_PLOT_BACKGROUND,
+  discretePaletteIndex,
   heatmapPalettePosition,
   linearRangePosition,
-  type HeatmapPalette,
+  normalizeHeatmapColors,
   type HeatmapRange,
 } from "./heatmap";
 
@@ -61,7 +66,9 @@ export async function createCompositeExportScene(
   const shellBounds = shell.getBoundingClientRect();
   const plotBounds = relativeBounds(plotFrame, shellBounds);
   const legend = exportLegend(provenance);
-  const legendMargin = legend ? 120 : 0;
+  const legendMargin = legend
+    ? legend.kind.startsWith("exact-") ? 170 : 120
+    : 0;
   const scene: CompositeExportScene = {
     width: Math.max(1, Math.round(shellBounds.width + legendMargin)),
     height: Math.max(1, Math.round(shellBounds.height)),
@@ -86,12 +93,24 @@ export async function createCompositeExportScene(
 
 interface HeatmapExportLegend {
   kind: "heatmap";
-  palette: HeatmapPalette;
+  colors: readonly string[];
   range: HeatmapRange;
 }
 
 interface ExactBaseExportLegend {
   kind: "exact-bases";
+  background: string;
+}
+
+interface ExactIdentityExportLegend {
+  kind: "exact-identity";
+  match: string;
+  background: string;
+}
+
+interface ExactDirectionExportLegend {
+  kind: "exact-direction";
+  background: string;
 }
 
 interface DirectionExportLegend {
@@ -100,20 +119,60 @@ interface DirectionExportLegend {
   background: string;
 }
 
-type ExportLegend = HeatmapExportLegend | ExactBaseExportLegend | DirectionExportLegend;
+type ExportLegend =
+  | HeatmapExportLegend
+  | ExactBaseExportLegend
+  | ExactIdentityExportLegend
+  | ExactDirectionExportLegend
+  | DirectionExportLegend;
+
+interface CategoricalLegendItem {
+  label: string;
+  fill: string;
+}
+
+/** Returns the ordered colors that a similarity export legend will actually render. */
+export function heatmapLegendColors(provenance: ExportProvenance): readonly string[] | null {
+  const legend = exportLegend(provenance);
+  return legend?.kind === "heatmap" ? [...legend.colors] : null;
+}
+
+/** Returns the legend family that a composite image export will render. */
+export function compositeExportLegendKind(provenance: ExportProvenance): ExportLegend["kind"] | null {
+  return exportLegend(provenance)?.kind ?? null;
+}
+
+/** Returns exact categorical legend labels in their rendered order. */
+export function exactExportLegendLabels(provenance: ExportProvenance): readonly string[] | null {
+  const legend = exportLegend(provenance);
+  if (!legend || !legend.kind.startsWith("exact-")) return null;
+  return exactLegendItems(legend as ExactIdentityExportLegend | ExactBaseExportLegend | ExactDirectionExportLegend)
+    .map((item) => item.label);
+}
 
 function exportLegend(provenance: ExportProvenance): ExportLegend | null {
   const display = provenance.display as {
     measurement?: string;
+    exactVisualization?: string;
     colorMode?: string;
     background?: string;
     palette?: string;
+    paletteColorCount?: number;
+    paletteColors?: unknown;
     heatmapRange?: Partial<HeatmapRange>;
   } | null;
-  if (display?.measurement === "kmer" && display.colorMode !== "direction") {
-    return { kind: "exact-bases" };
+  const exact = display?.measurement === "kmer";
+  const background = display?.background === "black" ? "#050506" : LIGHT_PLOT_BACKGROUND;
+  if (exact && display?.colorMode === "direction") {
+    return { kind: "exact-direction", background };
   }
-  if (!display || !display.palette || !(display.palette in HEATMAP_PALETTES)) return null;
+  if (
+    exact
+    && display.exactVisualization === "bases"
+  ) {
+    return { kind: "exact-bases", background };
+  }
+  if (!display || !display.palette || !isPaletteId(display.palette)) return null;
   const range = display.heatmapRange;
   if (
     typeof range?.minimum !== "number"
@@ -124,10 +183,40 @@ function exportLegend(provenance: ExportProvenance): ExportLegend | null {
     return {
       kind: "direction",
       range: range as HeatmapRange,
-      background: display.background === "black" ? "#050506" : "#f8f7f2",
+      background: display.background === "black" ? "#050506" : LIGHT_PLOT_BACKGROUND,
     };
   }
-  return { kind: "heatmap", palette: display.palette as HeatmapPalette, range: range as HeatmapRange };
+  const requestedColorCount = display.paletteColorCount;
+  const colorCount = typeof requestedColorCount === "number"
+    ? requestedColorCount
+    : paletteDefaultColorCount(display.palette);
+  let colors: string[];
+  try {
+    if (
+      display.paletteColors !== undefined
+      && (!Array.isArray(display.paletteColors)
+        || !display.paletteColors.every((color): color is string => typeof color === "string"))
+    ) return null;
+    colors = normalizeHeatmapColors(
+      display.palette,
+      colorCount,
+      display.paletteColors as string[] | undefined,
+    );
+  } catch {
+    return null;
+  }
+  if (exact) {
+    return {
+      kind: "exact-identity",
+      match: discretePaletteColor(colors, 1),
+      background,
+    };
+  }
+  return {
+    kind: "heatmap",
+    colors,
+    range: range as HeatmapRange,
+  };
 }
 
 function addHeatmapLegend(
@@ -137,8 +226,16 @@ function addHeatmapLegend(
   legend: ExportLegend,
 ): void {
   const barX = contentWidth + 24;
+  if (legend.kind === "exact-identity") {
+    addExactCategoricalLegend(scene, barX, Math.max(42, plotBounds.y), "Exact k-mer", legend);
+    return;
+  }
   if (legend.kind === "exact-bases") {
-    addExactBaseLegend(scene, barX, Math.max(42, plotBounds.y));
+    addExactCategoricalLegend(scene, barX, Math.max(42, plotBounds.y), "Base", legend);
+    return;
+  }
+  if (legend.kind === "exact-direction") {
+    addExactCategoricalLegend(scene, barX, Math.max(42, plotBounds.y), "Orientation", legend);
     return;
   }
   if (legend.kind === "direction") {
@@ -160,7 +257,7 @@ function addHeatmapLegend(
       y,
       width: barWidth,
       height: barHeight / steps + 0.25,
-      fill: interpolatedPaletteColor(legend.palette, position),
+      fill: discretePaletteColor(legend.colors, position),
     });
   }
   scene.lines.push(...borderLines({ x: barX, y: barTop, width: barWidth, height: barHeight }));
@@ -238,29 +335,53 @@ function uniqueValues(values: readonly number[]): number[] {
   return values.filter((value, index) => values.findIndex((candidate) => Math.abs(candidate - value) < 0.0001) === index);
 }
 
-function addExactBaseLegend(scene: CompositeExportScene, x: number, y: number): void {
-  scene.texts.push({ x, y: y - 17, value: "Exact base", fill: "#242227", size: 11, weight: "bold" });
-  const bases = [
-    ["A", "#33ad3d"],
-    ["C", "#1f73e0"],
-    ["G", "#f5a31f"],
-    ["T", "#e03330"],
-  ] as const;
-  bases.forEach(([label, fill], index) => {
-    const top = y + index * 25;
-    scene.rects.push({ x, y: top, width: 16, height: 16, fill });
-    scene.lines.push(...borderLines({ x, y: top, width: 16, height: 16 }));
-    scene.texts.push({ x: x + 25, y: top + 8, value: label, fill: "#454149", size: 10 });
+function addExactCategoricalLegend(
+  scene: CompositeExportScene,
+  x: number,
+  y: number,
+  title: string,
+  legend: ExactIdentityExportLegend | ExactBaseExportLegend | ExactDirectionExportLegend,
+): void {
+  scene.texts.push({ x, y: y - 17, value: title, fill: "#242227", size: 11, weight: "bold" });
+  exactLegendItems(legend).forEach(({ label, fill }, index) => {
+    const top = y + index * 24;
+    scene.rects.push({ x, y: top, width: 16, height: 15, fill });
+    scene.lines.push(...borderLines({ x, y: top, width: 16, height: 15 }));
+    scene.texts.push({ x: x + 23, y: top + 7.5, value: label, fill: "#454149", size: 9 });
   });
 }
 
-function interpolatedPaletteColor(palette: HeatmapPalette, position: number): string {
-  const colors = HEATMAP_PALETTES[palette].colors;
-  const scaled = Math.max(0, Math.min(1, position)) * (colors.length - 1);
-  const lower = Math.min(colors.length - 1, Math.floor(scaled));
-  const upper = Math.min(colors.length - 1, lower + 1);
-  const fraction = scaled - lower;
-  return interpolateHex(colors[lower]!, colors[upper]!, fraction);
+function exactLegendItems(
+  legend: ExactIdentityExportLegend | ExactBaseExportLegend | ExactDirectionExportLegend,
+): readonly CategoricalLegendItem[] {
+  const states: CategoricalLegendItem[] = [
+    { label: "Mismatch / below threshold", fill: legend.background },
+  ];
+  if (legend.kind === "exact-identity") {
+    return [{ label: "Exact match", fill: legend.match }, ...states];
+  }
+  if (legend.kind === "exact-bases") {
+    return [
+      { label: "A", fill: "#33ad3d" },
+      { label: "C", fill: "#1f73e0" },
+      { label: "G", fill: "#f5a31f" },
+      { label: "T", fill: "#e03330" },
+      ...states,
+    ];
+  }
+  return [
+    { label: "Forward", fill: "#0e749f" },
+    { label: "Reverse", fill: "#cb3959" },
+    { label: "Neutral", fill: "#78737a" },
+    ...states,
+  ];
+}
+
+function discretePaletteColor(
+  colors: readonly string[],
+  position: number,
+): string {
+  return colors[discretePaletteIndex(position, colors.length)]!;
 }
 
 function interpolateHex(lowColor: string, highColor: string, fraction: number): string {
@@ -484,7 +605,7 @@ async function renderPdf(scene: CompositeExportScene): Promise<Blob> {
     encode("\nendstream"),
   ));
   objects.push(concatBytes(encode(`<< /Length ${content.length} >>\nstream\n`), content, encode("\nendstream")));
-  objects.push(encode(`<< /Producer (moddotplot-rs) /Subject (${pdfEscape(JSON.stringify(scene.provenance))}) >>`));
+  objects.push(encode(`<< /Producer (moddotplot-interactive) /Subject (${pdfEscape(JSON.stringify(scene.provenance))}) >>`));
   const assembled = assemblePdf(objects);
   const pdf = new Uint8Array(assembled.length);
   pdf.set(assembled);

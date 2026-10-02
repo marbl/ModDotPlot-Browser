@@ -5,6 +5,7 @@ import {
   formatBytes,
   formatCoordinate,
   formatInterval,
+  formatPlotWindowSize,
 } from "../src/format";
 
 describe("coordinate formatting", () => {
@@ -30,5 +31,13 @@ describe("coordinate formatting", () => {
   it("presents half-open bins as one-based inclusive ranges", () => {
     expect(formatInterval(0, 1)).toBe("1");
     expect(formatInterval(999, 2000)).toBe("1,000–2,000");
+  });
+
+  it("reports a single representative scientific matrix-cell window size", () => {
+    expect(formatPlotWindowSize(4_000_000, 1_000)).toBe("4 kb per cell");
+    expect(formatPlotWindowSize(10, 3)).toBe("≈3 bp per cell");
+    expect(formatPlotWindowSize(32_540_500, 1_000)).toBe("≈32,541 bp per cell");
+    expect(formatPlotWindowSize(32, 32)).toBe("1 bp per cell");
+    expect(formatPlotWindowSize(0, 1_000)).toBe("—");
   });
 });

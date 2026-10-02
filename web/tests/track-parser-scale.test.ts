@@ -52,6 +52,58 @@ test("cancels annotation parsing before terminal publication", async () => {
   expect(terminalSeen).toBe(false);
 });
 
+test("batch parsing reads a file once and never duplicates ambiguous aliases", async () => {
+  const file = new File([
+    [
+      "chr1\t0\t10\texact",
+      "chr2\t10\t20\tunique-alias",
+      "chrMT\t20\t30\tambiguous-alias",
+    ].join("\n"),
+  ], "batch.bed", { type: "text/plain" });
+  const originalStream = file.stream.bind(file);
+  let streamCalls = 0;
+  Object.defineProperty(file, "stream", {
+    value: () => {
+      streamCalls += 1;
+      return originalStream();
+    },
+  });
+  const completed = new Promise<Extract<TrackParserMessage, { type: "batch-complete" }>>((resolve, reject) => {
+    vi.stubGlobal("self", {
+      onmessage: null as ((event: MessageEvent<TrackParserRequest>) => void) | null,
+      postMessage(message: TrackParserMessage) {
+        if (message.type === "error") reject(new Error(message.message));
+        if (message.type === "batch-complete") resolve(message);
+      },
+    });
+  });
+  await import("../src/track-parser-worker");
+  const worker = globalThis.self as unknown as {
+    onmessage: (event: MessageEvent<TrackParserRequest>) => void;
+  };
+  worker.onmessage({
+    data: {
+      type: "parse-batch",
+      requestId: 8,
+      file,
+      candidates: [
+        { axis: "x", index: 0, name: "chr1", length: 100 },
+        { axis: "y", index: 1, name: "2", length: 100 },
+        { axis: "y", index: 2, name: "MT", length: 100 },
+        { axis: "y", index: 3, name: "M", length: 100 },
+      ],
+    },
+  } as MessageEvent<TrackParserRequest>);
+  const result = await completed;
+
+  expect(streamCalls).toBe(1);
+  expect(result.results.map(({ candidate }) => candidate.index)).toEqual([0, 1]);
+  expect(result.results.map(({ report }) => report.matchKind)).toEqual(["exact", "alias"]);
+  expect(result.results.reduce((sum, { report }) => sum + report.validRecords, 0)).toBe(2);
+  expect(result.ambiguousRecords).toBe(1);
+  expect(result.ambiguousIdentifiers).toEqual(["chrMT"]);
+});
+
 test.skipIf(!RUN_SCALE_TEST)(
   "parses and publishes a generated million-record BED within the release envelope",
   async () => {

@@ -1,4 +1,4 @@
-//! Narrow, worker-oriented WebAssembly API for moddotplot-rs.
+//! Narrow, worker-oriented WebAssembly API for moddotplot-interactive.
 
 mod cache;
 mod composition;
@@ -22,8 +22,8 @@ use session::ComparisonContext;
 #[cfg(test)]
 use moddotplot_core::hash::HashAlgorithm;
 use moddotplot_core::{
-    CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE, FastaParser,
-    FrozenAxis, KmerTileRequest, MatrixTile, PackedSequence,
+    CompositionIndex, CompositionIndexBuilder, DEFAULT_COMPOSITION_BLOCK_SIZE, FastaError,
+    FastaParser, FrozenAxis, KmerTileGeometry, KmerTileRequest, MatrixTile, PackedSequence,
     ScientificConfig as CoreScientificConfig, ScientificConfigIdentity, TileBuildError,
     TileRequest, build_axis_range, compute_frozen_tile, compute_kmer_tile,
 };
@@ -56,6 +56,21 @@ impl BrowserScientificConfig {
     #[wasm_bindgen(getter)]
     pub fn digest(&self) -> String {
         format!("{:016x}", self.inner.digest())
+    }
+
+    /// Canonical full scientific configuration identity encoded as lowercase hex.
+    ///
+    /// The shorter digest is useful provenance, while this full field encoding is
+    /// the compatibility key used to validate persisted browser artifacts.
+    #[wasm_bindgen(getter)]
+    pub fn identity(&self) -> String {
+        let bytes = self.inner.identity();
+        let mut encoded = String::with_capacity(bytes.as_bytes().len() * 2);
+        for byte in bytes.as_bytes() {
+            use std::fmt::Write as _;
+            write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        encoded
     }
 
     /// Scientific-contract schema version.
@@ -137,7 +152,9 @@ struct SequenceMetadata {
 #[wasm_bindgen]
 pub struct ComputeSession {
     parser: Option<FastaParser>,
+    fasta_sequence_checkpoint: Option<usize>,
     sequences: Vec<PackedSequence>,
+    sequence_heap_bytes: usize,
     comparison: Option<ComparisonContext>,
     prepared_levels: BTreeMap<usize, PreparedComparison>,
     preparation: Option<ComparisonPreparation>,
@@ -158,7 +175,9 @@ impl ComputeSession {
         console_error_panic_hook::set_once();
         Self {
             parser: None,
+            fasta_sequence_checkpoint: None,
             sequences: Vec::new(),
+            sequence_heap_bytes: 0,
             comparison: None,
             prepared_levels: BTreeMap::new(),
             preparation: None,
@@ -178,11 +197,22 @@ impl ComputeSession {
     ///
     /// Returns an error if another FASTA stream is already active.
     pub fn begin_fasta(&mut self) -> Result<(), JsError> {
-        if self.parser.is_some() {
+        if self.parser.is_some() || self.fasta_sequence_checkpoint.is_some() {
             return Err(JsError::new("a FASTA stream is already active"));
         }
+        self.fasta_sequence_checkpoint = Some(self.sequences.len());
         self.parser = Some(FastaParser::new());
         Ok(())
+    }
+
+    /// Abandons the active FASTA stream without changing committed sequences.
+    ///
+    /// Returns `true` when an in-progress parser was discarded and `false` when no
+    /// stream was active. A new stream may begin immediately after this call.
+    pub fn abort_fasta(&mut self) -> bool {
+        let parser_was_active = self.parser.take().is_some();
+        let transaction_was_active = self.rollback_fasta_transaction();
+        parser_was_active || transaction_was_active
     }
 
     /// Pushes one raw FASTA byte chunk and returns metadata for records completed by it.
@@ -192,12 +222,11 @@ impl ComputeSession {
     /// Returns an error if no stream is active, the FASTA is malformed, or JavaScript
     /// metadata serialization fails.
     pub fn push_fasta_chunk(&mut self, chunk: &[u8]) -> Result<JsValue, JsError> {
-        let parser = self
-            .parser
-            .as_mut()
-            .ok_or_else(|| JsError::new("begin_fasta must be called first"))?;
-        let completed = parser
-            .push_chunk(chunk)
+        if self.parser.is_none() {
+            return Err(JsError::new("begin_fasta must be called first"));
+        }
+        let completed = self
+            .parse_fasta_chunk(chunk)
             .map_err(|error| JsError::new(&error.to_string()))?;
         self.append_records(completed)
     }
@@ -209,14 +238,83 @@ impl ComputeSession {
     /// Returns an error if no stream is active, the final FASTA record is invalid, or
     /// JavaScript metadata serialization fails.
     pub fn finish_fasta(&mut self) -> Result<JsValue, JsError> {
+        let completed = match self.finish_fasta_records() {
+            Ok(completed) => completed,
+            Err(error) => {
+                self.rollback_fasta_transaction();
+                return Err(error);
+            }
+        };
+        match self.append_records(completed) {
+            Ok(metadata) => {
+                self.fasta_sequence_checkpoint = None;
+                Ok(metadata)
+            }
+            Err(error) => {
+                self.rollback_fasta_transaction();
+                Err(error)
+            }
+        }
+    }
+
+    /// Finishes one lazily loaded indexed record and commits it only when it exactly
+    /// matches the name and length declared by the FAI index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error and rolls the whole FASTA transaction back when parsing,
+    /// serialization, record count, name, or length validation fails.
+    pub fn finish_indexed_fasta(
+        &mut self,
+        expected_name: &str,
+        expected_length: u64,
+    ) -> Result<JsValue, JsError> {
+        let checkpoint = self
+            .fasta_sequence_checkpoint
+            .ok_or_else(|| JsError::new("begin_fasta must be called first"))?;
+        let completed = match self.finish_fasta_records() {
+            Ok(completed) => completed,
+            Err(error) => {
+                self.rollback_fasta_transaction();
+                return Err(error);
+            }
+        };
+        let metadata = match self.append_records(completed) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.rollback_fasta_transaction();
+                return Err(error);
+            }
+        };
+        let matches_index = self.sequences.len() == checkpoint.saturating_add(1)
+            && self.sequences.get(checkpoint).is_some_and(|sequence| {
+                sequence.name() == expected_name && sequence.len() == expected_length
+            });
+        if !matches_index {
+            self.rollback_fasta_transaction();
+            return Err(JsError::new(
+                "Indexed FASTA record does not match its FAI name and length.",
+            ));
+        }
+        self.fasta_sequence_checkpoint = None;
+        Ok(metadata)
+    }
+
+    fn parse_fasta_chunk(&mut self, chunk: &[u8]) -> Result<Vec<PackedSequence>, FastaError> {
+        self.parser
+            .as_mut()
+            .expect("begin_fasta establishes a parser before internal ingestion")
+            .push_chunk(chunk)
+    }
+
+    fn finish_fasta_records(&mut self) -> Result<Vec<PackedSequence>, JsError> {
         let parser = self
             .parser
             .take()
             .ok_or_else(|| JsError::new("no FASTA stream is active"))?;
-        let completed = parser
+        parser
             .finish()
-            .map_err(|error| JsError::new(&error.to_string()))?;
-        self.append_records(completed)
+            .map_err(|error| JsError::new(&error.to_string()))
     }
 
     /// Returns metadata for every loaded record.
@@ -234,7 +332,8 @@ impl ComputeSession {
     /// Allocator metadata, temporary peak allocations, JavaScript buffers, and GPU
     /// textures are intentionally excluded.
     pub fn estimated_memory_bytes(&self) -> usize {
-        let mut bytes = estimated_sequence_bytes(&self.sequences, self.sequences.capacity());
+        let mut bytes =
+            estimated_sequence_bytes(self.sequence_heap_bytes, self.sequences.capacity());
         for prepared in self.prepared_levels.values() {
             bytes = bytes
                 .saturating_add(std::mem::size_of::<PreparedComparison>())
@@ -329,7 +428,7 @@ impl ComputeSession {
         let retained_bytes = if same_comparison {
             self.estimated_memory_bytes()
         } else {
-            estimated_sequence_bytes(&self.sequences, self.sequences.capacity())
+            estimated_sequence_bytes(self.sequence_heap_bytes, self.sequences.capacity())
         };
         validate_prepared_axis_admission(resolution, config, axis_count, retained_bytes)
             .map_err(JsError::new)?;
@@ -524,7 +623,6 @@ impl ComputeSession {
                     y,
                     x_index: state.x_index,
                     y_index: state.y_index,
-                    domain_length: state.domain_length,
                     config: state.config,
                 },
             );
@@ -614,8 +712,9 @@ impl ComputeSession {
     ///
     /// # Errors
     ///
-    /// Returns an error for an unprepared comparison, invalid coordinates, or invalid
-    /// b-bit/register parameters.
+    /// Returns an error when no sequence pair is selected, the selected k-mer length
+    /// disagrees with the configuration, coordinates are invalid, or b-bit/register
+    /// parameters are invalid.
     pub fn compute_zoom_tile_scientific(
         &mut self,
         resolution: usize,
@@ -628,17 +727,17 @@ impl ComputeSession {
         let config = config.inner;
         validate_tile_request(resolution, x_start, y_start, width, height)?;
 
-        let prepared = self
-            .prepared_levels
-            .values()
-            .find(|prepared| {
-                prepared.x_index == self.comparison.map_or(usize::MAX, |pair| pair.x_index)
-                    && prepared.y_index == self.comparison.map_or(usize::MAX, |pair| pair.y_index)
-            })
-            .ok_or_else(|| JsError::new("prepare_comparison must be called first"))?;
-        let x_index = prepared.x_index;
-        let y_index = prepared.y_index;
-        let domain_length = prepared.domain_length;
+        let comparison = self
+            .comparison
+            .ok_or_else(|| JsError::new("a comparison must be selected first"))?;
+        if comparison.k != config.k() {
+            return Err(JsError::new(
+                "selected comparison k-mer length does not match the scientific configuration",
+            ));
+        }
+        let x_index = comparison.x_index;
+        let y_index = comparison.y_index;
+        let domain_length = comparison.domain_length;
         let x_count = width.min(resolution - x_start);
         let y_count = height.min(resolution - y_start);
         let x_key = AxisCacheKey {
@@ -692,6 +791,7 @@ impl ComputeSession {
         y_start: u64,
         width: usize,
         height: usize,
+        anchors: bool,
     ) -> Result<WasmTile, JsError> {
         let comparison = self
             .comparison
@@ -724,6 +824,11 @@ impl ComputeSession {
                 width,
                 height,
                 k: comparison.k,
+                geometry: if anchors {
+                    KmerTileGeometry::Anchors
+                } else {
+                    KmerTileGeometry::Footprints
+                },
             },
         )
         .map_err(|error| JsError::new(&error.to_string()))?;
@@ -825,26 +930,53 @@ impl ComputeSession {
     /// Releases all sequence and comparison memory.
     pub fn clear(&mut self) {
         self.parser = None;
+        self.fasta_sequence_checkpoint = None;
         self.comparison = None;
         self.prepared_levels.clear();
         self.preparation = None;
         self.clear_pending_preparation_tiles();
         self.sequences.clear();
+        self.sequence_heap_bytes = 0;
         self.clear_axis_cache();
         self.composition.clear();
     }
 
     fn append_records(&mut self, records: Vec<PackedSequence>) -> Result<JsValue, JsError> {
-        let first = self.sequences.len();
-        self.sequences.extend(records);
+        let previous_sequence_heap_bytes = self.sequence_heap_bytes;
+        let first = self.extend_sequence_storage(records);
         if self.estimated_memory_bytes() > MAX_WASM_SESSION_BYTES {
             self.sequences.truncate(first);
+            self.sequence_heap_bytes = previous_sequence_heap_bytes;
             return Err(JsError::new(
                 "Loaded sequences exceed the 3 GiB Wasm session budget.",
             ));
         }
         let metadata = self.metadata_for_range(first, self.sequences.len());
         serde_wasm_bindgen::to_value(&metadata).map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    fn extend_sequence_storage(&mut self, records: Vec<PackedSequence>) -> usize {
+        let first = self.sequences.len();
+        let added_heap_bytes = records.iter().fold(0_usize, |total, sequence| {
+            total.saturating_add(sequence.estimated_heap_bytes())
+        });
+        self.sequence_heap_bytes = self.sequence_heap_bytes.saturating_add(added_heap_bytes);
+        self.sequences.extend(records);
+        first
+    }
+
+    fn rollback_fasta_transaction(&mut self) -> bool {
+        let Some(checkpoint) = self.fasta_sequence_checkpoint.take() else {
+            return false;
+        };
+        let removed_heap_bytes = self.sequences[checkpoint..]
+            .iter()
+            .fold(0_usize, |total, sequence| {
+                total.saturating_add(sequence.estimated_heap_bytes())
+            });
+        self.sequences.truncate(checkpoint);
+        self.sequence_heap_bytes = self.sequence_heap_bytes.saturating_sub(removed_heap_bytes);
+        true
     }
 
     fn metadata_for_range(&self, start: usize, end: usize) -> Vec<SequenceMetadata> {
@@ -1124,11 +1256,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn aborting_partial_fasta_preserves_committed_records_and_allows_restart() {
+        let committed = PackedSequence::from_ascii("committed", b"ACGT");
+        let committed_identity = committed.identity();
+        let mut session = ComputeSession::new();
+        session.extend_sequence_storage(vec![committed]);
+
+        session.begin_fasta().unwrap();
+        let provisional = session
+            .parse_fasta_chunk(b">cancelled\nACGTAC\n>unfinished\nTG")
+            .unwrap();
+        assert_eq!(provisional.len(), 1);
+        session.extend_sequence_storage(provisional);
+        assert_eq!(session.sequences.len(), 2);
+        assert!(session.abort_fasta());
+        assert!(!session.abort_fasta());
+        assert_eq!(session.sequences.len(), 1);
+        assert_eq!(session.sequences[0].name(), "committed");
+        assert_eq!(session.sequences[0].identity(), committed_identity);
+
+        session.begin_fasta().unwrap();
+        assert!(
+            session
+                .parse_fasta_chunk(b">replacement\nTGCA\n")
+                .unwrap()
+                .is_empty()
+        );
+        let completed = session.finish_fasta_records().unwrap();
+        session.extend_sequence_storage(completed);
+        assert_eq!(session.sequences.len(), 2);
+        assert_eq!(session.sequences[1].name(), "replacement");
+        assert_eq!(session.sequences[1].len(), 4);
+    }
+
+    #[test]
+    fn aborting_invalid_fasta_preserves_committed_records_and_allows_restart() {
+        let committed = PackedSequence::from_ascii("committed", b"ACGT");
+        let committed_identity = committed.identity();
+        let mut session = ComputeSession::new();
+        session.extend_sequence_storage(vec![committed]);
+
+        session.begin_fasta().unwrap();
+        assert!(session.parse_fasta_chunk(b"missing-header\n").is_err());
+        assert!(session.abort_fasta());
+        assert_eq!(session.sequences.len(), 1);
+        assert_eq!(session.sequences[0].identity(), committed_identity);
+
+        session.begin_fasta().unwrap();
+        assert!(
+            session
+                .parse_fasta_chunk(b">valid-after-error\nAAAA\n")
+                .unwrap()
+                .is_empty()
+        );
+        let completed = session.finish_fasta_records().unwrap();
+        session.extend_sequence_storage(completed);
+        assert_eq!(session.sequences.len(), 2);
+        assert_eq!(session.sequences[1].name(), "valid-after-error");
+        assert_eq!(session.sequences[1].len(), 4);
+    }
+
+    #[test]
     fn preview_and_detailed_overviews_remain_independent_and_bounded() {
         let mut session = ComputeSession::new();
-        session
-            .sequences
-            .push(PackedSequence::from_ascii("sequence", b"ACGTACGTACGTACGT"));
+        session.extend_sequence_storage(vec![PackedSequence::from_ascii(
+            "sequence",
+            b"ACGTACGTACGTACGT",
+        )]);
 
         let preview = BrowserScientificConfig {
             inner: CoreScientificConfig::production(3, 2, 4, false).unwrap(),
@@ -1191,14 +1385,36 @@ mod tests {
     }
 
     #[test]
+    fn demand_zoom_can_start_from_a_selected_pair_without_an_overview_axis() {
+        let mut session = ComputeSession::new();
+        session.extend_sequence_storage(vec![PackedSequence::from_ascii(
+            "sequence",
+            b"ACGTACGTACGTACGT",
+        )]);
+        let config = BrowserScientificConfig {
+            inner: CoreScientificConfig::production(3, 4, 4, false).unwrap(),
+        };
+
+        session
+            .select_exact_comparison(0, 0, 3)
+            .expect("the sequence pair is selected without preparing overview signatures");
+        assert!(session.prepared_levels.is_empty());
+        let mut tile = session
+            .compute_zoom_tile_scientific(8, 0, 0, 8, 8, &config)
+            .expect("a demand zoom tile can build only its requested axis ranges");
+        let identity = tile.take_identity();
+        assert_eq!(identity.len(), 64);
+        assert_eq!(identity[0], 10_000);
+        assert_eq!(identity[9], 10_000);
+    }
+
+    #[test]
     fn pairwise_preparation_interleaves_axes_and_publishes_compatible_blocks() {
         let mut session = ComputeSession::new();
-        session
-            .sequences
-            .push(PackedSequence::from_ascii("x", b"ACGTACGTACGTACGTACGTACGT"));
-        session
-            .sequences
-            .push(PackedSequence::from_ascii("y", b"ACGTACGTTCGTACGTACGTACGT"));
+        session.extend_sequence_storage(vec![
+            PackedSequence::from_ascii("x", b"ACGTACGTACGTACGTACGTACGT"),
+            PackedSequence::from_ascii("y", b"ACGTACGTTCGTACGTACGTACGT"),
+        ]);
         let preview = BrowserScientificConfig {
             inner: CoreScientificConfig::production(3, 4, 4, false).unwrap(),
         };
@@ -1230,12 +1446,10 @@ mod tests {
     #[test]
     fn progressive_preparation_filter_skips_unselected_matrix_blocks() {
         let mut session = ComputeSession::new();
-        session
-            .sequences
-            .push(PackedSequence::from_ascii("x", b"ACGTACGTACGTACGTACGTACGT"));
-        session
-            .sequences
-            .push(PackedSequence::from_ascii("y", b"ACGTACGTTCGTACGTACGTACGT"));
+        session.extend_sequence_storage(vec![
+            PackedSequence::from_ascii("x", b"ACGTACGTACGTACGTACGTACGT"),
+            PackedSequence::from_ascii("y", b"ACGTACGTTCGTACGTACGTACGT"),
+        ]);
         let config = BrowserScientificConfig {
             inner: CoreScientificConfig::production(3, 4, 4, false).unwrap(),
         };
@@ -1258,9 +1472,7 @@ mod tests {
     fn gc_index_builds_incrementally_and_is_reused() {
         let sequence = b"ACGT".repeat(600);
         let mut session = ComputeSession::new();
-        session
-            .sequences
-            .push(PackedSequence::from_ascii("gc", &sequence));
+        session.extend_sequence_storage(vec![PackedSequence::from_ascii("gc", &sequence)]);
 
         assert!(!session.begin_composition_index(0).unwrap());
         assert!(session.prepare_composition_index_chunk(0, 1).unwrap() < 1.0);
@@ -1284,11 +1496,40 @@ mod tests {
     }
 
     #[test]
+    fn retained_sequence_bytes_are_accounted_incrementally_and_cleared() {
+        let first = PackedSequence::from_ascii("first", &vec![b'A'; 4_097]);
+        let first_heap_bytes = first.estimated_heap_bytes();
+        let second = PackedSequence::with_description("second", "metadata");
+        let second_heap_bytes = second.estimated_heap_bytes();
+        let mut session = ComputeSession::new();
+
+        assert_eq!(session.extend_sequence_storage(vec![first]), 0);
+        assert_eq!(session.sequence_heap_bytes, first_heap_bytes);
+        assert_eq!(session.extend_sequence_storage(vec![second]), 1);
+        assert_eq!(
+            session.sequence_heap_bytes,
+            first_heap_bytes.saturating_add(second_heap_bytes)
+        );
+        assert_eq!(
+            session.estimated_memory_bytes(),
+            estimated_sequence_bytes(session.sequence_heap_bytes, session.sequences.capacity())
+        );
+
+        session.clear();
+        assert_eq!(session.sequence_heap_bytes, 0);
+        assert_eq!(
+            session.estimated_memory_bytes(),
+            estimated_sequence_bytes(0, session.sequences.capacity())
+        );
+    }
+
+    #[test]
     fn predicted_axis_memory_bounds_observed_retained_bytes() {
         let mut session = ComputeSession::new();
-        session
-            .sequences
-            .push(PackedSequence::from_ascii("memory", &vec![b'A'; 100_000]));
+        session.extend_sequence_storage(vec![PackedSequence::from_ascii(
+            "memory",
+            &vec![b'A'; 100_000],
+        )]);
         let config = BrowserScientificConfig {
             inner: CoreScientificConfig::production(21, 1_024, 10, false).unwrap(),
         };
@@ -1309,10 +1550,10 @@ mod tests {
     #[test]
     fn zoom_cache_uses_exact_scientific_identity_and_rejects_key_drift() {
         let mut session = ComputeSession::new();
-        session.sequences.push(PackedSequence::from_ascii(
+        session.extend_sequence_storage(vec![PackedSequence::from_ascii(
             "cache",
             b"ACGTACGTACGTACGTACGTACGTACGTACGT",
-        ));
+        )]);
         let base = CoreScientificConfig::new(
             3,
             HashAlgorithm::NtHash2,

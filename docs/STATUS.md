@@ -8,19 +8,40 @@ by the named evidence; it does not imply broad research validation.
 ## Working and verified
 
 * Transactional, cancellable multi-file FASTA loading with generation filtering,
-  annotation-file preflight rejection, and modal parse-error reporting.
+  annotation-file preflight rejection, modal parse-error reporting, and explicit
+  **Reading and validating** percentage progress for eager input.
+* Optional indexed input for plain FASTA plus FAI and BGZF FASTA plus FAI/GZI. Strict
+  index parsing publishes record metadata first, then bounded streams load selected
+  records into the same validated Wasm representation on demand and reuse them across
+  later comparisons. Ordinary gzip and incomplete companion sets retain eager loading;
+  orphan indexes are rejected.
 * Owned dataset, comparison, and feature jobs with immutable IDs, abort signals,
   job-local configuration/cache state, randomized stale-publication tests, and
   serialized Wasm mutation.
 * `U/u` to `T/t` normalization tested through direct packing, streaming FASTA,
   canonical k-mers, and the exact-containment oracle.
-* Independent X/Y sequence selection and initially exact short-sequence dispatch.
+* Single-selector Self mode, distinct-X/Y Pairwise mode, and bounded Grid mode for
+  multi-record sessions. Self is selected initially when multiple records are loaded;
+  Pairwise starts with two different records and automatically moves the opposite axis
+  when a selection would otherwise duplicate it. Short sequences dispatch directly to exact
+  tiles. Grid accepts
+  two through six distinct records, schedules only the self and unique pairwise 512 by
+  512 overviews serially, and renders reciprocal cells by transposition with the
+  displayed X/Y order preserved. Self plots run from bottom left to top right. Pointer
+  and keyboard reorder controls on either axis rearrange the shared record order
+  without recomputation. A comparison opened from a grid cell retains a return path to
+  the existing grid overview; leaving that return flow releases its completed data and
+  canvases.
 * Immutable validated `ScientificConfig` with exact identity through core axes and Wasm
   caches, plus a stable external digest through worker, renderer tile keys, and UI
   provenance.
 * ntHash2-only production hashing; obsolete candidate implementations removed from the
   release tree after tagging `v0.1.0`.
-* Hash-independent exact canonical k-mer containment oracle.
+* Hash-independent exact canonical k-mer containment oracle. Terminal exact display
+  defaults to categorical Bases coloring and always paints complete k-mer footprints;
+  Identity remains available as the alternate exact visualization. Cells without
+  exact k-mer evidence use the selected background rather than a separate gray state,
+  and the obsolete bottom-left state key is omitted while the **Base** legend remains.
 * Verified-winner OPH estimator, HLL p10, 256-register preview, and 1,024-register
   default detail selected by the multi-configuration validation sweep.
 * Pooled direction evidence and support-dependent chroma without identity attenuation.
@@ -36,14 +57,18 @@ by the named evidence; it does not imply broad research validation.
   are consolidated under the non-default Rust `validation` module. The browser
   protocol and ordinary Wasm build contain no sparse-correction option.
 * Frozen production axes, 3 GiB session admission, prepared-axis and zoom-cache
-  budgets, logarithmic recency tracking, and coordinated renderer eviction.
+  budgets, logarithmic recency tracking, and coordinated renderer eviction. Retained
+  sequence bytes are updated incrementally across append, rollback, and clear, including
+  reserved capacity that remains after conditional compaction.
 * A 4 GiB cross-layer plan accounts separately for Wasm, JavaScript tiles, GPU
   textures, annotations, computed tracks, and transient publication. It reports
   admission, eviction, downgrade, sharding, or rejection decisions and fallbacks.
 * Public sketch and exact tile builders validate ranges, dimensions, and compatibility
   before output allocation and return typed errors through the Wasm boundary.
 * Consuming Wasm tile channels with no redundant JavaScript `.slice()`.
-* WebGL2 context restoration and keyboard pan/zoom/reset.
+* WebGL2 context restoration and keyboard pan/zoom/reset, with every interactive zoom
+  path clamped to a minimum 100-bp visible interval per axis for records at least that
+  long.
 * Native-save-picker export, with browser-download fallback, of nonzero detailed
   current-view scientific values as BEDPE by default or compact nine-column CSV, plus complete-composition
   PNG/SVG/PDF. SVG/PDF retain vector axes, labels, tracks, and an outside heatmap
@@ -51,27 +76,63 @@ by the named evidence; it does not imply broad research validation.
   provenance. A blocking progress dialog covers preparation through write completion,
   complete detailed/exact cache coverage bypasses worker requests, and image pixels are
   rendered offscreen without resizing the visible canvas.
+* A gated launch screen with separate FASTA and annotation drop targets. **Explore**
+  becomes available after sequence input is viewable and explicitly starts the plot
+  workspace. A bundled *Arabidopsis thaliana* example can launch from one button using
+  an approximately 256 KB precomputed, refined 1,000-by-1,000 Chr1 self overview.
+  Its raw FASTA is exposed only as a same-origin, strictly validated HTTP byte-range
+  source for uncached interactions, and its centromere GFF3 retrieval is deferred into
+  a separate post-workspace load that does not gate the initial plot.
+* A deterministic precomputed-overview schema records source filenames, byte lengths,
+  SHA-256 values, literal FAI metadata, the complete canonical scientific configuration
+  identity, and full tile provenance. Startup also verifies the compressed artifact
+  against its pinned SHA-256 and the separately served FAI against the embedded bytes.
+  Decoding rejects malformed, incomplete,
+  overlapping, or configuration-incompatible artifacts rather than treating them as
+  current scientific results.
+* Similarity palettes ordered as dedicated Spectral and Viridis groups followed by the
+  remaining ColorBrewer sequential, diverging, and qualitative families, with
+  scheme-specific discrete color-count bounds, reversible direction, and color-wheel
+  plus hexadecimal editing of individual classes. Reversed Spectral on white is the
+  default; plots,
+  retained grids, and image exports share the resolved ordered colors.
+* Responsive workspace controls keep the Clear action contained within the sidebar at
+  desktop and stacked breakpoints. Advanced options expose Plot resolution together
+  with a live Plot window size derived from the shared genomic domain and current
+  scientific zoom level, rounded to one nearest-whole-base value per cell.
+* Non-interactive cursor guides follow the pointer across Self and Pairwise plots as
+  dotted horizontal and vertical lines by default. Advanced options can hide them,
+  use crossing diagonals, or choose dotted, dashed, or solid strokes without changing
+  calculation or export data.
+* Plot hover readouts include the selected sequence name before each X and Y genomic
+  interval, so self comparisons repeat one name and pairwise comparisons explicitly
+  identify their different axes.
 * Stackable GC% and CpG observed/expected axis tracks with incremental composition
   indexing, one unsmoothed bar per sampled display column or row, overscanned pan
   caches, immediate stale-track blanking, and value mouseovers.
 * Worker-streamed plain-text, gzip, and BGZF FASTA and BED3–12/GFF3/GTF annotation
-  import with bounded parallel BGZF decompression, bulk packed-base ingestion,
-  sparse invalid-base storage, compact completed-record storage, and validation reporting,
+  import with bounded parallel BGZF decompression, a reusable bounded sequence buffer,
+  bulk packed-base and eight-base stable-identity updates, sparse invalid-base storage,
+  conditional completed-record compaction, and validation reporting,
   conservative confirmed chromosome aliases, sequence-aware automatic axis assignment,
-  sequence-associated axis eligibility, UCSC colors, category-colored grouped gene
+  one logical imported row per track name with sequence-partitioned features and
+  automatic eligibility on every matching chromosome, UCSC colors, category-colored grouped gene
   models with distinct CDS geometry, one-to-ten-row deterministic lane packing,
   synchronous pan, feature mouseovers, midpoint-triggered direct strip reordering,
   pointer-following drag previews, and first-release drag-away disabling.
   Annotation files are admitted up to 512 MiB and one million matching records; the
-  generated million-record parser/publication gate passes on the release host.
+  generated million-record parser/publication gate passes on the release host. Landing
+  annotations are deferred until the first interactive sequence tile is published.
 * Actionable compute-worker recovery that rebuilds the engine and reloads the user's
   retained browser `File` objects after a worker crash.
 * Atomic clean build, pinned toolchains and CI actions, CycloneDX SBOM, dependency
   license bundle, and crate-local MIT-0 files.
 * Real-Wasm tests in Chromium, Firefox, WebKit, and installed Google Chrome for
   rapid-load cancellation, clear, exact entry, privacy, context loss, keyboard
-  navigation, progressive detail paint, pairwise operation, worker recovery, annotation
-  importing, sequence association, UCSC colors, track reordering, disabling, and
+  navigation, progressive detail paint, self/pairwise/grid operation, the six-record
+  grid bound, reciprocal transpose and axis-order correctness, pointer and keyboard
+  grid reordering, realistic grid sketching, worker recovery, annotation importing,
+  sequence association, UCSC colors, track reordering, disabling, and
   provenance-bearing numeric/image downloads.
 
 The automated counts are recorded from each clean release validation rather than

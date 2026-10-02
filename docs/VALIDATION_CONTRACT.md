@@ -82,6 +82,12 @@ Before behavior-preserving refactors, retain deterministic fixtures for:
 3. Configuration serialization and digests.
 4. Renderer transfer-function and direction-confidence behavior.
 5. Selective-composite quality choice and output.
+6. Exact full-footprint geometry, repeat-rich numerical goldens, full-versus-split
+   tile equivalence, and even-k ambiguous-orientation behavior. Internal anchor
+   coverage may remain as a core regression even though anchors are not a browser
+   display option.
+7. Exact integer-texture rendering at fractional CSS widths and device pixel ratios 1
+   and 2 without interpolated colors.
 
 Exact byte equality is required for integer numeric channels on the pinned reference
 toolchain. Cross-browser screenshots use a declared perceptual tolerance rather than
@@ -110,7 +116,17 @@ application estimates are not described as complete browser-process or GPU peaks
 The completed sequence is v0.2.1 evidence hardening, v0.3.0 core-contract refactoring,
 v0.4.0 owned browser jobs and operational scaling, v0.5.0 display-aware scheduling plus
 scientific validation and initial export, and v0.6.0 production cleanup plus export
-usability. v0.2.1 was manually accepted; later stages were authorized to proceed without
+usability. v0.7.0 added bounded multi-sequence plot modes, v0.8.0 added staged launch,
+grid-detail return navigation, and discrete ColorBrewer presentation controls, and
+v0.8.1 added palette direction, leading Spectral/Viridis groups, and editable classes.
+v0.8.2 added responsive control-header containment and a live genomic window-size
+translation for the current scientific plot resolution. v0.8.3 made that translation
+a single rounded value, corrected reciprocal grid orientation and X/Y ordering, moved
+self plots to the bottom-left-to-top-right diagonal, and added shared-axis grid
+reordering by pointer or keyboard. v0.8.4 placed every grid cell on the genomic domain
+of the longest selected sequence so shorter self and pairwise plots retain their
+proportional extents and remain aligned across rows and columns.
+v0.2.1 was manually accepted; later stages were authorized to proceed without
 pausing, provided every source and static-web checkpoint was retained for ordered
 testing. A v1.0.0 release remains explicitly outside this sequence; additional usability
 work will precede any stable-release decision.

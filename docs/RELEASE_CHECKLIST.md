@@ -8,7 +8,8 @@ This checklist applies to the next functional-preview release. Do not use
 ## Source and identity
 
 - [x] Baseline release is committed and annotated as `v0.1.0`.
-- [x] Release name is `moddotplot-rs`; license is MIT-0 in the root and packaged crates.
+- [x] Product name is **ModDotPlot Browser**; technical packages and archives retain
+  `moddotplot-interactive`; license is MIT-0 in the root and packaged crates.
 - [x] Canonical authorship is in [PROVENANCE.md](PROVENANCE.md); generated prose uses
   the standard file note.
 - [x] `CITATION.cff` requests the original ModDotPlot citation and credits method and
@@ -74,14 +75,16 @@ npm --prefix web run verify
 
 - [x] Rust, Node/npm, dependencies, and CI actions are pinned.
 - [x] One `npm --prefix web run build` command generates and tests the static release.
-- [x] `SBOM.cdx.json` and `THIRD_PARTY_LICENSES.txt` are generated from locked packages.
-- [x] Generate separate source and binary archives in a local packaging preflight;
+- [x] `SBOM.cdx.json` and `THIRD_PARTY_LICENSES.txt` are generated from locked packages
+  plus checked-in license assets for embedded third-party data such as ColorBrewer and
+  d3-scale-chromatic Viridis.
+- [ ] Generate separate source and binary archives in a local packaging preflight;
   regenerate them from the annotated release commit as the final step.
-- [x] Attach SHA-256 checksums and build provenance: commit, dirty-state check, OS,
+- [ ] Attach SHA-256 checksums and build provenance: commit, dirty-state check, OS,
   architecture, Rust, wasm-pack, wasm-bindgen/wasm-opt, Node, and npm versions.
-- [x] Rebuild twice from clean checkouts; confirm byte identity or document the exact
+- [ ] Rebuild twice from clean checkouts; confirm byte identity or document the exact
   nondeterministic fields.
-- [x] Verify the binary archive contains `LICENSE`, notices, license bundle, SBOM,
+- [ ] Verify the binary archive contains `LICENSE`, notices, license bundle, SBOM,
   citation metadata, user guide, and deployable static assets.
 
 ## Privacy and local-static-artifact gate
@@ -99,8 +102,8 @@ npm --prefix web run verify
 
 - [x] Update versions consistently in Cargo, npm, CFF, provenance, UI, changelog, and
   release notes.
-- [x] Commit generated SBOM/licenses and release evidence.
-- [x] Create and verify an annotated tag from a clean tree as the final source action.
-- [x] Produce source/binary archives, checksums, provenance, release notes, and known
+- [ ] Commit generated SBOM/licenses and release evidence.
+- [ ] Create and verify an annotated tag from a clean tree as the final source action.
+- [ ] Produce source/binary archives, checksums, provenance, release notes, and known
   limitations under the local ignored `release-artifacts/` directory.
 - [x] Do not push, publish, deploy, or upload any release material.

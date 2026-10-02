@@ -1,12 +1,12 @@
 cff-version: 1.2.0
 message: >-
-  If you use moddotplot-rs, please cite the original ModDotPlot paper listed as the
+  If you use ModDotPlot Browser, please cite the original ModDotPlot paper listed as the
   preferred citation and credit the relevant method papers listed in references.
-title: "moddotplot-rs"
+title: "ModDotPlot Browser"
 type: software
-version: 0.6.2
-date-released: 2026-08-30
-repository-code: "https://github.com/marbl/moddotplot-rs"
+version: 0.9.1
+date-released: 2026-09-30
+repository-code: "https://github.com/marbl/moddotplot-interactive"
 license: MIT-0
 abstract: >-
   Browser-native genomic dotplot software written by ChatGPT 5.6 Sol under the
@@ -211,3 +211,15 @@ references:
       - family-names: "Appleby"
         given-names: "Austin"
     url: "https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp"
+
+  - type: software
+    title: "ColorBrewer 2"
+    version: "2.0"
+    authors:
+      - family-names: "Brewer"
+        given-names: "Cynthia"
+      - family-names: "Harrower"
+        given-names: "Mark"
+      - name: "The Pennsylvania State University"
+    repository-code: "https://github.com/axismaps/colorbrewer"
+    url: "https://colorbrewer2.org/"

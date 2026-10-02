@@ -43,6 +43,26 @@ pub struct CanonicalKmer {
 const SPARSE_BIT_BLOCK_SHIFT: usize = 12;
 const SPARSE_BIT_BLOCK_BITS: usize = 1 << SPARSE_BIT_BLOCK_SHIFT;
 const SPARSE_BIT_WORDS: usize = SPARSE_BIT_BLOCK_BITS / u64::BITS as usize;
+const STORAGE_COMPACTION_MIN_UNUSED_BYTES: usize = 1024 * 1024;
+const STORAGE_COMPACTION_UNUSED_RATIO_DENOMINATOR: usize = 4;
+
+fn should_compact_capacity<T>(len: usize, capacity: usize) -> bool {
+    let unused = capacity.saturating_sub(len);
+    unused.saturating_mul(std::mem::size_of::<T>()) >= STORAGE_COMPACTION_MIN_UNUSED_BYTES
+        && unused.saturating_mul(STORAGE_COMPACTION_UNUSED_RATIO_DENOMINATOR) >= len
+}
+
+fn compact_vec_if_excessive<T>(values: &mut Vec<T>) {
+    if should_compact_capacity::<T>(values.len(), values.capacity()) {
+        values.shrink_to_fit();
+    }
+}
+
+fn compact_string_if_excessive(value: &mut String) {
+    if should_compact_capacity::<u8>(value.len(), value.capacity()) {
+        value.shrink_to_fit();
+    }
+}
 
 /// Two-level sparse bit vector used for the uncommon invalid-base positions.
 ///
@@ -101,9 +121,9 @@ impl SparseBitVector {
             )
     }
 
-    fn shrink_to_fit(&mut self) {
-        self.block_ids.shrink_to_fit();
-        self.blocks.shrink_to_fit();
+    fn compact_storage(&mut self) {
+        compact_vec_if_excessive(&mut self.block_ids);
+        compact_vec_if_excessive(&mut self.blocks);
     }
 }
 
@@ -240,17 +260,15 @@ impl PackedSequence {
         self.len += 1;
     }
 
+    #[inline]
     fn update_identity(&mut self, code: u8, is_valid: bool) {
         let identity_token = code | (u8::from(is_valid) << 2);
-        self.identity_left ^= u64::from(identity_token);
-        self.identity_left = self.identity_left.wrapping_mul(0x0000_0100_0000_01b3);
-        self.identity_right ^= u64::from(identity_token)
-            .wrapping_add(self.len.rotate_left(17))
-            .wrapping_mul(0x9e37_79b9_7f4a_7c15);
-        self.identity_right = self
-            .identity_right
-            .rotate_left(27)
-            .wrapping_mul(0x94d0_49bb_1331_11eb);
+        (self.identity_left, self.identity_right) = advance_identity(
+            self.identity_left,
+            self.identity_right,
+            self.len,
+            identity_token,
+        );
     }
 
     /// Appends one whitespace-free IUPAC sequence run in packed groups of eight.
@@ -314,10 +332,30 @@ impl PackedSequence {
                     }
                 }
             }
-            for (index, code) in [c0, c1, c2, c3, c4, c5, c6, c7].into_iter().enumerate() {
-                self.update_identity(code & 3, validity & (1 << index) != 0);
-                self.len += 1;
-            }
+            let position = self.len;
+            let (identity_left, identity_right) = advance_identity(
+                self.identity_left,
+                self.identity_right,
+                position,
+                c0 & 0b111,
+            );
+            let (identity_left, identity_right) =
+                advance_identity(identity_left, identity_right, position + 1, c1 & 0b111);
+            let (identity_left, identity_right) =
+                advance_identity(identity_left, identity_right, position + 2, c2 & 0b111);
+            let (identity_left, identity_right) =
+                advance_identity(identity_left, identity_right, position + 3, c3 & 0b111);
+            let (identity_left, identity_right) =
+                advance_identity(identity_left, identity_right, position + 4, c4 & 0b111);
+            let (identity_left, identity_right) =
+                advance_identity(identity_left, identity_right, position + 5, c5 & 0b111);
+            let (identity_left, identity_right) =
+                advance_identity(identity_left, identity_right, position + 6, c6 & 0b111);
+            let (identity_left, identity_right) =
+                advance_identity(identity_left, identity_right, position + 7, c7 & 0b111);
+            self.identity_left = identity_left;
+            self.identity_right = identity_right;
+            self.len = position + 8;
             offset += 8;
         }
 
@@ -355,12 +393,14 @@ impl PackedSequence {
             .saturating_add(self.invalid.estimated_heap_bytes())
     }
 
-    /// Releases geometric growth slack after a streamed FASTA record is complete.
+    /// Releases material geometric growth slack after a streamed FASTA record is complete.
+    /// Small or proportionally modest slack is retained to avoid copying an entire record
+    /// merely to recover a negligible amount of memory.
     pub(crate) fn compact_storage(&mut self) {
-        self.name.shrink_to_fit();
-        self.description.shrink_to_fit();
-        self.bases.shrink_to_fit();
-        self.invalid.shrink_to_fit();
+        compact_string_if_excessive(&mut self.name);
+        compact_string_if_excessive(&mut self.description);
+        compact_vec_if_excessive(&mut self.bases);
+        self.invalid.compact_storage();
     }
 
     /// Copies a half-open coordinate range into an independently owned sequence.
@@ -402,6 +442,25 @@ impl PackedSequence {
         assert!((1..=31).contains(&k), "k must be in 1..=31");
         CanonicalKmerIter::new(self, k, start.min(self.len), end.min(self.len))
     }
+}
+
+#[inline]
+fn advance_identity(
+    identity_left: u64,
+    identity_right: u64,
+    position: u64,
+    identity_token: u8,
+) -> (u64, u64) {
+    let identity_left =
+        (identity_left ^ u64::from(identity_token)).wrapping_mul(0x0000_0100_0000_01b3);
+    let identity_right = identity_right
+        ^ u64::from(identity_token)
+            .wrapping_add(position.rotate_left(17))
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let identity_right = identity_right
+        .rotate_left(27)
+        .wrapping_mul(0x94d0_49bb_1331_11eb);
+    (identity_left, identity_right)
 }
 
 /// Iterator returned by [`PackedSequence::canonical_kmers`].
@@ -579,6 +638,39 @@ mod tests {
     }
 
     #[test]
+    fn completed_record_compaction_retains_modest_slack() {
+        let mut sequence = PackedSequence::from_ascii("valid", b"ACGT");
+        sequence.bases.reserve_exact(4_096);
+        let capacity = sequence.bases.capacity();
+        assert!(!should_compact_capacity::<u8>(
+            sequence.bases.len(),
+            capacity
+        ));
+
+        sequence.compact_storage();
+
+        assert_eq!(sequence.bases.capacity(), capacity);
+    }
+
+    #[test]
+    fn completed_record_compaction_reclaims_material_slack() {
+        let mut sequence = PackedSequence::from_ascii("valid", b"ACGT");
+        sequence
+            .bases
+            .reserve_exact(STORAGE_COMPACTION_MIN_UNUSED_BYTES + sequence.bases.len());
+        let capacity = sequence.bases.capacity();
+        assert!(should_compact_capacity::<u8>(
+            sequence.bases.len(),
+            capacity
+        ));
+
+        sequence.compact_storage();
+
+        assert!(sequence.bases.capacity() < capacity);
+        assert_eq!(sequence.bases, vec![0b1110_0100]);
+    }
+
+    #[test]
     fn bulk_iupac_packing_matches_scalar_packing_at_unaligned_boundaries() {
         let mut bulk = PackedSequence::from_ascii("test", b"ACG");
         bulk.push_iupac_chunk(b"TacgUN.-ACGT").unwrap();
@@ -588,6 +680,37 @@ mod tests {
         let invalid = bulk.push_iupac_chunk(b"ACGT!AAA").unwrap_err();
         assert_eq!(invalid, 4);
         assert_eq!(bulk.len(), scalar.len() + 4);
+    }
+
+    #[test]
+    fn unrolled_bulk_identity_matches_scalar_at_every_alignment() {
+        const PREFIX: &[u8] = b"ACGTACG";
+        const BODY: &[u8] = b"ACGTURYSWKMBDHVN-.acgtuACGTACGT";
+
+        for prefix_length in 0..=PREFIX.len() {
+            let mut bulk = PackedSequence::from_ascii("test", &PREFIX[..prefix_length]);
+            bulk.push_iupac_chunk(BODY).unwrap();
+
+            let mut ascii = PREFIX[..prefix_length].to_vec();
+            ascii.extend_from_slice(BODY);
+            let scalar = PackedSequence::from_ascii("test", &ascii);
+            assert_eq!(bulk, scalar, "identity drift at alignment {prefix_length}");
+        }
+    }
+
+    #[test]
+    fn sequence_identity_matches_stable_golden() {
+        const INPUT: &[u8] = b"ACGTURYSWKMBDHVN-.acgtu";
+        const EXPECTED: [u8; 16] = [
+            187, 118, 212, 181, 13, 28, 61, 167, 229, 61, 117, 118, 174, 195, 148, 93,
+        ];
+
+        let scalar = PackedSequence::from_ascii("scalar", INPUT);
+        assert_eq!(scalar.identity().as_bytes(), &EXPECTED);
+
+        let mut bulk = PackedSequence::new("bulk");
+        bulk.push_iupac_chunk(INPUT).unwrap();
+        assert_eq!(bulk.identity().as_bytes(), &EXPECTED);
     }
 
     #[test]

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { initialViewport, panBy, remapViewportDomain, zoomAt } from "../src/viewport";
+import {
+  genomicMinimumViewportSize,
+  initialViewport,
+  panBy,
+  remapViewportDomain,
+  zoomAt,
+} from "../src/viewport";
 
 describe("viewport transforms", () => {
   it("keeps the pointer anchor fixed while zooming", () => {
@@ -22,6 +28,28 @@ describe("viewport transforms", () => {
     }
     expect(view.width).toBeCloseTo(0.000_004);
     expect(view.height).toBeCloseTo(0.000_004);
+  });
+
+  it("converts the 100-base zoom floor into matrix coordinates", () => {
+    expect(genomicMinimumViewportSize(1_000, 1_000_000)).toBeCloseTo(0.1);
+    expect(genomicMinimumViewportSize(72, 72)).toBe(72);
+    expect(genomicMinimumViewportSize(80, 80, 0)).toBe(0);
+  });
+
+  it("never zooms below 100 bp through wheel-like or keyboard-like factors", () => {
+    const minimumSize = genomicMinimumViewportSize(1_000, 1_000_000);
+    let wheelView = initialViewport(1_000, minimumSize);
+    let keyboardView = initialViewport(1_000, minimumSize);
+    for (let iteration = 0; iteration < 100; iteration += 1) {
+      wheelView = zoomAt(wheelView, 0.05, 0.13, 0.87);
+      keyboardView = zoomAt(keyboardView, 0.8, 0.5, 0.5);
+    }
+    expect(wheelView.width).toBeCloseTo(minimumSize);
+    expect(wheelView.height).toBeCloseTo(minimumSize);
+    expect(keyboardView.width).toBeCloseTo(minimumSize);
+    expect(keyboardView.height).toBeCloseTo(minimumSize);
+    expect(wheelView.width / wheelView.domain * 1_000_000).toBeCloseTo(100);
+    expect(wheelView.height / wheelView.domain * 1_000_000).toBeCloseTo(100);
   });
 
   it("preserves the normalized viewport when scientific resolution changes", () => {

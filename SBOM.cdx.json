@@ -5,8 +5,8 @@
   "metadata": {
     "component": {
       "type": "application",
-      "name": "moddotplot-rs",
-      "version": "0.6.2",
+      "name": "moddotplot-interactive",
+      "version": "0.9.1",
       "licenses": [
         {
           "license": {
@@ -16,11 +16,11 @@
       ],
       "properties": [
         {
-          "name": "moddotplot-rs:dependency-fingerprint",
-          "value": "d966a9cf668b0e7cefe183823bd77416c87545cb775681400e0abbaa3e7940b2"
+          "name": "moddotplot-interactive:dependency-fingerprint",
+          "value": "89546cc9a152cd100d93bba1ffd39480bd4e0980563d7695aa6680fdbca15837"
         },
         {
-          "name": "moddotplot-rs:generator",
+          "name": "moddotplot-interactive:generator",
           "value": "scripts/generate-sbom.mjs"
         }
       ]
@@ -432,6 +432,29 @@
         {
           "type": "distribution",
           "url": "registry+https://github.com/rust-lang/crates.io-index"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ColorBrewer color schemes",
+      "version": "2.0",
+      "purl": "pkg:generic/colorbrewer@2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://colorbrewer2.org/"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/axismaps/colorbrewer"
         }
       ]
     },
@@ -1996,6 +2019,29 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/check-error/-/check-error-2.1.3.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-scale-chromatic",
+      "version": "3.1.0",
+      "purl": "pkg:npm/d3-scale-chromatic@3.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://d3js.org/d3-scale-chromatic/"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/d3/d3-scale-chromatic"
         }
       ]
     },

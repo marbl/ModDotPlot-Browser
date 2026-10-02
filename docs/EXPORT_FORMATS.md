@@ -11,14 +11,16 @@ another worker request.
 Both files start with two comment lines:
 
 ```text
-# moddotplot-rs current-view ... export
+# moddotplot-interactive current-view ... export
 # provenance={...}
 ```
 
 The JSON provenance records software and export time, method, scheduler policy,
-comparison parameters, scientific configurations, display mapping, viewport, and both
-sequence records. FASTA descriptions remain in provenance, but table sequence fields
-contain only the FASTA identifier.
+comparison parameters, scientific configurations, display mapping (including the
+palette, selected color count, direction, and resolved ordered colors), viewport, and
+both sequence records.
+FASTA descriptions remain in provenance, but table sequence fields contain only the
+FASTA identifier.
 
 ## Shared values
 
@@ -49,7 +51,7 @@ missing when `direction_support` is zero.
 ## BEDPE
 
 The first ten fields follow the conventional BEDPE layout. The final three are
-moddotplot-rs extensions.
+moddotplot-interactive extensions.
 
 | Column | Definition |
 | --- | --- |

@@ -1,44 +1,25 @@
+import {
+  DEFAULT_PALETTE,
+  DEFAULT_PALETTE_COLOR_COUNT,
+  HEATMAP_PALETTES,
+  paletteColors,
+  paletteDefaultColorCount,
+  type PaletteId,
+} from "./palettes";
+
 export interface HeatmapRange {
   minimum: number;
   midpoint: number;
   maximum: number;
 }
 
-export const HEATMAP_PALETTES = {
-  sunset: {
-    label: "Sunset",
-    colors: [
-      "#f6ec9d", "#f4dc82", "#f2c76c", "#efad59", "#eb8746", "#e85d39",
-      "#cf4638", "#ad323b", "#86233e", "#5a1541", "#310e43",
-    ],
-  },
-  spectral: {
-    label: "Spectral",
-    colors: [
-      "#5e4fa2", "#3288bd", "#66c2a5", "#abdda4", "#e6f598", "#ffffbf",
-      "#fee08b", "#fdae61", "#f46d43", "#d53e4f", "#9e0142",
-    ],
-  },
-  viridis: {
-    label: "Viridis",
-    colors: [
-      "#440154", "#482878", "#3e4989", "#31688e", "#26828e", "#1f9e89",
-      "#35b779", "#6ece58", "#b5de2b", "#dce319", "#fde725",
-    ],
-  },
-  blueRed: {
-    label: "Blue–red",
-    colors: [
-      "#2166ac", "#4393c3", "#72b2d7", "#abd9e9", "#d9eef4", "#f7f7f7",
-      "#f9d7c8", "#f4a582", "#e36b54", "#c9363e", "#b2182b",
-    ],
-  },
-} as const;
+export type RgbaColor = readonly [number, number, number, number];
 
-export type HeatmapPalette = keyof typeof HEATMAP_PALETTES;
-
-export const DEFAULT_HEATMAP_PALETTE: HeatmapPalette = "viridis";
-export const LIGHT_PLOT_BACKGROUND = "#f8f7f2";
+export { HEATMAP_PALETTES };
+export type HeatmapPalette = PaletteId;
+export const DEFAULT_HEATMAP_PALETTE: HeatmapPalette = DEFAULT_PALETTE;
+export const DEFAULT_HEATMAP_COLOR_COUNT = DEFAULT_PALETTE_COLOR_COUNT;
+export const LIGHT_PLOT_BACKGROUND = "#ffffff";
 export const DARK_PLOT_BACKGROUND = "#050506";
 
 /** Keeps the three handles ordered while preserving the handle the user moved. */
@@ -73,16 +54,70 @@ export function addIdentitiesToHistogram(bins: Uint32Array, values: Uint16Array)
   }
 }
 
-/** Returns the selected eleven-stop palette as normalized RGB triples for WebGL. */
-export function heatmapPaletteRgb(palette: HeatmapPalette): Float32Array {
+/** Returns the selected application palette as normalized RGB triples for WebGL. */
+export function heatmapPaletteRgb(
+  palette: HeatmapPalette,
+  colorCount = paletteDefaultColorCount(palette),
+  colors?: readonly string[],
+): Float32Array {
   return new Float32Array(
-    HEATMAP_PALETTES[palette].colors.flatMap((color) => hexToRgb(color)),
+    normalizeHeatmapColors(palette, colorCount, colors).flatMap((color) => hexToRgb(color)),
   );
+}
+
+/** Decodes an already selected palette once for allocation-free CPU pixel lookup. */
+export function heatmapPaletteRgba(colors: readonly string[]): RgbaColor[] {
+  if (colors.length === 0) throw new RangeError("A heatmap palette must contain at least one color");
+  return colors.map((color) => {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) {
+      throw new TypeError(`Invalid palette color: ${color}`);
+    }
+    return [...hexToRgbBytes(color), 255] as RgbaColor;
+  });
+}
+
+/** Resolves and validates the exact ordered colors shared by every plot and export path. */
+export function normalizeHeatmapColors(
+  palette: HeatmapPalette,
+  colorCount = paletteDefaultColorCount(palette),
+  colors?: readonly string[],
+): string[] {
+  const canonical = paletteColors(palette, colorCount);
+  if (colors === undefined) return [...canonical];
+  if (colors.length !== colorCount) {
+    throw new RangeError(`Expected ${colorCount} palette colors, received ${colors.length}`);
+  }
+  return colors.map((color) => {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) {
+      throw new TypeError(`Invalid palette color: ${color}`);
+    }
+    return color.toLowerCase();
+  });
 }
 
 /** Returns the plot background as a normalized RGB triple for WebGL. */
 export function plotBackgroundRgb(dark: boolean): readonly [number, number, number] {
   return hexToRgb(dark ? DARK_PLOT_BACKGROUND : LIGHT_PLOT_BACKGROUND);
+}
+
+/** Returns the selected plot background as byte RGBA for CPU rendering. */
+export function plotBackgroundRgba(dark: boolean): RgbaColor {
+  return [...hexToRgbBytes(dark ? DARK_PLOT_BACKGROUND : LIGHT_PLOT_BACKGROUND), 255];
+}
+
+/**
+ * Allocation-free CPU palette lookup for render loops. The palette and background must be
+ * decoded once with heatmapPaletteRgba and plotBackgroundRgba before entering the loop.
+ */
+export function identityColorRgbaFromPalette(
+  encodedIdentity: number,
+  paletteRgba: readonly RgbaColor[],
+  range: HeatmapRange,
+  background: RgbaColor,
+): RgbaColor {
+  if (encodedIdentity === 65_535 || encodedIdentity / 100 < range.minimum) return background;
+  const position = heatmapPalettePosition(encodedIdentity / 100, range);
+  return paletteRgba[discretePaletteIndex(position, paletteRgba.length)]!;
 }
 
 /** CPU reference for stable pixel goldens; mirrors the similarity fragment shader. */
@@ -91,25 +126,28 @@ export function identityColorRgba(
   palette: HeatmapPalette,
   range: HeatmapRange,
   darkBackground: boolean,
-): readonly [number, number, number, number] {
-  const background = darkBackground ? DARK_PLOT_BACKGROUND : LIGHT_PLOT_BACKGROUND;
+  colorCount = paletteDefaultColorCount(palette),
+  paletteOverride?: readonly string[],
+): RgbaColor {
+  const background = plotBackgroundRgba(darkBackground);
   if (encodedIdentity === 65_535 || encodedIdentity / 100 < range.minimum) {
-    return [...hexToRgbBytes(background), 255];
+    return background;
   }
-  const position = heatmapPalettePosition(encodedIdentity / 100, range);
-  const colors = HEATMAP_PALETTES[palette].colors;
-  const scaled = Math.max(0, Math.min(1, position)) * (colors.length - 1);
-  const lower = Math.min(colors.length - 1, Math.floor(scaled));
-  const upper = Math.min(colors.length - 1, lower + 1);
-  const fraction = scaled - lower;
-  const low = hexToRgbBytes(colors[lower]!);
-  const high = hexToRgbBytes(colors[upper]!);
-  return [
-    Math.round(low[0] + (high[0] - low[0]) * fraction),
-    Math.round(low[1] + (high[1] - low[1]) * fraction),
-    Math.round(low[2] + (high[2] - low[2]) * fraction),
-    255,
-  ];
+  const colors = normalizeHeatmapColors(palette, colorCount, paletteOverride);
+  return identityColorRgbaFromPalette(
+    encodedIdentity,
+    heatmapPaletteRgba(colors),
+    range,
+    background,
+  );
+}
+
+/** Maps a normalized palette position to one of the requested discrete classes. */
+export function discretePaletteIndex(position: number, colorCount: number): number {
+  if (!Number.isSafeInteger(colorCount) || colorCount < 1) {
+    throw new RangeError("Palette color count must be a positive integer");
+  }
+  return Math.min(colorCount - 1, Math.floor(Math.max(0, Math.min(1, position)) * colorCount));
 }
 
 /** Maps an ANI_c percentage through the same adjustable three-anchor transfer function as WebGL. */
@@ -136,18 +174,27 @@ export function heatmapGradient(
   palette: HeatmapPalette,
   range: HeatmapRange,
   darkBackground: boolean,
+  colorCount = paletteDefaultColorCount(palette),
+  paletteOverride?: readonly string[],
 ): string {
   const background = darkBackground ? DARK_PLOT_BACKGROUND : LIGHT_PLOT_BACKGROUND;
-  const colors = HEATMAP_PALETTES[palette].colors;
+  const colors = normalizeHeatmapColors(palette, colorCount, paletteOverride);
   const minimumPosition = rangePosition(range.minimum);
-  const colorStops = colors.map((color, index) => {
-    const palettePosition = index / (colors.length - 1);
-    const identity = palettePosition <= 0.5
-      ? range.minimum + (range.midpoint - range.minimum) * palettePosition * 2
-      : range.midpoint + (range.maximum - range.midpoint) * (palettePosition - 0.5) * 2;
-    return `${color} ${formatPosition(rangePosition(identity))}`;
+  const colorStops = colors.flatMap((color, index) => {
+    const start = identityAtPalettePosition(index / colors.length, range);
+    const end = identityAtPalettePosition((index + 1) / colors.length, range);
+    return [
+      `${color} ${formatPosition(rangePosition(start))}`,
+      `${color} ${formatPosition(rangePosition(end))}`,
+    ];
   });
   return `linear-gradient(90deg, ${background} 0%, ${background} ${formatPosition(minimumPosition)}, ${colorStops.join(", ")}, ${colors.at(-1)} 100%)`;
+}
+
+function identityAtPalettePosition(position: number, range: HeatmapRange): number {
+  return position <= 0.5
+    ? range.minimum + (range.midpoint - range.minimum) * position * 2
+    : range.midpoint + (range.maximum - range.midpoint) * (position - 0.5) * 2;
 }
 
 function clamp(value: number): number {

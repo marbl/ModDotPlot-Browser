@@ -5,6 +5,17 @@ export function formatBases(value: number): string {
   return `${value} bp`;
 }
 
+/** Formats one representative genomic span for a scientific matrix cell. */
+export function formatPlotWindowSize(domainLength: number, resolution: number): string {
+  if (!Number.isFinite(domainLength) || !Number.isFinite(resolution)) return "—";
+  const domain = Math.floor(domainLength);
+  if (domain < 1 || resolution < 1) return "—";
+  const cells = Math.min(domain, Math.max(1, Math.floor(resolution)));
+  const windowSize = domain / cells;
+  if (Number.isInteger(windowSize)) return `${formatBases(windowSize)} per cell`;
+  return `≈${Math.round(windowSize).toLocaleString("en-US")} bp per cell`;
+}
+
 export function formatBytes(value: number): string {
   if (value >= 1024 ** 3) return `${trim(value / 1024 ** 3)} GiB`;
   if (value >= 1024 ** 2) return `${trim(value / 1024 ** 2)} MiB`;

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "WebAssembly boundary for moddotplot-rs"
+description = "WebAssembly boundary for moddotplot-interactive"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

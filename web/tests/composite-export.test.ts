@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  compositeExportLegendKind,
   evenlySpacedLegendTicks,
+  exactExportLegendLabels,
+  heatmapLegendColors,
   pdfTextPlacement,
   renderCompositeExport,
   type CompositeExportScene,
@@ -55,5 +58,70 @@ describe("portable vector export", () => {
       + placement.baselineOffset * placement.d;
     expect(reconstructedX).toBeCloseTo(item.x);
     expect(reconstructedY).toBeCloseTo(400 - item.y);
+  });
+
+  it("uses customized display colors in the exported legend", () => {
+    const provenance = {
+      display: {
+        measurement: "sketch",
+        colorMode: "similarity",
+        background: "white",
+        palette: "Viridis",
+        paletteColorCount: 3,
+        paletteReversed: true,
+        paletteColors: ["#abcdef", "#445566", "#112233"],
+        heatmapRange: { minimum: 85, midpoint: 92, maximum: 100 },
+      },
+    } as CompositeExportScene["provenance"];
+    expect(heatmapLegendColors(provenance)).toEqual(["#abcdef", "#445566", "#112233"]);
+
+    const malformed = {
+      ...provenance,
+      display: { ...provenance.display as object, paletteColors: ["#abcdef"] },
+    } as CompositeExportScene["provenance"];
+    expect(heatmapLegendColors(malformed)).toBeNull();
+  });
+
+  it("uses scientifically explicit categorical legends for every exact view", () => {
+    const display = {
+      measurement: "kmer",
+      colorMode: "similarity",
+      background: "white",
+      palette: "Spectral",
+      paletteColorCount: 6,
+      heatmapRange: { minimum: 85, midpoint: 92, maximum: 100 },
+    };
+    const identity = {
+      display: { ...display, exactVisualization: "identity" },
+    } as CompositeExportScene["provenance"];
+    const bases = {
+      display: { ...display, exactVisualization: "bases" },
+    } as CompositeExportScene["provenance"];
+    const direction = {
+      display: { ...display, exactVisualization: "identity", colorMode: "direction" },
+    } as CompositeExportScene["provenance"];
+
+    expect(compositeExportLegendKind(identity)).toBe("exact-identity");
+    expect(exactExportLegendLabels(identity)).toEqual([
+      "Exact match",
+      "Mismatch / below threshold",
+    ]);
+    expect(heatmapLegendColors(identity)).toBeNull();
+    expect(compositeExportLegendKind(bases)).toBe("exact-bases");
+    expect(exactExportLegendLabels(bases)).toEqual([
+      "A",
+      "C",
+      "G",
+      "T",
+      "Mismatch / below threshold",
+    ]);
+    expect(heatmapLegendColors(bases)).toBeNull();
+    expect(compositeExportLegendKind(direction)).toBe("exact-direction");
+    expect(exactExportLegendLabels(direction)).toEqual([
+      "Forward",
+      "Reverse",
+      "Neutral",
+      "Mismatch / below threshold",
+    ]);
   });
 });

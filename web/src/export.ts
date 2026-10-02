@@ -52,17 +52,17 @@ export function createNumericExport(
     throw new Error(
       `Numeric export contains ${cellCount.toLocaleString()} renderer cells; `
       + `the local limit is ${MAX_NUMERIC_EXPORT_CELLS.toLocaleString()}. `
-      + "Zoom in or select a lower Plot detail setting, then export again.",
+      + "Zoom in or select a lower Plot resolution setting, then export again.",
     );
   }
   const chunks: BlobPart[] = format === "bedpe"
     ? [
-        "# moddotplot-rs current-view BEDPE export\n",
+        "# moddotplot-interactive current-view BEDPE export\n",
         `# provenance=${JSON.stringify(provenance)}\n`,
         "#chrom1\tstart1\tend1\tchrom2\tstart2\tend2\tname\tscore\tstrand1\tstrand2\tani_c\tdirection\tdirection_support\n",
       ]
     : [
-        "# moddotplot-rs current-view numeric export\n",
+        "# moddotplot-interactive current-view numeric export\n",
         `# provenance=${JSON.stringify(provenance)}\n`,
         "x_seq_id,x_start,x_end,y_seq_id,y_start,y_end,ani_c,direction,direction_support\n",
       ];
@@ -124,7 +124,7 @@ export function createNumericExport(
 export async function embedPngProvenance(png: Blob, provenance: ExportProvenance): Promise<Blob> {
   const bytes = new Uint8Array(await png.arrayBuffer());
   const iend = findIend(bytes);
-  const keyword = new TextEncoder().encode("moddotplot-rs");
+  const keyword = new TextEncoder().encode("moddotplot-interactive");
   const text = new TextEncoder().encode(JSON.stringify(provenance));
   const data = new Uint8Array(keyword.length + 5 + text.length);
   data.set(keyword, 0);

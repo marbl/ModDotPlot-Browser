@@ -216,27 +216,45 @@ function bgzfBlockSize(header: Uint8Array, strict: boolean): number | null {
 }
 
 async function decompressBlock(block: Uint8Array): Promise<Uint8Array> {
-  const bytes = Uint8Array.from(block);
-  const compressed = new Blob([bytes.buffer]).stream() as ReadableStream<BufferSource>;
+  // Blob snapshots the supplied view, including its byte offset and length. Normal
+  // file-stream chunks use ArrayBuffer, so this avoids another complete block copy;
+  // retain a safe copy fallback for a caller backed by SharedArrayBuffer.
+  const bytes: Uint8Array<ArrayBuffer> = block.buffer instanceof ArrayBuffer
+    ? new Uint8Array(block.buffer, block.byteOffset, block.byteLength)
+    : Uint8Array.from(block);
+  const compressed = new Blob([bytes]).stream() as ReadableStream<BufferSource>;
   const reader = compressed
     .pipeThrough(new DecompressionStream("gzip"))
     .getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
+  const expectedBytes = littleEndian32(block, block.byteLength - 4);
+  let firstChunk: Uint8Array | null = null;
+  let output: Uint8Array | null = null;
+  let written = 0;
   while (true) {
     const result = await reader.read();
     if (result.done) break;
-    chunks.push(result.value);
-    totalBytes += result.value.byteLength;
+    const chunk = result.value;
+    if (chunk.byteLength === 0) continue;
+    if (!firstChunk) {
+      firstChunk = chunk;
+      written = chunk.byteLength;
+      continue;
+    }
+    if (!output) {
+      output = new Uint8Array(expectedBytes);
+      if (written > output.byteLength) throw new Error("BGZF output exceeds its declared size");
+      output.set(firstChunk);
+    }
+    if (written + chunk.byteLength > output.byteLength) {
+      throw new Error("BGZF output exceeds its declared size");
+    }
+    output.set(chunk, written);
+    written += chunk.byteLength;
   }
-  if (chunks.length === 1) return chunks[0] ?? new Uint8Array();
-  const output = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
+  if (written !== expectedBytes) {
+    throw new Error(`BGZF output size ${written} does not match declared size ${expectedBytes}`);
   }
-  return output;
+  return output ?? firstChunk ?? new Uint8Array();
 }
 
 function defaultConcurrency(): number {
@@ -246,4 +264,13 @@ function defaultConcurrency(): number {
 
 function littleEndian16(bytes: Uint8Array, offset: number): number {
   return (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8);
+}
+
+function littleEndian32(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset] ?? 0)
+    | ((bytes[offset + 1] ?? 0) << 8)
+    | ((bytes[offset + 2] ?? 0) << 16)
+    | ((bytes[offset + 3] ?? 0) << 24)
+  ) >>> 0;
 }

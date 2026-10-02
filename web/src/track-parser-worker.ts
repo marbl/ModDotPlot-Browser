@@ -7,6 +7,7 @@ import {
   gffFeatureColor,
   inferFeatureFormat,
   parseItemRgb,
+  resolveTrackSequenceIdentifier,
   sequenceIdentifierMatch,
   type ImportIssue,
   type ImportedFeature,
@@ -41,6 +42,11 @@ interface ParseState {
   transcripts: Map<string, TranscriptBuilder>;
   genes: Map<string, GeneRecord>;
   otherGff: ImportedFeature[];
+  admission: RecordAdmission;
+}
+
+interface RecordAdmission {
+  records: number;
 }
 
 interface TranscriptBuilder {
@@ -85,7 +91,9 @@ workerScope.onmessage = (event: MessageEvent<TrackParserRequest>): void => {
     ? Promise.reject(new Error(admissionError))
     : request.type === "parse"
       ? parseFile(request, controller.signal)
-      : inspectFile(request, controller.signal);
+      : request.type === "parse-batch"
+        ? parseBatchFile(request, controller.signal)
+        : inspectFile(request, controller.signal);
   void operation.catch((error: unknown) => {
     if (controller.signal.aborted) return;
     post({
@@ -134,24 +142,7 @@ async function parseFile(
   request: Extract<TrackParserRequest, { type: "parse" }>,
   signal: AbortSignal,
 ): Promise<void> {
-  const state: ParseState = {
-    fileName: request.file.name,
-    format: inferFeatureFormat(request.file.name),
-    target: request.targetSequence,
-    lineNumber: 0,
-    validRecords: 0,
-    skippedRecords: 0,
-    clippedRecords: 0,
-    ignoredSequenceRecords: 0,
-    identifiers: new Set(),
-    issues: [],
-    exactSeen: false,
-    bedTrackName: stripExtension(request.file.name),
-    bedTracks: new Map(),
-    transcripts: new Map(),
-    genes: new Map(),
-    otherGff: [],
-  };
+  const state = createParseState(request.file, request.targetSequence, { records: 0 });
   await readLines(request.file, signal, (line) => parseLine(state, line), (progress) => {
     post({ type: "progress", requestId: request.requestId, progress, text: `Reading ${request.file.name}` });
   });
@@ -170,8 +161,114 @@ async function parseFile(
   post({ type: "complete", requestId: request.requestId, report });
 }
 
-function parseLine(state: ParseState, rawLine: string): void {
-  state.lineNumber += 1;
+async function parseBatchFile(
+  request: Extract<TrackParserRequest, { type: "parse-batch" }>,
+  signal: AbortSignal,
+): Promise<void> {
+  const candidates = [...new Map(request.candidates.map((candidate) => [candidate.index, candidate])).values()];
+  const admission: RecordAdmission = { records: 0 };
+  const states = new Map(candidates.map((candidate) => [
+    candidate.index,
+    createParseState(request.file, candidate, admission),
+  ]));
+  const routedRecords = new Map(candidates.map((candidate) => [candidate.index, 0]));
+  const identifiers = new Set<string>();
+  const ambiguousIdentifiers = new Set<string>();
+  let ambiguousRecords = 0;
+  let dataRecords = 0;
+  let lineNumber = 0;
+
+  await readLines(request.file, signal, (rawLine) => {
+    lineNumber += 1;
+    const line = rawLine.trim();
+    if (!line || line.startsWith("browser ") || line.startsWith("#")) return;
+    if (line.startsWith("track ")) {
+      for (const state of states.values()) parseLine(state, rawLine, lineNumber);
+      return;
+    }
+    dataRecords += 1;
+    const identifier = rawLine.split("\t", 1)[0]?.trim() ?? "";
+    if (identifier) identifiers.add(identifier);
+    const resolution = resolveTrackSequenceIdentifier(identifier, candidates);
+    if (resolution.kind === "ambiguous") {
+      ambiguousRecords += 1;
+      if (identifier) ambiguousIdentifiers.add(identifier);
+      return;
+    }
+    if (resolution.kind === "none") return;
+    const state = states.get(resolution.candidate.index);
+    if (!state) return;
+    routedRecords.set(resolution.candidate.index, (routedRecords.get(resolution.candidate.index) ?? 0) + 1);
+    parseLine(state, rawLine, lineNumber);
+  }, (progress) => {
+    post({ type: "progress", requestId: request.requestId, progress, text: `Reading ${request.file.name}` });
+  });
+  if (signal.aborted) return;
+
+  const results = [];
+  const issues: ImportIssue[] = [];
+  for (const candidate of candidates) {
+    const state = states.get(candidate.index);
+    if (!state) continue;
+    state.ignoredSequenceRecords = Math.max(0, dataRecords - (routedRecords.get(candidate.index) ?? 0));
+    const report = finish(state);
+    if (report.validRecords > 0 && report.tracks.some((track) => track.features.length > 0)) {
+      results.push({ candidate, report });
+    } else {
+      issues.push(...report.issues.slice(0, MAX_REPORTED_ISSUES - issues.length));
+    }
+  }
+  if (results.length === 0) {
+    const found = identifiers.size > 0 ? ` Found: ${[...identifiers].slice(0, 8).join(", ")}.` : "";
+    const ambiguous = ambiguousIdentifiers.size > 0
+      ? ` Ambiguous aliases skipped: ${[...ambiguousIdentifiers].slice(0, 8).join(", ")}.`
+      : "";
+    post({
+      type: "error",
+      requestId: request.requestId,
+      message: `No valid features matched any loaded FASTA record.${found}${ambiguous}`,
+      issues,
+    });
+    return;
+  }
+  post({
+    type: "batch-complete",
+    requestId: request.requestId,
+    results,
+    identifiers: [...identifiers].slice(0, 64),
+    ambiguousIdentifiers: [...ambiguousIdentifiers].slice(0, 64),
+    ambiguousRecords,
+  });
+}
+
+function createParseState(
+  file: File,
+  target: { index: number; name: string; length: number },
+  admission: RecordAdmission,
+): ParseState {
+  return {
+    fileName: file.name,
+    format: inferFeatureFormat(file.name),
+    target,
+    lineNumber: 0,
+    validRecords: 0,
+    skippedRecords: 0,
+    clippedRecords: 0,
+    ignoredSequenceRecords: 0,
+    identifiers: new Set(),
+    issues: [],
+    exactSeen: false,
+    bedTrackName: stripExtension(file.name),
+    bedTracks: new Map(),
+    transcripts: new Map(),
+    genes: new Map(),
+    otherGff: [],
+    admission,
+  };
+}
+
+function parseLine(state: ParseState, rawLine: string, lineNumber?: number): void {
+  state.lineNumber = lineNumber ?? state.lineNumber + 1;
   const line = rawLine.trim();
   if (!line || line.startsWith("browser ")) return;
   if (line.startsWith("track ")) {
@@ -358,10 +455,11 @@ function parseGff(state: ParseState, line: string, format: "gff3" | "gtf"): void
 }
 
 function admitRecord(state: ParseState): void {
-  const next = state.validRecords + 1;
+  const next = state.admission.records + 1;
   const admissionError = annotationAdmissionError(0, next);
   if (admissionError) throw new Error(admissionError);
-  state.validRecords = next;
+  state.admission.records = next;
+  state.validRecords += 1;
 }
 
 function transcript(state: ParseState, id: string): TranscriptBuilder {

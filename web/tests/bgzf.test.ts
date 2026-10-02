@@ -20,6 +20,26 @@ describe("BGZF streaming", () => {
     const gzip = await gzipBytes(">ordinary\nACGT\n");
     expect(await isBgzfBlob(new Blob([arrayBuffer(gzip)]))).toBe(false);
   });
+
+  it("decompresses a block supplied as an offset view without surrounding bytes", async () => {
+    const expected = `>offset\n${"ACGT".repeat(4_000)}\n`;
+    const block = await bgzfBlock(expected);
+    const padded = new Uint8Array(block.byteLength + 19);
+    padded.fill(0xa5);
+    padded.set(block, 7);
+    const view = padded.subarray(7, 7 + block.byteLength);
+
+    const decoded = await collect(decompressBgzfStream(streamOf([view]), 1));
+    expect(new TextDecoder().decode(decoded)).toBe(expected);
+  });
+
+  it("preserves a near-maximum decompressed BGZF payload", async () => {
+    const expected = "A".repeat(65_000);
+    const block = await bgzfBlock(expected);
+    const decoded = await collect(decompressBgzfStream(streamOf(fragment(block, [13, 29, 5])), 2));
+    expect(decoded.byteLength).toBe(expected.length);
+    expect(new TextDecoder().decode(decoded)).toBe(expected);
+  });
 });
 
 async function bgzfBlock(text: string): Promise<Uint8Array> {

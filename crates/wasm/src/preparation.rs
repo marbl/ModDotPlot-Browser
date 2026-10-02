@@ -9,7 +9,6 @@ pub(super) struct PreparedComparison {
     pub(super) y: Option<FrozenAxis>,
     pub(super) x_index: usize,
     pub(super) y_index: usize,
-    pub(super) domain_length: u64,
     pub(super) config: CoreScientificConfig,
 }
 

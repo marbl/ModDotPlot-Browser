@@ -1,3 +1,6 @@
+import type { ExactKmerGeometry } from "./exact-mode";
+import type { PrecomputedOverviewArtifact } from "./precomputed-overview";
+
 export interface SequenceMetadata {
   index: number;
   /** FASTA identifier ending at the first header whitespace. */
@@ -16,11 +19,14 @@ export interface ComparisonParameters {
   previewRegisterCount: number;
   detailedRegisterCount: number;
   k: number;
+  exactGeometry: ExactKmerGeometry;
 }
 
 export interface ScientificConfigMetadata {
   version: number;
   digest: string;
+  /** Full canonical scientific field encoding; authoritative cache compatibility key. */
+  identity: string;
   hashAlgorithm: string;
   hashSeed: string;
   estimator: string;
@@ -62,8 +68,21 @@ export interface FeatureTrackPayload {
   values: Float64Array;
 }
 
+/** Same-origin FASTA retained as a lazy HTTP byte-range source. */
+export interface RemoteFastaSourceDescriptor {
+  url: string;
+  fileName: string;
+  byteLength: number;
+}
+
 export type MainToWorkerMessage =
   | { type: "load"; generation: number; files: File[] }
+  | {
+      type: "load-precomputed-overview";
+      generation: number;
+      source: RemoteFastaSourceDescriptor;
+      artifact: PrecomputedOverviewArtifact;
+    }
   | { type: "prepare"; generation: number; requestId: number; parameters: ComparisonParameters }
   | { type: "cancel-tiles"; generation: number; requestId: number }
   | { type: "preview-presented"; generation: number; requestId: number }
@@ -86,6 +105,7 @@ export type MainToWorkerMessage =
       requestId: number;
       resolution: number;
       mode: "sketch" | "kmer";
+      exactGeometry: ExactKmerGeometry;
       tiles: TileCoordinate[];
       forceDetailed?: boolean;
     }
@@ -103,13 +123,13 @@ export interface MatrixTilePayload {
   identity: Uint16Array;
   direction: Int16Array;
   directionSupport: Uint16Array;
-  /** X-axis base codes (A=0, C=1, G=2, T=3, N/padding=4) for exact tiles. */
+  /** X-sequence base codes (A=0, C=1, G=2, T=3, N/padding=4) for exact tiles. */
   bases?: Uint8Array;
 }
 
 export type WorkerToMainMessage =
   | { type: "ready" }
-  | { type: "status"; text: string; progress?: number; busy?: boolean }
+  | { type: "status"; generation: number; text: string; progress?: number; busy?: boolean }
   | { type: "sequences"; generation: number; sequences: SequenceMetadata[] }
   | {
       type: "comparison-ready";
@@ -134,6 +154,12 @@ export type WorkerToMainMessage =
       estimatedBytes: number;
     }
   | ({ type: "tile" } & MatrixTilePayload)
-  | { type: "complete"; generation: number; elapsedMs: number; estimatedBytes: number }
+  | {
+      type: "complete";
+      generation: number;
+      elapsedMs: number;
+      estimatedBytes: number;
+      precomputed?: boolean;
+    }
   | { type: "memory"; estimatedBytes: number }
   | { type: "error"; message: string };

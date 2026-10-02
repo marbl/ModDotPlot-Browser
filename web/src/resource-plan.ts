@@ -60,7 +60,7 @@ export function decideResourceAdmission(
       "reject",
       "total",
       `The complete plan would require ${projectedTotal.toLocaleString()} bytes, above its ${RESOURCE_BUDGETS.total.toLocaleString()}-byte budget.`,
-      "Reduce plot detail, remove annotations, or load fewer sequences.",
+      "Reduce plot resolution, remove annotations, or load fewer sequences.",
     );
   }
   return decision("admit", resource, "The allocation fits the declared resource plan.", null);

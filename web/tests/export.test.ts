@@ -143,7 +143,7 @@ describe("reproducible export", () => {
       new Blob([signature, iend], { type: "image/png" }),
       provenance,
     )).arrayBuffer());
-    expect(new TextDecoder().decode(result)).toContain("iTXtmoddotplot-rs");
+    expect(new TextDecoder().decode(result)).toContain("iTXtmoddotplot-interactive");
     expect(new TextDecoder().decode(result)).toContain(JSON.stringify(provenance));
   });
 
@@ -167,6 +167,6 @@ describe("reproducible export", () => {
       ...context,
       baseResolution: MAX_NUMERIC_EXPORT_CELLS + 1,
       viewport: { x: 0, y: 0, width: MAX_NUMERIC_EXPORT_CELLS + 1, height: 1 },
-    }, provenance, "csv")).toThrow("Zoom in or select a lower Plot detail setting");
+    }, provenance, "csv")).toThrow("Zoom in or select a lower Plot resolution setting");
   });
 });

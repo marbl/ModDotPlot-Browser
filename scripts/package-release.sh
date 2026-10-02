@@ -41,16 +41,16 @@ fi
 
 artifact_directory="$repository_root/release-artifacts"
 mkdir -p "$artifact_directory"
-source_archive="$artifact_directory/moddotplot-rs-$release_version-source.tar.gz"
-binary_archive="$artifact_directory/moddotplot-rs-$release_version-web.tar.gz"
-provenance_file="$artifact_directory/moddotplot-rs-$release_version-provenance.txt"
-checksum_file="$artifact_directory/moddotplot-rs-$release_version-SHA256SUMS"
+source_archive="$artifact_directory/moddotplot-interactive-$release_version-source.tar.gz"
+binary_archive="$artifact_directory/moddotplot-interactive-$release_version-web.tar.gz"
+provenance_file="$artifact_directory/moddotplot-interactive-$release_version-provenance.txt"
+checksum_file="$artifact_directory/moddotplot-interactive-$release_version-SHA256SUMS"
 
-git archive --format=tar --prefix="moddotplot-rs-$release_version-source/" HEAD | gzip -n > "$source_archive"
+git archive --format=tar --prefix="moddotplot-interactive-$release_version-source/" HEAD | gzip -n > "$source_archive"
 
-staging_directory=$(mktemp -d "${TMPDIR:-/tmp}/moddotplot-release.XXXXXX")
+staging_directory=$(mktemp -d "${TMPDIR:-/tmp}/moddotplot-interactive-release.XXXXXX")
 trap 'rm -rf "$staging_directory"' EXIT INT TERM
-binary_root="$staging_directory/moddotplot-rs-$release_version-web"
+binary_root="$staging_directory/moddotplot-interactive-$release_version-web"
 mkdir -p "$binary_root/docs"
 cp -R web/dist/. "$binary_root/"
 cp LICENSE CITATION.cff SBOM.cdx.json THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.txt "$binary_root/"
@@ -59,11 +59,11 @@ cp "$release_notes" "$binary_root/docs/"
 find "$binary_root" -exec touch -t 198001010000 {} +
 (
   cd "$staging_directory"
-  find "moddotplot-rs-$release_version-web" -print | LC_ALL=C sort | tar --no-recursion -cf - -T -
+  find "moddotplot-interactive-$release_version-web" -print | LC_ALL=C sort | tar --no-recursion -cf - -T -
 ) | gzip -n > "$binary_archive"
 
 {
-  echo "moddotplot-rs $release_version"
+  echo "moddotplot-interactive $release_version"
   echo "commit=$(git rev-parse HEAD)"
   echo "source-date-epoch=$(git show -s --format=%ct HEAD)"
   echo "host=$(uname -srm)"

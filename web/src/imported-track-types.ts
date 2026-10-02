@@ -67,6 +67,20 @@ export interface TrackSequenceCandidate {
   length: number;
 }
 
+export type TrackSequenceResolution =
+  | {
+      kind: "match";
+      candidate: TrackSequenceCandidate;
+      matchKind: "exact" | "alias";
+    }
+  | { kind: "ambiguous"; candidates: TrackSequenceCandidate[] }
+  | { kind: "none" };
+
+export interface BatchTrackImportResult {
+  candidate: TrackSequenceCandidate;
+  report: TrackImportReport;
+}
+
 export type TrackParserRequest =
   | { type: "cancel"; requestIds: number[] }
   | {
@@ -74,6 +88,12 @@ export type TrackParserRequest =
       requestId: number;
       file: File;
       targetSequence: { index: number; name: string; length: number };
+    }
+  | {
+      type: "parse-batch";
+      requestId: number;
+      file: File;
+      candidates: TrackSequenceCandidate[];
     }
   | {
       type: "inspect";
@@ -89,6 +109,14 @@ export type TrackParserMessage =
       requestId: number;
       identifiers: string[];
       matches: Array<TrackSequenceCandidate & { identifier: string; matchKind: "exact" | "alias" }>;
+    }
+  | {
+      type: "batch-complete";
+      requestId: number;
+      results: BatchTrackImportResult[];
+      identifiers: string[];
+      ambiguousIdentifiers: string[];
+      ambiguousRecords: number;
     }
   | { type: "complete"; requestId: number; report: TrackImportReport }
   | { type: "error"; requestId: number; message: string; issues: ImportIssue[] };
@@ -126,6 +154,37 @@ export function sequenceIdentifierMatch(
     : null;
 }
 
+/** Resolves one annotation identifier without ever copying a record to multiple sequences. */
+export function resolveTrackSequenceIdentifier(
+  recordIdentifier: string,
+  candidates: readonly TrackSequenceCandidate[],
+): TrackSequenceResolution {
+  const exact: TrackSequenceCandidate[] = [];
+  const aliases: TrackSequenceCandidate[] = [];
+  const seenExact = new Set<number>();
+  const seenAliases = new Set<number>();
+  for (const candidate of candidates) {
+    const matchKind = sequenceIdentifierMatch(recordIdentifier, candidate.name);
+    if (matchKind === "exact" && !seenExact.has(candidate.index)) {
+      seenExact.add(candidate.index);
+      exact.push(candidate);
+    } else if (matchKind === "alias" && !seenAliases.has(candidate.index)) {
+      seenAliases.add(candidate.index);
+      aliases.push(candidate);
+    }
+  }
+  const preferred = exact.length > 0 ? exact : aliases;
+  if (preferred.length === 1) {
+    return {
+      kind: "match",
+      candidate: preferred[0] as TrackSequenceCandidate,
+      matchKind: exact.length > 0 ? "exact" : "alias",
+    };
+  }
+  if (preferred.length > 1) return { kind: "ambiguous", candidates: preferred };
+  return { kind: "none" };
+}
+
 export function parseItemRgb(value: string | undefined): string | null {
   if (!value || value === "0") return null;
   const channels = value.split(",").map(Number);
@@ -158,7 +217,21 @@ export function trackAxisEligible(
   xIndex: number,
   yIndex: number,
 ): boolean {
-  return associatedSequenceIndex === (axis === "x" ? xIndex : yIndex);
+  return trackCollectionAxisEligible([associatedSequenceIndex], axis, xIndex, yIndex);
+}
+
+/** True when a logical, multi-sequence track has data for the sequence on an axis. */
+export function trackCollectionAxisEligible(
+  associatedSequenceIndexes: Iterable<number>,
+  axis: FeatureTrackAxis,
+  xIndex: number,
+  yIndex: number,
+): boolean {
+  const selectedIndex = axis === "x" ? xIndex : yIndex;
+  for (const sequenceIndex of associatedSequenceIndexes) {
+    if (sequenceIndex === selectedIndex) return true;
+  }
+  return false;
 }
 
 /** Assigns deterministic, unbounded greedy lanes. Display code folds excess lanes into its final row. */

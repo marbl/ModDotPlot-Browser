@@ -59,6 +59,7 @@ export class ComparisonJob extends OwnedJob {
   preparationToken = 0;
   pendingPresentation: { resolve: () => void } | null = null;
   activeTileRequestId: number;
+  private tileRequestController = new AbortController();
 
   constructor(
     generation: number,
@@ -73,8 +74,26 @@ export class ComparisonJob extends OwnedJob {
 
   canPublish(generation: number, requestId: number): boolean {
     return !this.signal.aborted
+      && !this.tileRequestController.signal.aborted
       && generation === this.generation
       && requestId === this.activeTileRequestId;
+  }
+
+  get tileSignal(): AbortSignal {
+    return this.tileRequestController.signal;
+  }
+
+  beginTileRequest(requestId: number): void {
+    this.tileRequestController.abort("tile request superseded");
+    this.tileRequestController = new AbortController();
+    this.activeTileRequestId = requestId;
+    this.releasePresentation();
+  }
+
+  cancelTileRequest(requestId: number): void {
+    this.activeTileRequestId = requestId;
+    this.tileRequestController.abort("tile request cancelled");
+    this.releasePresentation();
   }
 
   releasePresentation(): void {
@@ -85,6 +104,7 @@ export class ComparisonJob extends OwnedJob {
 
   override cancel(reason: string): void {
     this.releasePresentation();
+    this.tileRequestController.abort(reason);
     for (const config of this.configurations.values()) config.free();
     this.configurations.clear();
     super.cancel(reason);
