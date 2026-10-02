@@ -103,7 +103,10 @@ for (const [relativePath, pkg] of Object.entries(npmLock.packages)) {
   }
   if (pkg.resolved) component.externalReferences = [{ type: "distribution", url: pkg.resolved }];
   addComponent(component);
-  collectLicenseText(`${name} ${pkg.version}`, join(root, "web", relativePath));
+  // Optional native packages are installed according to the host OS. Keep every
+  // lockfile package in the SBOM, but omit platform-conditional license text so
+  // the generated distributable bundle is identical on macOS and Linux.
+  if (!pkg.optional) collectLicenseText(`${name} ${pkg.version}`, join(root, "web", relativePath));
 }
 
 const sortedComponents = [...components.values()].sort((left, right) => left.purl.localeCompare(right.purl));
