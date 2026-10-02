@@ -22,6 +22,7 @@ interface ExportControllerOptions {
   baseName: () => string;
   provenance: () => ExportProvenance;
   numericContext: () => NumericExportContext | null;
+  cliConfig: () => Blob | null;
   prepareDetailedExport: (onProgress: (message: string, progress?: number) => void) => Promise<void>;
   progressDialog: HTMLDialogElement;
   progressMessage: HTMLElement;
@@ -111,12 +112,15 @@ export class ExportController {
       const fileName = withExtension(this.#options.baseName(), format);
       const provenance = this.#options.provenance();
       let output: Blob;
+      let configOutput: Blob | null = null;
       if (kind === "data") {
         reportProgress("Building data export");
         const context = this.#options.numericContext();
         const tiles = this.#options.renderer.exportTileViews(true);
         if (!context || tiles.length === 0) throw new Error("No rendered plot data is available to export yet.");
         output = createNumericExport(tiles, context, provenance, format as DataExportFormat);
+        configOutput = this.#options.cliConfig();
+        if (!configOutput) throw new Error("No active comparison is available for the ModDotPlot CLI config.");
       } else {
         reportProgress("Rendering image");
         const plot = await this.#options.renderer.exportPng(2);
@@ -137,6 +141,10 @@ export class ExportController {
         await writable.close();
       } else {
         downloadBlob(output, fileName);
+      }
+      if (configOutput) {
+        const configName = `${this.#options.baseName()}.config.json`;
+        downloadBlob(configOutput, configName);
       }
     } catch (error: unknown) {
       this.#options.onError(error instanceof Error ? error.message : String(error));

@@ -201,6 +201,9 @@ h1 {
   gap: 6px;
 }
 .github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 11px;
@@ -210,6 +213,21 @@ h1 {
   font-weight: 650;
   text-decoration: none;
   transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+.github-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: currentColor;
+}
+.publication-warning {
+  flex-basis: 100%;
+  width: min(620px, 90vw);
+  margin: 1px 0 0;
+  color: #817b84;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
 }
 .github-link:hover, .github-link:focus-visible {
   border-color: #6a6570;

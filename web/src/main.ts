@@ -18,6 +18,7 @@ import {
 } from "./example-loader";
 import { ExportController } from "./export-controller";
 import { exportBaseName, type ExportProvenance, type NumericExportContext } from "./export";
+import { createModDotPlotCliConfigBlob } from "./moddotplot-config";
 import {
   DEFAULT_EXACT_KMER_GEOMETRY,
   DEFAULT_EXACT_VISUALIZATION,
@@ -793,6 +794,7 @@ new ExportController({
   baseName: currentExportBaseName,
   provenance: currentExportProvenance,
   numericContext: currentNumericExportContext,
+  cliConfig: currentModDotPlotCliConfig,
   prepareDetailedExport,
   progressDialog: exportProgressDialog,
   progressMessage: exportProgressMessage,
@@ -2707,6 +2709,26 @@ function currentNumericExportContext(): NumericExportContext | null {
     xName,
     yName,
   };
+}
+
+function currentModDotPlotCliConfig(): Blob | null {
+  if (!activeParameters || !pendingView) return null;
+  return createModDotPlotCliConfigBlob({
+    appVersion: __APP_VERSION__,
+    baseName: currentExportBaseName(),
+    plotMode,
+    sequences,
+    gridSequenceIndices: gridSelectedIndices,
+    parameters: activeParameters,
+    domainLength: activeDomainLength,
+    currentResolution: requestedResolution(pendingView),
+    viewport: pendingView.view,
+    palette: selectedHeatmapPalette(),
+    paletteReversed,
+    paletteColors: activeHeatmapColors(),
+    heatmapRange,
+    colorMode: selectedColorMode(),
+  });
 }
 
 function currentExportProvenance(): ExportProvenance {

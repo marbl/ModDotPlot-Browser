@@ -7,6 +7,22 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-02
+
+### Added
+
+* Added GitHub marks beside both landing-page repository links and a visible publication
+  warning directing publication work to the official ModDotPlot CLI.
+* Added a second JSON artifact to every numeric export. It is accepted by the official
+  ModDotPlot develop config loader and maps the selected FASTA records, visible regions,
+  cell size, k-mer length, identity range, exact colors, direction mode, and comparison
+  layout for recomputation with `moddotplot -c config.json`.
+
+### Changed
+
+* Preserve sub-CLI-resolution browser zoom in JSON metadata while clamping the executable
+  CLI window to its supported minimum and k-mer length.
+
 ## [0.9.2] - 2026-10-02
 
 ### Added
@@ -641,7 +657,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/marbl/moddotplot-interactive/compare/v0.8.9...v0.9.0
