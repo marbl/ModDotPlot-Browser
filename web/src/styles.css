@@ -167,8 +167,14 @@ h1 {
   font-weight: 700;
 }
 .explore-button:hover, .explore-button:focus-visible { background: #276f46; }
+.example-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+}
 .example-button {
-  justify-self: center;
   border: 1px solid #7796a0;
   border-radius: 999px;
   padding: 9px 18px;
@@ -187,6 +193,28 @@ h1 {
 .example-button:disabled {
   cursor: wait;
   opacity: 0.66;
+}
+.github-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.github-link {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #534e56;
+  background: rgba(255, 254, 250, 0.72);
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: none;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+.github-link:hover, .github-link:focus-visible {
+  border-color: #6a6570;
+  color: #27242a;
+  background: #fffefa;
 }
 .example-progress {
   width: min(100%, 360px);

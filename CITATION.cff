@@ -4,9 +4,9 @@ message: >-
   preferred citation and credit the relevant method papers listed in references.
 title: "ModDotPlot Browser"
 type: software
-version: 0.9.1
-date-released: 2026-09-30
-repository-code: "https://github.com/marbl/moddotplot-interactive"
+version: 0.9.2
+date-released: 2026-10-02
+repository-code: "https://github.com/marbl/ModDotPlot-Browser"
 license: MIT-0
 abstract: >-
   Browser-native genomic dotplot software written by ChatGPT 5.6 Sol under the
