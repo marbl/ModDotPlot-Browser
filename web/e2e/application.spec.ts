@@ -174,6 +174,10 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#example-button i")).toHaveText("Arabidopsis thaliana");
   await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot"]')).toBeVisible();
   await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot-Browser"]')).toBeVisible();
+  await expect(page.locator(".github-link .github-icon")).toHaveCount(2);
+  await expect(page.locator(".publication-warning")).toHaveText(
+    "This is a vibe-coded tool for ModDotPlot, and should not be used for publication purposes. Please use the official ModDotPlot CLI tool for publications.",
+  );
   const landingVersion = await page.locator("#landing-version").textContent();
   const progressStyle = await page.locator("#compute-progress svg").evaluate((element) => {
     const style = getComputedStyle(element);
@@ -437,6 +441,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
     type SaveHarness = Window & {
       __saveFormat?: string;
       __saveOptions?: { startIn?: string; types?: unknown[] };
+      __numericExport?: string;
       __forcedDetailRequests?: number;
       showSaveFilePicker?: (options: {
         suggestedName: string;
@@ -462,10 +467,15 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
       const name = requested
         ? options.suggestedName.replace(/\.[a-z0-9]+$/i, `.${requested}`)
         : options.suggestedName;
+      const isNumeric = /\.(bedpe|csv)$/i.test(name);
       return {
         name,
         createWritable: async () => ({
           write: async (blob: Blob) => {
+            if (isNumeric) {
+              harness.__numericExport = await blob.text();
+              return;
+            }
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
             anchor.href = url;
@@ -501,13 +511,14 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   expect(exportImageFit.scrollWidth).toBeLessThanOrEqual(exportImageFit.clientWidth);
   expect(exportImageFit.scrollHeight).toBeLessThanOrEqual(exportImageFit.clientHeight);
 
-  const dataDownload = page.waitForEvent("download");
+  const configDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
-  const data = await dataDownload;
-  expect(data.suggestedFilename()).toBe("moddotplot-chrShort_short-vs-chrShort_short.bedpe");
-  const dataPath = await data.path();
-  if (!dataPath) throw new Error("numeric export has no temporary path");
-  const bedpe = await readFile(dataPath, "utf8");
+  const configArtifact = await configDownload;
+  expect(configArtifact.suggestedFilename()).toBe(
+    "moddotplot-chrShort_short-vs-chrShort_short.config.json",
+  );
+  const bedpe = await page.evaluate(() =>
+    (window as unknown as { __numericExport: string }).__numericExport);
   expect(bedpe).toContain("# provenance=");
   expect(bedpe).toContain("exact complete distinct canonical k-mer-set containment");
   expect(bedpe).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
@@ -516,6 +527,22 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
     (window as unknown as { __saveOptions?: { startIn?: string; types?: unknown[] } }).__saveOptions);
   expect(saveOptions?.startIn).toBe("downloads");
   expect(saveOptions?.types).toHaveLength(2);
+  const configPath = await configArtifact.path();
+  if (!configPath) throw new Error("CLI config export has no temporary path");
+  const cliConfig = JSON.parse(await readFile(configPath, "utf8"));
+  expect(cliConfig).toMatchObject({
+    fasta: ["./short.fa"],
+    sequence: ["chrShort"],
+    kmer: 21,
+    compare_only: false,
+    grid_only: false,
+    palette: "Spectral_11",
+    colors: expect.any(Array),
+    breakpoints: expect.any(Array),
+  });
+  expect(cliConfig.colors).toHaveLength(11);
+  expect(cliConfig.breakpoints).toHaveLength(12);
+  expect(cliConfig.identity).toBe(cliConfig.breakpoints[0]);
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
 
   await page.locator(".feature-track-controls summary").click();
@@ -665,7 +692,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
 test("exports wait for detailed visible tiles behind a blocking progress dialog", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "export payload inspection runs on the Chromium channel");
   await page.addInitScript(() => {
-    const state = { contents: "", closed: false };
+    const state = { contents: "", closedCount: 0 };
     (window as unknown as { __detailedSave: typeof state }).__detailedSave = state;
     (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
       .showSaveFilePicker = async (options) => ({
@@ -675,7 +702,7 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
             state.contents = await blob.text();
             await new Promise((resolve) => setTimeout(resolve, 150));
           },
-          close: async () => { state.closed = true; },
+          close: async () => { state.closedCount += 1; },
         }),
       });
   });
@@ -685,11 +712,12 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   const sequence = deterministicDna(6_000);
   await loadFasta(page, "detailed.fa", `>detailed\n${sequence}\n`);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  const configDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
   await expect(page.locator("#export-progress-dialog")).toBeVisible();
   expect(await page.locator("#export-progress-dialog").evaluate((dialog) => dialog.matches(":modal"))).toBe(true);
   await page.waitForFunction(() =>
-    (window as unknown as { __detailedSave?: { closed: boolean } }).__detailedSave?.closed === true,
+    (window as unknown as { __detailedSave?: { closedCount: number } }).__detailedSave?.closedCount === 1,
   { timeout: 30_000 });
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
   const contents = await page.evaluate(() =>
@@ -700,11 +728,16 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   expect(rows.every((row) => row.split(",").length === 9)).toBe(true);
   expect(contents).not.toContain("identity_fixed");
   expect(contents).not.toContain("config_digest");
+  const configArtifact = await configDownload;
+  const configPath = await configArtifact.path();
+  if (!configPath) throw new Error("CLI config export has no temporary path");
+  expect(JSON.parse(await readFile(configPath, "utf8")))
+    .toMatchObject({ fasta: ["./detailed.fa"], sequence: ["detailed"] });
 });
 
 test("FASTA descriptions stay on axes while source-qualified IDs disambiguate selections and saves", async ({ page }) => {
   await page.addInitScript(() => {
-    const state = { suggestedName: "", contents: "", closed: false };
+    const state = { suggestedName: "", contents: "", closedCount: 0 };
     (window as unknown as { __nativeSave: typeof state }).__nativeSave = state;
     (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
       .showSaveFilePicker = async (options) => {
@@ -712,8 +745,10 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
         return {
           name: options.suggestedName,
           createWritable: async () => ({
-            write: async (blob: Blob) => { state.contents = await blob.text(); },
-            close: async () => { state.closed = true; },
+            write: async (blob: Blob) => {
+              state.contents = await blob.text();
+            },
+            close: async () => { state.closedCount += 1; },
           }),
         };
       };
@@ -745,9 +780,10 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#y-sequence-label")).toHaveText("chr1 gorilla chromosome one");
 
+  const configDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
   await page.waitForFunction(() =>
-    (window as unknown as { __nativeSave?: { closed: boolean } }).__nativeSave?.closed === true);
+    (window as unknown as { __nativeSave?: { closedCount: number } }).__nativeSave?.closedCount === 1);
   const saved = await page.evaluate(() =>
     (window as unknown as { __nativeSave: { suggestedName: string; contents: string } }).__nativeSave);
   expect(saved.suggestedName).toBe("moddotplot-chr1_human-vs-chr1_gorilla.bedpe");
@@ -756,6 +792,14 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
   expect(dataRows.every((row) => row.startsWith("chr1\t"))).toBe(true);
   expect(saved.contents).not.toContain("human chromosome one\t");
   expect(saved.contents).not.toContain("gorilla chromosome one\t");
+  const configArtifact = await configDownload;
+  const configPath = await configArtifact.path();
+  if (!configPath) throw new Error("CLI config export has no temporary path");
+  expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({
+    fasta: ["./human.fa", "./gorilla.fa"],
+    sequence: ["chr1", "chr1"],
+    compare_only: true,
+  });
 });
 
 test("multi-record inputs expose self, pairwise, and bounded grid plot modes", async ({ page }) => {

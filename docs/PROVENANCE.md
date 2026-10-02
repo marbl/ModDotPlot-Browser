@@ -12,7 +12,7 @@ than restating it, reducing the risk of attribution drift. Machine-readable auth
 software version, preferred citation, and method references are maintained in
 [`CITATION.cff`](../CITATION.cff).
 
-The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current release is `v0.9.2`.
+The v0.1.0 baseline is preserved by Git tag `v0.1.0`; the current release is `v0.9.3`.
 Every built axis carries the complete immutable scientific configuration as its exact
 in-process identity, plus a stable source-sequence identity. The shorter configuration
 digest remains the external provenance label. The browser displays the digest and
@@ -20,4 +20,6 @@ principal parameters under Advanced options. Release builds also include a Cyclo
 SBOM, a dependency license bundle, checksums, and build provenance. BEDPE/CSV and
 PNG/SVG/PDF exports embed the current method, software version, complete scientific
 metadata, scheduler policy, display settings including palette, color count, direction,
-and resolved ordered colors, viewport, and sequence identities.
+and resolved ordered colors, viewport, and sequence identities. Each numeric export is
+paired with an official ModDotPlot develop-compatible JSON configuration for reproducible
+CLI recomputation.

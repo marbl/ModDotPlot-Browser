@@ -337,7 +337,7 @@ available when orientation coloring is needed.
 | Identity range | Map the palette's low, midpoint, and high colors from 80% to 100% |
 | White / Black background | Choose the color used for the plot and below-minimum cells; white is the default |
 | Feature tracks | Enable sequence-derived tracks or import BED/GFF/GTF annotations, optionally gzip compressed |
-| Export data | Save current-view values as BEDPE (default) or CSV |
+| Export data | Save current-view values as BEDPE (default) or CSV plus an official-CLI JSON config |
 | Export image | Save the complete current composition as PNG (default), SVG, or PDF |
 | Reset view | Return to the full comparison and redraw the overview |
 | Back to grid | Return from a grid-opened comparison to the existing grid overview |
@@ -393,6 +393,17 @@ a compact nine-column scientific table with sequence IDs, interval pairs, `ANI_c
 direction, and direction support. Zero-valued and missing cells are omitted. The exact
 column definitions and formulas are in [Data export formats](EXPORT_FORMATS.md).
 
+Every numeric export also saves `<plot-name>.config.json`. Keep that JSON beside the
+original FASTA file or edit its `fasta` paths, then run it with
+`moddotplot -c <plot-name>.config.json` using the official ModDotPlot develop version.
+The config carries the selected records and visible regions, k-mer and window settings,
+identity thresholds, exact ordered colors, direction coloring, and pairwise/grid layout.
+ModDotPlot Browser and the official CLI use different estimators, so the JSON recreates
+the view and recomputes it with the publication CLI; it does not promise byte-identical
+browser cell values. The CLI requires a window of at least 10 bp and one k-mer, so an
+export made below that scale records the browser's requested cell size in
+`_moddotplot_browser.requested_bp_per_cell` and uses the smallest runnable CLI window.
+
 Before either data or image output is written, every tile intersecting the current view
 is calculated with the selected **Detailed accuracy** register count. Terminal zoom is
 exact. Export therefore waits when necessary and never writes quick-view estimates.
@@ -431,7 +442,7 @@ by ModDotPlot Browser. After the picker closes, a modal progress dialog blocks i
 and reports detailed-tile preparation, image rendering, and file writing until the save
 has completed.
 
-Both files include machine-readable provenance for the software version, method,
+Data and image files include machine-readable provenance for the software version, method,
 scheduler policy, comparison parameters, complete scientific configurations, palette,
 palette color count, direction, resolved ordered colors, display range, viewport, and
 selected sequences. PNG provenance is stored in an
@@ -558,7 +569,7 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.9.2 remains a functional preview. Existing bounded estimator evidence is not a
+* v0.9.3 remains a functional preview. Existing bounded estimator evidence is not a
   universal guarantee. Clean-Git packaging, reproducibility, and tagging remain a
   repository-owner step for this source-archive checkpoint.
 * Very large records are limited by available browser memory; bounded in-memory
