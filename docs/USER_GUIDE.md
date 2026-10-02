@@ -33,7 +33,7 @@ workers and WebAssembly on `file://` pages.
    its DNA helix indicates active work, and the status line reports on-demand sequence
    loading, signature construction, tile drawing, and refinement progress.
    To try the application without choosing local files, select **Try ModDotPlot on an
-   Arabadopsis genome**. The initial Chr1 self plot comes from the bundled
+   *Arabidopsis thaliana* genome**. The initial Chr1 self plot comes from the bundled
    `Col-CEN_v1.2.Chr1.mdp-overview-v1.gz` artifact, an approximately 256 KB compressed,
    refined 1,000-by-1,000 overview. The complete 134 MB FASTA and 3.6 MB annotation do
    not block that first plot. Startup also retrieves the 195-byte FAI and requires it
@@ -558,7 +558,7 @@ state. Keep your source FASTA files available if you need to recreate a view.
 
 ## Current limitations
 
-* v0.9.1 remains a functional preview. Existing bounded estimator evidence is not a
+* v0.9.2 remains a functional preview. Existing bounded estimator evidence is not a
   universal guarantee. Clean-Git packaging, reproducibility, and tagging remain a
   repository-owner step for this source-archive checkpoint.
 * Very large records are limited by available browser memory; bounded in-memory

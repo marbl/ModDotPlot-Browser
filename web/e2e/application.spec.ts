@@ -169,8 +169,11 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#annotation-drop-zone")).toBeVisible();
   await expect(page.locator("#explore-button")).toBeHidden();
   await expect(page.locator("#example-button")).toHaveText(
-    "Try ModDotPlot on an Arabadopsis genome",
+    "Try ModDotPlot on an Arabidopsis thaliana genome",
   );
+  await expect(page.locator("#example-button i")).toHaveText("Arabidopsis thaliana");
+  await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot"]')).toBeVisible();
+  await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot-Browser"]')).toBeVisible();
   const landingVersion = await page.locator("#landing-version").textContent();
   const progressStyle = await page.locator("#compute-progress svg").evaluate((element) => {
     const style = getComputedStyle(element);

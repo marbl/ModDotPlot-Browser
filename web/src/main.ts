@@ -982,7 +982,9 @@ function cancelExampleLoad(): void {
 
 function resetExampleButton(): void {
   exampleButton.disabled = false;
-  exampleButton.textContent = "Try ModDotPlot on an Arabadopsis genome";
+  const species = document.createElement("i");
+  species.textContent = "Arabidopsis thaliana";
+  exampleButton.replaceChildren("Try ModDotPlot on an ", species, " genome");
 }
 
 function showExampleProgress(label: string, progress: number): void {
