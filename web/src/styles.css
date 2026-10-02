@@ -87,7 +87,7 @@ h1 {
 }
 .landing-content { display: grid; gap: 18px; justify-items: center; }
 .landing-logo-heading {
-  width: min(460px, 84vw);
+  width: min(575px, 92vw);
   line-height: 0;
 }
 .landing-logo {

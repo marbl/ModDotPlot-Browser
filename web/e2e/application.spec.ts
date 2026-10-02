@@ -162,6 +162,7 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
     "src",
     "/moddotplot-browser.gif",
   );
+  await expect(page.locator("#landing .landing-logo-heading")).toHaveCSS("width", "575px");
   await expect(page.locator("#landing-version")).toHaveText(/^v\d/);
   await expect(page.locator(".landing-notes")).toHaveCount(0);
   await expect(page.locator("#drop-title")).toHaveText("Drop FASTA files here");
@@ -180,7 +181,10 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot-Browser"]')).toBeVisible();
   await expect(page.locator(".github-link .github-icon")).toHaveCount(2);
   await expect(page.locator(".publication-warning")).toHaveText(
-    "This is a vibe-coded tool for ModDotPlot, and should not be used for publication purposes. Please use the official ModDotPlot CLI tool for publications.",
+    "This experimental, vibe-coded WebAssembly version of ModDotPlot should not be used for publications. Please use the official ModDotPlot CLI instead.",
+  );
+  await expect(page.locator(".publication-warning strong em")).toHaveText(
+    "should not be used for publications",
   );
   const landingVersion = await page.locator("#landing-version").textContent();
   const progressStyle = await page.locator("#compute-progress svg").evaluate((element) => {
