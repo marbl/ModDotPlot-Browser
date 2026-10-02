@@ -13,6 +13,7 @@ import { selectDetailResolution, selectTiles } from "./detail";
 import { DnaLoader } from "./dna-loader";
 import {
   loadBundledArabidopsisAnnotation,
+  loadBundledArabidopsisDetailOverviews,
   loadBundledArabidopsisExample,
   type ArabidopsisExampleStartup,
 } from "./example-loader";
@@ -29,7 +30,7 @@ import {
   type ExactKmerGeometry,
   type ExactVisualizationMode,
 } from "./exact-mode";
-import { formatBases, formatBytes, formatInterval, formatPlotWindowSize } from "./format";
+import { formatBases, formatBytes, formatInterval, formatPlotWindowSize, plotWindowSizeBases } from "./format";
 import { GridPairRenderer } from "./grid-renderer";
 import {
   FeatureTrackOverlay,
@@ -66,6 +67,7 @@ import {
 } from "./renderer";
 import { REFINEMENT_POLICY_VERSION } from "./refinement";
 import { sequenceAxisLabel } from "./sequence-metadata";
+import type { PrecomputedOverviewArtifact } from "./precomputed-overview";
 import {
   decideResourceAdmission,
   totalResourceBytes,
@@ -306,6 +308,8 @@ let launchReady = false;
 let launchExampleWhenReady = false;
 let exampleLoadController: AbortController | null = null;
 let exampleAnnotationController: AbortController | null = null;
+let exampleDetailController: AbortController | null = null;
+const bundledDetailCacheResolutions = new Set<number>();
 let activeBundledExample: ArabidopsisExampleStartup | null = null;
 let recoveryBundledExample: ArabidopsisExampleStartup | null = null;
 let gridReturnAvailable = false;
@@ -415,6 +419,16 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (message.busy) showProgress(message.text, message.progress);
       else hideProgress();
       break;
+    case "precomputed-overview-cached":
+      if (message.generation !== generation || !activeBundledExample) break;
+      bundledDetailCacheResolutions.add(message.resolution);
+      if (
+        bundledDetailCacheResolutions.has(2_000)
+        && bundledDetailCacheResolutions.has(4_000)
+      ) {
+        document.body.dataset.bundledDetailCache = "ready";
+      }
+      break;
     case "sequences":
       if (message.generation !== generation) return;
       sequences = message.sequences;
@@ -424,6 +438,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       }
       sequenceLoadPending = false;
       populateSelectors();
+      if (activeBundledExample) void cacheBundledDetailOverviews(activeBundledExample);
       if (launchValidationPending) {
         launchValidationPending = false;
         launchReady = true;
@@ -967,13 +982,42 @@ async function loadBundledAnnotation(
   }
 }
 
+async function cacheBundledDetailOverviews(
+  example: ArabidopsisExampleStartup,
+): Promise<void> {
+  exampleDetailController?.abort(new DOMException("Detail cache load was replaced.", "AbortError"));
+  const controller = new AbortController();
+  exampleDetailController = controller;
+  try {
+    const artifacts = await loadBundledArabidopsisDetailOverviews({ signal: controller.signal });
+    if (
+      controller.signal.aborted
+      || exampleDetailController !== controller
+      || activeBundledExample !== example
+    ) return;
+    exampleDetailController = null;
+    bundledDetailCacheResolutions.clear();
+    document.body.dataset.bundledDetailCache = "loading";
+    for (const artifact of artifacts) postCachedOverview(artifact);
+  } catch (error) {
+    if (isAbortError(error) || exampleDetailController !== controller) return;
+    exampleDetailController = null;
+    document.body.dataset.bundledDetailCache = "unavailable";
+    console.warn("Static Arabidopsis zoom cache is unavailable; falling back to local computation.", error);
+  }
+}
+
 function cancelExampleLoad(): void {
-  const wasLoading = exampleLoadController !== null || exampleAnnotationController !== null;
+  const wasLoading = exampleLoadController !== null
+    || exampleAnnotationController !== null
+    || exampleDetailController !== null;
   const reason = new DOMException("The example load was cancelled.", "AbortError");
   exampleLoadController?.abort(reason);
   exampleAnnotationController?.abort(reason);
+  exampleDetailController?.abort(reason);
   exampleLoadController = null;
   exampleAnnotationController = null;
+  exampleDetailController = null;
   launchExampleWhenReady = false;
   resetExampleButton();
   if (wasLoading && !landing.hidden) {
@@ -2307,7 +2351,7 @@ function updateParameterNotes(): void {
 function updatePlotWindowSize(): void {
   if (plotMode === "grid") {
     plotWindowSize.value = "Varies by grid plot";
-    plotWindowSizeNote.textContent = "Open a grid plot to see its current genomic span per matrix cell";
+    plotWindowSizeNote.textContent = "Open a grid plot to see the genomic interval represented by each pixel";
     return;
   }
   const selection = selectedSingleComparison();
@@ -2331,9 +2375,10 @@ function updatePlotWindowSize(): void {
     ? requestedResolution(pendingView)
     : baseResolution;
   plotWindowSize.value = formatPlotWindowSize(domainLength, currentResolution);
-  plotWindowSizeNote.textContent = currentResolution > baseResolution
-    ? `${currentResolution.toLocaleString()} cells per axis at the current zoom level`
-    : "Genomic interval represented by each cell at the full-plot resolution";
+  const bases = plotWindowSizeBases(domainLength, currentResolution);
+  plotWindowSizeNote.textContent = bases === null
+    ? "Available after sequence selection"
+    : `Each pixel represents a genomic interval of ${bases.toLocaleString("en-US")} bases`;
 }
 
 function normalizeRegisterControls(changed: Element): void {
@@ -2435,8 +2480,10 @@ function clearSession(): void {
   launchReady = false;
   launchExampleWhenReady = false;
   activeBundledExample = null;
+  bundledDetailCacheResolutions.clear();
   recoveryBundledExample = null;
   recoveryFiles = null;
+  delete document.body.dataset.bundledDetailCache;
   comparisonReady = false;
   currentMeasurement = "sketch";
   exactVisualization = DEFAULT_EXACT_VISUALIZATION;
@@ -2631,6 +2678,19 @@ function restartEngine(): void {
 
 function post(message: MainToWorkerMessage): void {
   worker.postMessage(message);
+}
+
+function postCachedOverview(artifact: PrecomputedOverviewArtifact): void {
+  const transfers = artifact.tiles.flatMap((tile) => [
+    tile.identity.buffer as ArrayBuffer,
+    tile.direction.buffer as ArrayBuffer,
+    tile.directionSupport.buffer as ArrayBuffer,
+  ]);
+  worker.postMessage({
+    type: "cache-precomputed-overview",
+    generation,
+    artifact,
+  } satisfies MainToWorkerMessage, transfers);
 }
 
 function prepareDetailedExport(

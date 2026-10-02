@@ -83,6 +83,11 @@ export type MainToWorkerMessage =
       source: RemoteFastaSourceDescriptor;
       artifact: PrecomputedOverviewArtifact;
     }
+  | {
+      type: "cache-precomputed-overview";
+      generation: number;
+      artifact: PrecomputedOverviewArtifact;
+    }
   | { type: "prepare"; generation: number; requestId: number; parameters: ComparisonParameters }
   | { type: "cancel-tiles"; generation: number; requestId: number }
   | { type: "preview-presented"; generation: number; requestId: number }
@@ -130,6 +135,7 @@ export interface MatrixTilePayload {
 export type WorkerToMainMessage =
   | { type: "ready" }
   | { type: "status"; generation: number; text: string; progress?: number; busy?: boolean }
+  | { type: "precomputed-overview-cached"; generation: number; resolution: number }
   | { type: "sequences"; generation: number; sequences: SequenceMetadata[] }
   | {
       type: "comparison-ready";

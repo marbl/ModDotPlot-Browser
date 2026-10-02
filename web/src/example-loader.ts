@@ -36,10 +36,28 @@ export const ARABIDOPSIS_EXAMPLE_ASSETS = {
     fileName: "Col-CEN_v1.2.Chr1.mdp-overview-v1.gz",
     relativeUrl: "examples/Col-CEN_v1.2.Chr1.mdp-overview-v1.gz",
     mediaType: "application/gzip",
-    byteLength: 255_582,
-    sha256: "cff868954355763b81df5e3ac097120f24d4664213a9005677c27bf9b8dd0d4b",
+    byteLength: 255_580,
+    sha256: "032ea6b5fd515aae3034bc12bb66a511f398f06ca03e340141f2b95409b200b8",
     decodedByteLength: 6_003_800,
-    decodedSha256: "82701ff40df42b075c50dd3d2b60f28be11a35cafe89647d0b3e6201748ebdd0",
+    decodedSha256: "0080892fff7512b1a35c205fc7ea7eab83b2ec88de3e39caedb64508ca9af4bc",
+  },
+  overview2000: {
+    fileName: "Col-CEN_v1.2.Chr1.2000.mdp-overview-v1.gz",
+    relativeUrl: "examples/Col-CEN_v1.2.Chr1.2000.mdp-overview-v1.gz",
+    mediaType: "application/gzip",
+    byteLength: 543_584,
+    sha256: "2159af69644b3b20c880a2c83619b846336c55b5b7b9c0af3ecd9fde744b98ba",
+    decodedByteLength: 24_009_368,
+    decodedSha256: "3ab0fca6051f39f2b7326c37d659009f627f64793288e64dd67d313758bb01d3",
+  },
+  overview4000: {
+    fileName: "Col-CEN_v1.2.Chr1.4000.mdp-overview-v1.gz",
+    relativeUrl: "examples/Col-CEN_v1.2.Chr1.4000.mdp-overview-v1.gz",
+    mediaType: "application/gzip",
+    byteLength: 1_256_406,
+    sha256: "3accae550fddcfc41676a3a517078eebe49433454a6c269a647c3b0034fd8b64",
+    decodedByteLength: 96_031_736,
+    decodedSha256: "f0ee4522da3d597ff4c12f4ff3cb0cb7cbd09f1911d92fef0c9aa9b5f685737c",
   },
   annotation: {
     fileName: "ColCEN_CEN180.gff3",
@@ -76,6 +94,8 @@ export interface LoadArabidopsisAnnotationOptions {
   baseUrl?: string | URL;
   fetcher?: ExampleAssetFetcher;
 }
+
+export type ArabidopsisStaticDetailResolution = 2_000 | 4_000;
 
 function defaultApplicationBaseUrl(): string | URL {
   if (typeof document === "undefined") return "/";
@@ -228,18 +248,7 @@ export async function loadBundledArabidopsisExample(
   if (faiText !== artifact.fastaIndexText) {
     throw new Error("Bundled FASTA index does not match the precomputed overview.");
   }
-  for (const role of ["fasta", "fai", "annotation"] as const) {
-    const declared = artifact.sourceAssets.find((asset) => asset.role === role);
-    const expected = ARABIDOPSIS_EXAMPLE_ASSETS[role];
-    if (
-      !declared
-      || declared.fileName !== expected.fileName
-      || declared.byteLength !== expected.byteLength
-      || declared.sha256 !== expected.sha256
-    ) {
-      throw new Error(`Precomputed overview identifies an unexpected ${role.toUpperCase()} source.`);
-    }
-  }
+  validateOverviewSourceAssets(artifact);
   const fastaAsset = artifact.sourceAssets.find((asset) => asset.role === "fasta")!;
   signal?.throwIfAborted();
   onProgress?.(message, 1);
@@ -251,6 +260,50 @@ export async function loadBundledArabidopsisExample(
     },
     artifact,
   };
+}
+
+/** Loads the static Chr1 detail pyramid after the initial workspace is already usable. */
+export async function loadBundledArabidopsisDetailOverviews(
+  options: LoadArabidopsisExampleOptions = {},
+): Promise<PrecomputedOverviewArtifact[]> {
+  const {
+    signal,
+    onProgress,
+    baseUrl = defaultApplicationBaseUrl(),
+    fetcher = globalThis.fetch,
+  } = options;
+  signal?.throwIfAborted();
+  const message = "Caching precomputed Arabidopsis zoom levels";
+  onProgress?.(message, 0);
+  const assets = [
+    ARABIDOPSIS_EXAMPLE_ASSETS.overview2000,
+    ARABIDOPSIS_EXAMPLE_ASSETS.overview4000,
+  ] as const;
+  const entries = await Promise.all(
+    assets.map((asset) => fetchExampleAssetResponse(asset, baseUrl, fetcher, signal)),
+  );
+  const reporters = aggregateProgress(entries, message, onProgress);
+  const bytes = await Promise.all(entries.map((entry, index) => (
+    responseToBytes(entry, signal, reporters[index]!)
+  )));
+  const artifacts = await Promise.all(bytes.map(async (value, index) => {
+    const asset = assets[index]!;
+    const representation = await verifyAssetDigest(asset, value);
+    return representation === "decoded"
+      ? decodePrecomputedOverview(value)
+      : decodePrecomputedOverviewGzip(value);
+  }));
+  const expectedResolutions: ArabidopsisStaticDetailResolution[] = [2_000, 4_000];
+  for (let index = 0; index < artifacts.length; index += 1) {
+    const artifact = artifacts[index]!;
+    validateOverviewSourceAssets(artifact);
+    if (artifact.comparison.resolution !== expectedResolutions[index]) {
+      throw new Error("Bundled Arabidopsis detail overview has an unexpected resolution.");
+    }
+  }
+  signal?.throwIfAborted();
+  onProgress?.(message, 1);
+  return artifacts;
 }
 
 /** Downloads the optional annotation independently after the workspace is visible. */
@@ -282,6 +335,21 @@ export async function loadBundledArabidopsisAnnotation(
     type: asset.mediaType,
     lastModified: 0,
   });
+}
+
+function validateOverviewSourceAssets(artifact: PrecomputedOverviewArtifact): void {
+  for (const role of ["fasta", "fai", "annotation"] as const) {
+    const declared = artifact.sourceAssets.find((asset) => asset.role === role);
+    const expected = ARABIDOPSIS_EXAMPLE_ASSETS[role];
+    if (
+      !declared
+      || declared.fileName !== expected.fileName
+      || declared.byteLength !== expected.byteLength
+      || declared.sha256 !== expected.sha256
+    ) {
+      throw new Error(`Precomputed overview identifies an unexpected ${role.toUpperCase()} source.`);
+    }
+  }
 }
 
 async function verifyAssetDigest(

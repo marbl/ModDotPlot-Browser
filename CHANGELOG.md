@@ -7,6 +7,28 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-10-02
+
+### Added
+
+* Added deterministic static 2,000-by-2,000 and 4,000-by-4,000 refined Chr1 detail
+  levels for the bundled *Arabidopsis thaliana* example. They load in the background
+  after first paint and serve the first two zoom levels without FASTA range reads or
+  browser-side sketch construction.
+* Added a focusable gray help marker beside **Plot window size**. Its tooltip reports
+  the nearest whole number of genomic bases represented by each current plot pixel.
+
+### Changed
+
+* Count only nonzero rows that will actually be written when enforcing the two-million
+  row numeric-export safety limit. Large sparse renderer views no longer fail merely
+  because their rectangular bounds exceed the limit.
+* Renamed **Export data** to **Export ModDotPlot command** and fixed its tabular output
+  to BEDPE. Each action saves the BEDPE plus its companion JSON config, whose metadata
+  records the runnable `moddotplot -c name.config.json -l name.bedpe` command.
+* Moved **Plot window size** from Advanced options into the primary controls directly
+  below the identity color bar.
+
 ## [0.9.3] - 2026-10-02
 
 ### Added
@@ -657,7 +679,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.0...v0.9.1

@@ -40,7 +40,6 @@ interface FormatOption {
 const FORMAT_OPTIONS: Record<ExportKind, FormatOption[]> = {
   data: [
     { value: "bedpe", label: "BEDPE", mime: "text/tab-separated-values" },
-    { value: "csv", label: "CSV", mime: "text/csv" },
   ],
   image: [
     { value: "png", label: "PNG", mime: "image/png" },

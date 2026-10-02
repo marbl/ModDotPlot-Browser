@@ -16,6 +16,15 @@ export function formatPlotWindowSize(domainLength: number, resolution: number): 
   return `≈${Math.round(windowSize).toLocaleString("en-US")} bp per cell`;
 }
 
+/** Returns the same nearest-whole-base span used by the plot-window tooltip. */
+export function plotWindowSizeBases(domainLength: number, resolution: number): number | null {
+  if (!Number.isFinite(domainLength) || !Number.isFinite(resolution)) return null;
+  const domain = Math.floor(domainLength);
+  if (domain < 1 || resolution < 1) return null;
+  const cells = Math.min(domain, Math.max(1, Math.floor(resolution)));
+  return Math.round(domain / cells);
+}
+
 export function formatBytes(value: number): string {
   if (value >= 1024 ** 3) return `${trim(value / 1024 ** 3)} GiB`;
   if (value >= 1024 ** 2) return `${trim(value / 1024 ** 2)} MiB`;

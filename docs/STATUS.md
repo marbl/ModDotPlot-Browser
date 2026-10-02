@@ -70,7 +70,7 @@ by the named evidence; it does not imply broad research validation.
   path clamped to a minimum 100-bp visible interval per axis for records at least that
   long.
 * Native-save-picker export, with browser-download fallback, of nonzero detailed
-  current-view scientific values as BEDPE by default or compact nine-column CSV, plus complete-composition
+  current-view scientific values as BEDPE plus a companion official-CLI JSON config, and complete-composition
   PNG/SVG/PDF. SVG/PDF retain vector axes, labels, tracks, and an outside heatmap
   legend and embed only the heatmap as raster; all formats carry method/configuration
   provenance. A blocking progress dialog covers preparation through write completion,
@@ -80,6 +80,8 @@ by the named evidence; it does not imply broad research validation.
   becomes available after sequence input is viewable and explicitly starts the plot
   workspace. A bundled *Arabidopsis thaliana* example can launch from one button using
   an approximately 256 KB precomputed, refined 1,000-by-1,000 Chr1 self overview.
+  Background-loaded 2,000-by-2,000 and 4,000-by-4,000 static detail levels serve the
+  first two zoom steps without fetching FASTA bases or constructing browser-side sketches.
   Its raw FASTA is exposed only as a same-origin, strictly validated HTTP byte-range
   source for uncached interactions, and its centromere GFF3 retrieval is deferred into
   a separate post-workspace load that does not gate the initial plot.
@@ -97,9 +99,10 @@ by the named evidence; it does not imply broad research validation.
   default; plots,
   retained grids, and image exports share the resolved ordered colors.
 * Responsive workspace controls keep the Clear action contained within the sidebar at
-  desktop and stacked breakpoints. Advanced options expose Plot resolution together
-  with a live Plot window size derived from the shared genomic domain and current
-  scientific zoom level, rounded to one nearest-whole-base value per cell.
+  desktop and stacked breakpoints. Advanced options expose Plot resolution; the primary
+  controls below the identity color bar expose a live Plot window size derived from the
+  shared genomic domain and current scientific zoom level, rounded to one nearest-whole-base
+  value per cell with a focusable explanatory tooltip.
 * Non-interactive cursor guides follow the pointer across Self and Pairwise plots as
   dotted horizontal and vertical lines by default. Advanced options can hide them,
   use crossing diagonals, or choose dotted, dashed, or solid strokes without changing

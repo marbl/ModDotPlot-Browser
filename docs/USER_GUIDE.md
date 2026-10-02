@@ -39,7 +39,9 @@ workers and WebAssembly on `file://` pages.
    not block that first plot. Startup also retrieves the 195-byte FAI and requires it
    to match the artifact exactly. The raw FASTA remains available on the same static
    origin for indexed byte-range requests, and the CEN180 annotation starts in a
-   separate load after the workspace opens rather than gating the plot.
+   separate load after the workspace opens rather than gating the plot. Static refined
+   2,000- and 4,000-cell Chr1 detail matrices cache in the background so the first two
+   zoom levels do not require FASTA range reads or browser-side sketch construction.
 4. Choose the available sequence or plot mode. A one-record session has one self
    selector. When more than one record is loaded, the Self plot, Pairwise plot, and
    Grid plot tabs appear with Self plot selected initially.
@@ -337,7 +339,8 @@ available when orientation coloring is needed.
 | Identity range | Map the palette's low, midpoint, and high colors from 80% to 100% |
 | White / Black background | Choose the color used for the plot and below-minimum cells; white is the default |
 | Feature tracks | Enable sequence-derived tracks or import BED/GFF/GTF annotations, optionally gzip compressed |
-| Export data | Save current-view values as BEDPE (default) or CSV plus an official-CLI JSON config |
+| Plot window size | Genomic interval represented by each matrix pixel at the current zoom level; hover the question mark for a sentence-form explanation |
+| Export ModDotPlot command | Save current-view BEDPE values plus an official-CLI JSON config |
 | Export image | Save the complete current composition as PNG (default), SVG, or PDF |
 | Reset view | Return to the full comparison and redraw the overview |
 | Back to grid | Return from a grid-opened comparison to the existing grid overview |
@@ -350,7 +353,6 @@ Advanced controls are collapsed by default.
 | Control | Meaning |
 | --- | --- |
 | Plot resolution | Full-view matrix dimension: 500, 1,000, 2,000, or 4,000 cells per axis |
-| Plot window size | Genomic interval represented by each matrix cell at the current zoom level |
 | Cursor guides | Show or hide the pointer-following overlay; shown by default |
 | Guide geometry | Use horizontal/vertical lines or crossing diagonals |
 | Guide style | Use dotted (default), dashed, or solid strokes |
@@ -360,8 +362,8 @@ Advanced controls are collapsed by default.
 
 Plot resolution changes the number of independently calculated matrix cells, not the CSS
 size of the plot. The plot expands with the browser window while retaining the selected
-scientific resolution. Plot window size translates the current scientific resolution
-into genomic coordinates. It updates as the plot zooms and reports one
+scientific resolution. The primary **Plot window size** control translates the current
+scientific resolution into genomic coordinates. It updates as the plot zooms and reports one
 nearest-whole-base value per cell when the common domain does not divide evenly. Grid
 plots report that the value varies until an individual comparison is opened because
 their sequence lengths can differ.
@@ -385,17 +387,17 @@ They are unavailable in Grid mode because the grid contains multiple bounded qui
 overviews rather than one detailed current viewport. Click a grid cell to open its
 interactive comparison before exporting.
 
-Select **Export data**, then choose BEDPE or CSV in the native Save As dialog. BEDPE is
-the default and writes each nonzero valid current-view cell as an interval pair with
-`ANI_c`, relative direction, and support. Configuration and estimator details are kept
-once in the provenance preamble rather than repeated in every BEDPE row. CSV provides
-a compact nine-column scientific table with sequence IDs, interval pairs, `ANI_c`,
-direction, and direction support. Zero-valued and missing cells are omitted. The exact
-column definitions and formulas are in [Data export formats](EXPORT_FORMATS.md).
+Select **Export ModDotPlot command** to save a BEDPE and its companion JSON config.
+BEDPE writes each nonzero valid current-view cell as an interval pair with `ANI_c`,
+relative direction, and support. Configuration and estimator details are kept once in
+the provenance preamble rather than repeated in every BEDPE row. Zero-valued and
+missing cells are omitted. The exact column definitions and formulas are in
+[Data export formats](EXPORT_FORMATS.md).
 
 Every numeric export also saves `<plot-name>.config.json`. Keep that JSON beside the
 original FASTA file or edit its `fasta` paths, then run it with
-`moddotplot -c <plot-name>.config.json` using the official ModDotPlot develop version.
+`moddotplot -c <plot-name>.config.json -l <plot-name>.bedpe` using the official
+ModDotPlot develop version.
 The config carries the selected records and visible regions, k-mer and window settings,
 identity thresholds, exact ordered colors, direction coloring, and pairwise/grid layout.
 ModDotPlot Browser and the official CLI use different estimators, so the JSON recreates
@@ -408,8 +410,9 @@ Before either data or image output is written, every tile intersecting the curre
 is calculated with the selected **Detailed accuracy** register count. Terminal zoom is
 exact. Export therefore waits when necessary and never writes quick-view estimates.
 
-Numeric construction is limited to two million participating renderer cells so it
-stays within the transient-memory plan. If a full high-detail view exceeds that limit,
+Numeric construction is limited to two million nonzero output rows so it stays within
+the transient-memory plan. Blank and missing renderer cells do not count toward that
+limit. If a genuinely dense high-detail view exceeds the limit,
 zoom in or choose a lower **Plot resolution** setting before exporting.
 
 Select **Export image**, then choose PNG, SVG, or PDF in the native Save As dialog. All

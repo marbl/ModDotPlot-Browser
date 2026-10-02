@@ -13,7 +13,7 @@ const sequences: SequenceMetadata[] = [
 
 function context(): ModDotPlotConfigContext {
   return {
-    appVersion: "0.9.3",
+    appVersion: "0.9.4",
     baseName: "moddotplot-Chr1-vs-Chr2",
     plotMode: "pairwise" as const,
     sequences,
@@ -52,6 +52,9 @@ describe("official ModDotPlot CLI config export", () => {
     expect(config.breakpoints).toEqual([85, 89, 94, 100]);
     expect(config.identity).toBe(config.breakpoints[0]);
     expect(config._moddotplot_browser.requested_bp_per_cell).toBe(5);
+    expect(config._moddotplot_browser.command).toBe(
+      "moddotplot -c moddotplot-Chr1-vs-Chr2.config.json -l moddotplot-Chr1-vs-Chr2.bedpe",
+    );
   });
 
   it("exports one union region for an asymmetric self view", () => {

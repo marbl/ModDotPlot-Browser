@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ARABIDOPSIS_EXAMPLE_ASSETS,
   loadBundledArabidopsisAnnotation,
+  loadBundledArabidopsisDetailOverviews,
   loadBundledArabidopsisExample,
   resolveExampleAssetUrl,
   type ExampleAssetFetcher,
@@ -182,15 +183,40 @@ describe("bundled Arabidopsis example loader", () => {
     expect(progress.at(-1)).toBe(1);
   });
 
+  it("loads static 2,000- and 4,000-cell Chr1 zoom levels without raw FASTA", async () => {
+    const fetcher = vi.fn<ExampleAssetFetcher>(checkedInAssetFetcher);
+    const artifacts = await loadBundledArabidopsisDetailOverviews({
+      baseUrl: "https://example.test/app/",
+      fetcher,
+    });
+
+    expect(fetcher.mock.calls.map(([input]) => fileNameFromRequest(input))).toEqual([
+      "Col-CEN_v1.2.Chr1.2000.mdp-overview-v1.gz",
+      "Col-CEN_v1.2.Chr1.4000.mdp-overview-v1.gz",
+    ]);
+    expect(artifacts.map(({ comparison }) => comparison.resolution)).toEqual([2_000, 4_000]);
+    expect(artifacts.map(({ tiles }) => tiles.length)).toEqual([64, 256]);
+  });
+
   it("declares content hashes and checked-in sizes for every provenance asset", () => {
     expect(ARABIDOPSIS_EXAMPLE_ASSETS).toMatchObject({
       fasta: { fileName: "Col-CEN_v1.2.fasta", byteLength: 134_282_475 },
       fai: { fileName: "Col-CEN_v1.2.fasta.fai", byteLength: 195 },
       overview: {
         fileName: "Col-CEN_v1.2.Chr1.mdp-overview-v1.gz",
-        byteLength: 255_582,
+        byteLength: 255_580,
         decodedByteLength: 6_003_800,
-        decodedSha256: "82701ff40df42b075c50dd3d2b60f28be11a35cafe89647d0b3e6201748ebdd0",
+        decodedSha256: "0080892fff7512b1a35c205fc7ea7eab83b2ec88de3e39caedb64508ca9af4bc",
+      },
+      overview2000: {
+        fileName: "Col-CEN_v1.2.Chr1.2000.mdp-overview-v1.gz",
+        byteLength: 543_584,
+        decodedByteLength: 24_009_368,
+      },
+      overview4000: {
+        fileName: "Col-CEN_v1.2.Chr1.4000.mdp-overview-v1.gz",
+        byteLength: 1_256_406,
+        decodedByteLength: 96_031_736,
       },
       annotation: { fileName: "ColCEN_CEN180.gff3", byteLength: 3_647_621 },
     });
