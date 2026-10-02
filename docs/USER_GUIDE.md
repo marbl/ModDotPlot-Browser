@@ -340,7 +340,7 @@ available when orientation coloring is needed.
 | White / Black background | Choose the color used for the plot and below-minimum cells; white is the default |
 | Feature tracks | Enable sequence-derived tracks or import BED/GFF/GTF annotations, optionally gzip compressed |
 | Plot window size | Genomic interval represented by each matrix pixel at the current zoom level; hover the question mark for a sentence-form explanation |
-| Export ModDotPlot command | Save current-view BEDPE values plus an official-CLI JSON config |
+| Export ModDotPlot command | Save current-view BEDPE values plus an official-CLI JSON config in one ZIP package |
 | Export image | Save the complete current composition as PNG (default), SVG, or PDF |
 | Reset view | Return to the full comparison and redraw the overview |
 | Back to grid | Return from a grid-opened comparison to the existing grid overview |
@@ -387,15 +387,16 @@ They are unavailable in Grid mode because the grid contains multiple bounded qui
 overviews rather than one detailed current viewport. Click a grid cell to open its
 interactive comparison before exporting.
 
-Select **Export ModDotPlot command** to save a BEDPE and its companion JSON config.
+Select **Export ModDotPlot command** to save one ZIP package containing a BEDPE and its
+companion JSON config.
 BEDPE writes each nonzero valid current-view cell as an interval pair with `ANI_c`,
 relative direction, and support. Configuration and estimator details are kept once in
 the provenance preamble rather than repeated in every BEDPE row. Zero-valued and
 missing cells are omitted. The exact column definitions and formulas are in
 [Data export formats](EXPORT_FORMATS.md).
 
-Every numeric export also saves `<plot-name>.config.json`. Keep that JSON beside the
-original FASTA file or edit its `fasta` paths, then run it with
+Extract `<plot-name>.bedpe` and `<plot-name>.config.json` into the same directory. The
+config already contains `"load": ["./<plot-name>.bedpe"]`; run it with
 `moddotplot -c <plot-name>.config.json -l <plot-name>.bedpe` using the official
 ModDotPlot develop version.
 The config carries the selected records and visible regions, k-mer and window settings,

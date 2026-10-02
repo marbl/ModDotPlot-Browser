@@ -127,7 +127,7 @@ if (contract) {
   );
   requireText(
     "README.md",
-    "Export nonzero, detailed current-view data as BEDPE together with an official-CLI JSON config",
+    "Export nonzero, detailed current-view BEDPE and an official-CLI JSON config in one ZIP",
     "current data export is missing from the feature summary",
   );
   requireText(

@@ -4,6 +4,25 @@ import { gzipSync } from "node:zlib";
 
 const shortFasta = ">chrShort\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
 
+function readStoredZip(buffer: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  let offset = 0;
+  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
+    const method = buffer.readUInt16LE(offset + 8);
+    if (method !== 0) throw new Error(`Unexpected ZIP compression method ${method}`);
+    const size = buffer.readUInt32LE(offset + 18);
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = buffer.subarray(nameStart, nameStart + nameLength).toString("utf8");
+    entries.set(name, buffer.subarray(dataStart, dataStart + size));
+    offset = dataStart + size;
+  }
+  if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error("ZIP central directory is missing");
+  return entries;
+}
+
 function deterministicDna(length: number, seed = 17): string {
   let state = seed;
   return Array.from({ length }, () => {
@@ -470,7 +489,6 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
     type SaveHarness = Window & {
       __saveFormat?: string;
       __saveOptions?: { startIn?: string; types?: unknown[] };
-      __numericExport?: string;
       __forcedDetailRequests?: number;
       showSaveFilePicker?: (options: {
         suggestedName: string;
@@ -496,15 +514,10 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
       const name = requested
         ? options.suggestedName.replace(/\.[a-z0-9]+$/i, `.${requested}`)
         : options.suggestedName;
-      const isNumeric = /\.(bedpe|csv)$/i.test(name);
       return {
         name,
         createWritable: async () => ({
           write: async (blob: Blob) => {
-            if (isNumeric) {
-              harness.__numericExport = await blob.text();
-              return;
-            }
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
             anchor.href = url;
@@ -541,14 +554,21 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   expect(exportImageFit.scrollWidth).toBeLessThanOrEqual(exportImageFit.clientWidth);
   expect(exportImageFit.scrollHeight).toBeLessThanOrEqual(exportImageFit.clientHeight);
 
-  const configDownload = page.waitForEvent("download");
+  const commandDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
-  const configArtifact = await configDownload;
-  expect(configArtifact.suggestedFilename()).toBe(
-    "moddotplot-chrShort_short-vs-chrShort_short.config.json",
+  const commandArtifact = await commandDownload;
+  expect(commandArtifact.suggestedFilename()).toBe(
+    "moddotplot-chrShort_short-vs-chrShort_short.zip",
   );
-  const bedpe = await page.evaluate(() =>
-    (window as unknown as { __numericExport: string }).__numericExport);
+  const commandPath = await commandArtifact.path();
+  if (!commandPath) throw new Error("ModDotPlot command ZIP has no temporary path");
+  const commandEntries = readStoredZip(await readFile(commandPath));
+  expect([...commandEntries.keys()]).toEqual([
+    "moddotplot-chrShort_short-vs-chrShort_short.bedpe",
+    "moddotplot-chrShort_short-vs-chrShort_short.config.json",
+  ]);
+  const bedpe = commandEntries.get("moddotplot-chrShort_short-vs-chrShort_short.bedpe")?.toString("utf8");
+  if (!bedpe) throw new Error("ModDotPlot command ZIP has no BEDPE entry");
   expect(bedpe).toContain("# provenance=");
   expect(bedpe).toContain("exact complete distinct canonical k-mer-set containment");
   expect(bedpe).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
@@ -557,11 +577,11 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
     (window as unknown as { __saveOptions?: { startIn?: string; types?: unknown[] } }).__saveOptions);
   expect(saveOptions?.startIn).toBe("downloads");
   expect(saveOptions?.types).toHaveLength(1);
-  const configPath = await configArtifact.path();
-  if (!configPath) throw new Error("CLI config export has no temporary path");
-  const cliConfig = JSON.parse(await readFile(configPath, "utf8"));
+  const configEntry = commandEntries.get("moddotplot-chrShort_short-vs-chrShort_short.config.json");
+  if (!configEntry) throw new Error("ModDotPlot command ZIP has no config entry");
+  const cliConfig = JSON.parse(configEntry.toString("utf8"));
   expect(cliConfig).toMatchObject({
-    fasta: ["./short.fa"],
+    load: ["./moddotplot-chrShort_short-vs-chrShort_short.bedpe"],
     sequence: ["chrShort"],
     kmer: 21,
     compare_only: false,
@@ -573,6 +593,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
       command: "moddotplot -c moddotplot-chrShort_short-vs-chrShort_short.config.json -l moddotplot-chrShort_short-vs-chrShort_short.bedpe",
     },
   });
+  expect(cliConfig).not.toHaveProperty("fasta");
   expect(cliConfig.colors).toHaveLength(11);
   expect(cliConfig.breakpoints).toHaveLength(12);
   expect(cliConfig.identity).toBe(cliConfig.breakpoints[0]);
@@ -725,14 +746,14 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
 test("exports wait for detailed visible tiles behind a blocking progress dialog", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "export payload inspection runs on the Chromium channel");
   await page.addInitScript(() => {
-    const state = { contents: "", closedCount: 0 };
+    const state = { bytes: [] as number[], closedCount: 0 };
     (window as unknown as { __detailedSave: typeof state }).__detailedSave = state;
     (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
       .showSaveFilePicker = async (options) => ({
         name: options.suggestedName,
         createWritable: async () => ({
           write: async (blob: Blob) => {
-            state.contents = await blob.text();
+            state.bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
             await new Promise((resolve) => setTimeout(resolve, 150));
           },
           close: async () => { state.closedCount += 1; },
@@ -745,7 +766,6 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   const sequence = deterministicDna(6_000);
   await loadFasta(page, "detailed.fa", `>detailed\n${sequence}\n`);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  const configDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
   await expect(page.locator("#export-progress-dialog")).toBeVisible();
   expect(await page.locator("#export-progress-dialog").evaluate((dialog) => dialog.matches(":modal"))).toBe(true);
@@ -753,24 +773,28 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
     (window as unknown as { __detailedSave?: { closedCount: number } }).__detailedSave?.closedCount === 1,
   { timeout: 30_000 });
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
-  const contents = await page.evaluate(() =>
-    (window as unknown as { __detailedSave: { contents: string } }).__detailedSave.contents);
+  const bytes = await page.evaluate(() =>
+    (window as unknown as { __detailedSave: { bytes: number[] } }).__detailedSave.bytes);
+  const entries = readStoredZip(Buffer.from(bytes));
+  const contents = entries.get("moddotplot-detailed_detailed-vs-detailed_detailed.bedpe")?.toString("utf8");
+  if (!contents) throw new Error("Detailed export ZIP has no BEDPE entry");
   expect(contents).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
   const rows = contents.split("\n").filter((row) => /^detailed\t/.test(row));
   expect(rows.length).toBeGreaterThan(0);
   expect(rows.every((row) => row.split("\t").length === 13)).toBe(true);
   expect(contents).not.toContain("identity_fixed");
   expect(contents).not.toContain("config_digest");
-  const configArtifact = await configDownload;
-  const configPath = await configArtifact.path();
-  if (!configPath) throw new Error("CLI config export has no temporary path");
-  expect(JSON.parse(await readFile(configPath, "utf8")))
-    .toMatchObject({ fasta: ["./detailed.fa"], sequence: ["detailed"] });
+  const config = entries.get("moddotplot-detailed_detailed-vs-detailed_detailed.config.json");
+  if (!config) throw new Error("Detailed export ZIP has no config entry");
+  expect(JSON.parse(config.toString("utf8"))).toMatchObject({
+    load: ["./moddotplot-detailed_detailed-vs-detailed_detailed.bedpe"],
+    sequence: ["detailed"],
+  });
 });
 
 test("FASTA descriptions stay on axes while source-qualified IDs disambiguate selections and saves", async ({ page }) => {
   await page.addInitScript(() => {
-    const state = { suggestedName: "", contents: "", closedCount: 0 };
+    const state = { suggestedName: "", bytes: [] as number[], closedCount: 0 };
     (window as unknown as { __nativeSave: typeof state }).__nativeSave = state;
     (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
       .showSaveFilePicker = async (options) => {
@@ -779,7 +803,7 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
           name: options.suggestedName,
           createWritable: async () => ({
             write: async (blob: Blob) => {
-              state.contents = await blob.text();
+              state.bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
             },
             close: async () => { state.closedCount += 1; },
           }),
@@ -813,23 +837,24 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#y-sequence-label")).toHaveText("chr1 gorilla chromosome one");
 
-  const configDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
   await page.waitForFunction(() =>
     (window as unknown as { __nativeSave?: { closedCount: number } }).__nativeSave?.closedCount === 1);
   const saved = await page.evaluate(() =>
-    (window as unknown as { __nativeSave: { suggestedName: string; contents: string } }).__nativeSave);
-  expect(saved.suggestedName).toBe("moddotplot-chr1_human-vs-chr1_gorilla.bedpe");
-  const dataRows = saved.contents.split("\n").filter((row) => row && !row.startsWith("#"));
+    (window as unknown as { __nativeSave: { suggestedName: string; bytes: number[] } }).__nativeSave);
+  expect(saved.suggestedName).toBe("moddotplot-chr1_human-vs-chr1_gorilla.zip");
+  const entries = readStoredZip(Buffer.from(saved.bytes));
+  const bedpe = entries.get("moddotplot-chr1_human-vs-chr1_gorilla.bedpe")?.toString("utf8");
+  if (!bedpe) throw new Error("Qualified-sequence export ZIP has no BEDPE entry");
+  const dataRows = bedpe.split("\n").filter((row) => row && !row.startsWith("#"));
   expect(dataRows.length).toBeGreaterThan(0);
   expect(dataRows.every((row) => row.startsWith("chr1\t"))).toBe(true);
-  expect(saved.contents).not.toContain("human chromosome one\t");
-  expect(saved.contents).not.toContain("gorilla chromosome one\t");
-  const configArtifact = await configDownload;
-  const configPath = await configArtifact.path();
-  if (!configPath) throw new Error("CLI config export has no temporary path");
-  expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({
-    fasta: ["./human.fa", "./gorilla.fa"],
+  expect(bedpe).not.toContain("human chromosome one\t");
+  expect(bedpe).not.toContain("gorilla chromosome one\t");
+  const config = entries.get("moddotplot-chr1_human-vs-chr1_gorilla.config.json");
+  if (!config) throw new Error("Qualified-sequence export ZIP has no config entry");
+  expect(JSON.parse(config.toString("utf8"))).toMatchObject({
+    load: ["./moddotplot-chr1_human-vs-chr1_gorilla.bedpe"],
     sequence: ["chr1", "chr1"],
     compare_only: true,
   });

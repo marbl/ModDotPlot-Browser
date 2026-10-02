@@ -21,7 +21,7 @@ export interface ModDotPlotConfigContext {
 }
 
 export interface ModDotPlotCliConfig {
-  fasta: string[];
+  load: string[];
   sequence: string[];
   region?: string[];
   kmer: number;
@@ -71,7 +71,7 @@ export function createModDotPlotCliConfig(context: ModDotPlotConfigContext): Mod
     : visibleRegions(context);
 
   return {
-    fasta: distinct(selected.map((sequence) => `./${fileName(sequence.sourceFile)}`)),
+    load: [`./${outputBase}.bedpe`],
     sequence: selected.map((sequence) => sequence.name),
     ...(regions && regions.length > 0 ? { region: regions } : {}),
     kmer: context.parameters.k,
@@ -97,7 +97,7 @@ export function createModDotPlotCliConfig(context: ModDotPlotConfigContext): Mod
     _moddotplot_browser: {
       version: context.appVersion,
       command: `moddotplot -c ${outputBase}.config.json -l ${outputBase}.bedpe`,
-      note: "Recomputes this view with the official ModDotPlot estimator and loads the companion BEDPE. Keep both exports beside the named FASTA files, or edit the fasta paths.",
+      note: "Loads the companion browser-exported BEDPE. Keep the config and BEDPE together after extracting the ZIP package.",
       requested_bp_per_cell: requestedWindow,
       exported_viewport: { ...context.viewport },
     },
@@ -193,11 +193,6 @@ function intervalForAxis(
 
 function officialPaletteName(palette: string, colorCount: number): string {
   return palette === "Viridis" ? "Spectral_11" : `${palette}_${colorCount}`;
-}
-
-function fileName(value: string): string {
-  const normalized = value.replaceAll("\\", "/");
-  return normalized.split("/").filter(Boolean).at(-1) ?? value;
 }
 
 function safePathPart(value: string): string {
