@@ -282,6 +282,8 @@ assembly is centered rather than anchored to the control panel.
 
 * Use the mouse wheel or trackpad to zoom around the pointer.
 * Drag the plot to pan.
+* On a touch screen, drag with one finger to pan and pinch with two fingers to zoom
+  around their moving midpoint.
 * Select **Reset view** to return to the complete comparison.
 * In Self mode, change the single sequence selector to start another self comparison.
 * In Pairwise mode, change either sequence selector at any time to start another
@@ -293,8 +295,8 @@ assembly is centered rather than anchored to the control panel.
   releases the retained grid overview.
 
 Zooming stops when each displayed axis spans 100 bp; for a sequence shorter than 100
-bp, its full shorter extent is the limit. Wheel, keyboard, and programmatic viewport
-navigation share this bound, so no interaction can open a view closer than the
+bp, its full shorter extent is the limit. Wheel, touch, keyboard, and programmatic
+viewport navigation share this bound, so no interaction can open a view closer than the
 available 100-by-100-bp area.
 
 When entering a new level, the existing lower-resolution image is enlarged immediately.

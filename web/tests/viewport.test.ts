@@ -5,6 +5,7 @@ import {
   panBy,
   remapViewportDomain,
   zoomAt,
+  zoomBetweenPoints,
 } from "../src/viewport";
 
 describe("viewport transforms", () => {
@@ -19,6 +20,15 @@ describe("viewport transforms", () => {
     const zoomed = zoomAt(initialViewport(1000), 0.25, 0.5, 0.5);
     expect(panBy(zoomed, -10_000, 10_000).x).toBe(0);
     expect(panBy(zoomed, -10_000, 10_000).y).toBe(750);
+  });
+
+  it("keeps a pinch anchor under its moving midpoint", () => {
+    const view = initialViewport(1_000);
+    const zoomed = zoomBetweenPoints(view, 0.5, 0.5, 0.5, 0.6, 0.4);
+    expect(zoomed.width).toBe(500);
+    expect(zoomed.height).toBe(500);
+    expect(zoomed.x + zoomed.width * 0.6).toBe(500);
+    expect(zoomed.y + zoomed.height * 0.4).toBe(500);
   });
 
   it("supports fractional matrix spans needed for base-resolution sequence views", () => {

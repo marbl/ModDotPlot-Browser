@@ -49,6 +49,29 @@ export function zoomAt(
   });
 }
 
+/** Keeps the point below an earlier gesture center below its new center while zooming. */
+export function zoomBetweenPoints(
+  view: ViewportState,
+  factor: number,
+  fromUnitX: number,
+  fromUnitY: number,
+  toUnitX: number,
+  toUnitY: number,
+): ViewportState {
+  const clampedFactor = Math.max(0.05, Math.min(20, factor));
+  const newWidth = Math.max(view.minSize, Math.min(view.domain, view.width * clampedFactor));
+  const newHeight = Math.max(view.minSize, Math.min(view.domain, view.height * clampedFactor));
+  const anchorX = view.x + fromUnitX * view.width;
+  const anchorY = view.y + fromUnitY * view.height;
+  return clampViewport({
+    ...view,
+    x: anchorX - toUnitX * newWidth,
+    y: anchorY - toUnitY * newHeight,
+    width: newWidth,
+    height: newHeight,
+  });
+}
+
 export function panBy(view: ViewportState, deltaX: number, deltaY: number): ViewportState {
   return clampViewport({ ...view, x: view.x + deltaX, y: view.y + deltaY });
 }

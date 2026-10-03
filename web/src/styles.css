@@ -1419,6 +1419,7 @@ body.is-track-pointer-dragging * { cursor: grabbing !important; }
 }
 
 @media (max-width: 760px) {
+  .landing-logo-heading { width: min(660px, 75vw); }
   .workspace { grid-template-columns: 1fr; }
   .controls { position: static; }
   .plot-grid-header { align-items: start; flex-direction: column; gap: 4px; }

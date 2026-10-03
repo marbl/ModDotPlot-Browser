@@ -7,6 +7,19 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-10-03
+
+### Added
+
+* Added native one-finger plot panning and two-finger pinch zooming for touch screens.
+  Pinching follows the moving midpoint while retaining the same 100-bp zoom floor and
+  background-refinement behavior as desktop navigation.
+
+### Changed
+
+* Constrained the animated landing logo to the FASTA drop area's width on screens up to
+  760 pixels, keeping it centered without changing its 575-pixel desktop size.
+
 ## [0.9.5] - 2026-10-02
 
 ### Fixed
@@ -689,7 +702,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.2...v0.9.3

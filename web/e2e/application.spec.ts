@@ -249,6 +249,69 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   expect(unexpectedRequests).toEqual([]);
 });
 
+test("mobile landing logo matches the FASTA drop width and remains centered", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const logo = await page.locator(".landing-logo-heading").boundingBox();
+  const drop = await page.locator(".drop-zone-frame").boundingBox();
+  if (!logo || !drop) throw new Error("Mobile landing layout is missing");
+  expect(logo.width).toBeCloseTo(drop.width, 1);
+  expect(logo.x + logo.width / 2).toBeCloseTo(drop.x + drop.width / 2, 1);
+});
+
+test("mobile touch gestures pinch to zoom and drag to pan", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "real multi-touch injection uses Chromium's input protocol");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.locator("#resolution").selectOption("500", { force: true });
+  await page.locator("#kmer-length").fill("5", { force: true });
+  await loadFasta(page, "mobile.fa", `>mobile\n${deterministicDna(6_000)}\n`);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 20_000 });
+
+  const canvas = page.locator("#plot-canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const bounds = await canvas.boundingBox();
+  if (!bounds) throw new Error("Mobile plot has no bounds");
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+  const initialWindow = Number((await page.locator("#plot-window-size").innerText()).match(/[\d,]+/)?.[0].replaceAll(",", ""));
+  const client = await page.context().newCDPSession(page);
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [
+      { x: centerX - 40, y: centerY, id: 1 },
+      { x: centerX + 40, y: centerY, id: 2 },
+    ],
+  });
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [
+      { x: centerX - 100, y: centerY, id: 1 },
+      { x: centerX + 100, y: centerY, id: 2 },
+    ],
+  });
+  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect.poll(async () =>
+    Number((await page.locator("#plot-window-size").innerText()).match(/[\d,]+/)?.[0].replaceAll(",", "")),
+  ).toBeLessThan(initialWindow);
+
+  const beforePan = await page.locator("#x-axis-overlay").evaluate(
+    (axis: HTMLCanvasElement) => axis.toDataURL(),
+  );
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: centerX, y: centerY, id: 3 }],
+  });
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: centerX + 55, y: centerY, id: 3 }],
+  });
+  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect.poll(async () => page.locator("#x-axis-overlay").evaluate(
+    (axis: HTMLCanvasElement) => axis.toDataURL(),
+  )).not.toBe(beforePan);
+});
+
 test("Clear restores Bases with similarity coloring for a new exact session", async ({ page }) => {
   await page.goto("/");
   await loadFasta(page, "first.fa", shortFasta);
