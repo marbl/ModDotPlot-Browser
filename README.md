@@ -68,7 +68,8 @@ remain in a [historical decision record](docs/adr/0004-validated-production-back
   The retained grid is released when the user leaves that return flow.
 * Render 500, 1,000, 2,000, or 4,000 overview cells per axis.
 * Paint completed quick blocks immediately and refine uncertain tiles asynchronously.
-* Pan and zoom through cached 256 by 256 tiles with coarse visual fallback.
+* Pan and zoom through cached 256 by 256 tiles with coarse visual fallback, using a
+  mouse, trackpad, keyboard, or one-finger pan and two-finger pinch on touch screens.
   Plot hovers identify both selected sequence names alongside their X/Y genomic
   intervals, and the closest interactive view is bounded to 100 bp per axis.
 * Follow the pointer with dotted horizontal and vertical plot guides; Advanced options

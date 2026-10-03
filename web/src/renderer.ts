@@ -15,6 +15,7 @@ import {
   panBy,
   remapViewportDomain,
   zoomAt,
+  zoomBetweenPoints,
   type ViewportState,
 } from "./viewport";
 import { selectTileEvictionCandidate } from "./cache";
@@ -117,6 +118,7 @@ export class DotplotRenderer {
   #frameResolvers: Array<() => void> = [];
   #pointerId: number | null = null;
   #lastPointer = { x: 0, y: 0 };
+  readonly #touchPointers = new Map<number, { x: number; y: number }>();
   #lastHoverEvent: PointerEvent | null = null;
   #hoverListener: ((datum: HoverDatum | null, event: PointerEvent) => void) | null = null;
   #viewListener: ((change: ViewChange) => void) | null = null;
@@ -515,12 +517,58 @@ export class DotplotRenderer {
       this.#notifyViewChange();
     });
     this.#canvas.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "touch") {
+        event.preventDefault();
+        if (this.#touchPointers.size >= 2) return;
+        this.#touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        this.#canvas.setPointerCapture(event.pointerId);
+        this.#canvas.classList.add("is-panning");
+        this.#lastHoverEvent = null;
+        this.#hoverListener?.(null, event);
+        return;
+      }
       this.#pointerId = event.pointerId;
       this.#lastPointer = { x: event.clientX, y: event.clientY };
       this.#canvas.setPointerCapture(event.pointerId);
       this.#canvas.classList.add("is-panning");
     });
     this.#canvas.addEventListener("pointermove", (event) => {
+      const previousTouch = this.#touchPointers.get(event.pointerId);
+      if (previousTouch) {
+        event.preventDefault();
+        const rect = this.#canvas.getBoundingClientRect();
+        const before = [...this.#touchPointers.values()];
+        this.#touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const after = [...this.#touchPointers.values()];
+        if (after.length === 1) {
+          this.#view = panBy(
+            this.#view,
+            (-(event.clientX - previousTouch.x) / rect.width) * this.#view.width,
+            ((event.clientY - previousTouch.y) / rect.height) * this.#view.height,
+          );
+        } else {
+          const previousGesture = pointerPairGeometry(before[0]!, before[1]!);
+          const currentGesture = pointerPairGeometry(after[0]!, after[1]!);
+          const factor = currentGesture.distance > Number.EPSILON
+            ? previousGesture.distance / currentGesture.distance
+            : 1;
+          this.#view = zoomBetweenPoints(
+            this.#view,
+            factor,
+            (previousGesture.x - rect.left) / rect.width,
+            1 - (previousGesture.y - rect.top) / rect.height,
+            (currentGesture.x - rect.left) / rect.width,
+            1 - (currentGesture.y - rect.top) / rect.height,
+          );
+        }
+        this.#requestRender();
+        this.#notifyViewChange();
+        return;
+      }
+      if (event.pointerType === "touch") {
+        event.preventDefault();
+        return;
+      }
       if (this.#pointerId === event.pointerId) {
         const rect = this.#canvas.getBoundingClientRect();
         const deltaX = event.clientX - this.#lastPointer.x;
@@ -539,6 +587,13 @@ export class DotplotRenderer {
       }
     });
     const release = (event: PointerEvent): void => {
+      if (this.#touchPointers.delete(event.pointerId)) {
+        event.preventDefault();
+        if (this.#touchPointers.size === 0) this.#canvas.classList.remove("is-panning");
+        this.#lastHoverEvent = null;
+        this.#hoverListener?.(null, event);
+        return;
+      }
       if (this.#pointerId !== event.pointerId) return;
       this.#pointerId = null;
       this.#canvas.classList.remove("is-panning");
@@ -548,6 +603,7 @@ export class DotplotRenderer {
     this.#canvas.addEventListener("pointerup", release);
     this.#canvas.addEventListener("pointercancel", release);
     this.#canvas.addEventListener("pointerleave", (event) => {
+      if (event.pointerType === "touch") return;
       if (this.#pointerId === null) {
         this.#lastHoverEvent = null;
         this.#hoverListener?.(null, event);
@@ -772,6 +828,17 @@ export class DotplotRenderer {
   #isRenderableResolution(resolution: number): boolean {
     return resolution >= this.#metadata.resolution && resolution <= this.#activeResolution;
   }
+}
+
+function pointerPairGeometry(
+  first: { x: number; y: number },
+  second: { x: number; y: number },
+): { x: number; y: number; distance: number } {
+  return {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2,
+    distance: Math.hypot(second.x - first.x, second.y - first.y),
+  };
 }
 
 interface TileBounds {

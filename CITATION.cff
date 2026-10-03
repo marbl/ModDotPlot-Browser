@@ -4,8 +4,8 @@ message: >-
   preferred citation and credit the relevant method papers listed in references.
 title: "ModDotPlot Browser"
 type: software
-version: 0.9.5
-date-released: 2026-10-02
+version: 0.9.6
+date-released: 2026-10-03
 repository-code: "https://github.com/marbl/ModDotPlot-Browser"
 license: MIT-0
 abstract: >-
