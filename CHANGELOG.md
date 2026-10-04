@@ -7,6 +7,22 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-10-03
+
+### Added
+
+* Added an explicit Open Graph and large-card social preview using the bundled
+  `browser_1.png` artwork, including its dimensions and accessible description.
+* Added **Export ModDotPlot command** to grid mode. The ZIP contains one BEDPE for
+  every selected self plot and unique pairwise plot, plus a config that lists all
+  companion files and records a runnable `moddotplot --grid-only -c … -l …` command.
+
+### Changed
+
+* Report one grid-wide plot window size from the largest selected sequence and the
+  shared 512-cell overview scale, with the same genomic-interval tooltip used by
+  interactive plots.
+
 ## [0.9.6] - 2026-10-03
 
 ### Added
@@ -702,7 +718,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.6...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.7...HEAD
+[0.9.7]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.3...v0.9.4

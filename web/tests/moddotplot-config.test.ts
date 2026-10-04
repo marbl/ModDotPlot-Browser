@@ -72,11 +72,23 @@ describe("official ModDotPlot CLI config export", () => {
     const input = context();
     input.plotMode = "grid";
     input.gridSequenceIndices = [1, 0];
+    input.loadFiles = [
+      "moddotplot-Chr2-vs-Chr2.bedpe",
+      "moddotplot-Chr1-vs-Chr2.bedpe",
+      "moddotplot-Chr1-vs-Chr1.bedpe",
+    ];
     const config = createModDotPlotCliConfig(input);
     expect(config.sequence).toEqual(["Chr2", "Chr1"]);
-    expect(config.load).toEqual(["./moddotplot-Chr1-vs-Chr2.bedpe"]);
+    expect(config.load).toEqual([
+      "./moddotplot-Chr2-vs-Chr2.bedpe",
+      "./moddotplot-Chr1-vs-Chr2.bedpe",
+      "./moddotplot-Chr1-vs-Chr1.bedpe",
+    ]);
     expect(config.region).toBeUndefined();
     expect(config.grid_only).toBe(true);
+    expect(config._moddotplot_browser.command).toBe(
+      "moddotplot --grid-only -c moddotplot-Chr1-vs-Chr2.config.json -l moddotplot-Chr2-vs-Chr2.bedpe moddotplot-Chr1-vs-Chr2.bedpe moddotplot-Chr1-vs-Chr1.bedpe",
+    );
   });
 
   it("emits one more breakpoint than color and anchors at min, midpoint, max", () => {

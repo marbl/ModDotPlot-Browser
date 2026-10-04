@@ -176,6 +176,16 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
 
   await page.goto("/");
   await expect(page).toHaveTitle("ModDotPlot Browser");
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+    "content",
+    "https://marbl.github.io/ModDotPlot-Browser/browser_1.png",
+  );
+  await expect(page.locator('meta[property="og:image:width"]')).toHaveAttribute("content", "2508");
+  await expect(page.locator('meta[property="og:image:height"]')).toHaveAttribute("content", "750");
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute("content", "summary_large_image");
+  const socialPreview = await page.request.get("/browser_1.png");
+  expect(socialPreview.ok()).toBe(true);
+  expect(socialPreview.headers()["content-type"]).toBe("image/png");
   await expect(page.locator("#landing h1")).toHaveAccessibleName("ModDotPlot Browser");
   await expect(page.locator("#landing .landing-logo")).toHaveAttribute(
     "src",
@@ -924,6 +934,23 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
 });
 
 test("multi-record inputs expose self, pairwise, and bounded grid plot modes", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { suggestedName: "", bytes: [] as number[], closedCount: 0 };
+    (window as unknown as { __gridSave: typeof state }).__gridSave = state;
+    (window as unknown as { showSaveFilePicker: (options: { suggestedName: string }) => Promise<unknown> })
+      .showSaveFilePicker = async (options) => {
+        state.suggestedName = options.suggestedName;
+        return {
+          name: options.suggestedName,
+          createWritable: async () => ({
+            write: async (blob: Blob) => {
+              state.bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+            },
+            close: async () => { state.closedCount += 1; },
+          }),
+        };
+      };
+  });
   await page.goto("/");
   await loadFasta(page, "three.fa", [
     ">alpha first record",
@@ -962,7 +989,7 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
 
   await page.locator("#plot-mode-grid").click();
   await expect(page.locator("#grid-selection-panel")).toBeVisible();
-  await expect(page.locator("#plot-window-size")).toHaveText("Varies by grid plot");
+  await expect(page.locator("#plot-window-size")).toHaveText("1 bp per cell");
   await expect(page.locator("#plot-grid-view")).toBeVisible();
   await expect(page.locator("#plot-shell")).toBeHidden();
   await expect(page.locator("#identity-histogram")).toBeHidden();
@@ -972,9 +999,13 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
   await expect(page.locator('.grid-plot-cell[data-canonical="true"]')).toHaveCount(6);
   await expect(page.locator(".grid-plot-cell.is-diagonal")).toHaveCount(3);
   await expect(page.locator("#feature-track-controls")).toBeHidden();
-  await expect(page.locator("#plot-actions")).toBeHidden();
+  await expect(page.locator("#plot-actions")).toBeVisible();
+  await expect(page.locator("#reset-view")).toBeHidden();
+  await expect(page.locator("#export-image")).toBeHidden();
+  await expect(page.locator("#export-data")).toBeVisible();
   await expect(page.locator("#status")).toContainText("Ready · 6 grid comparisons", { timeout: 30_000 });
   await expect(page.locator(".grid-plot-cell.is-ready")).toHaveCount(9);
+  await expect(page.locator("#export-data")).toBeEnabled();
   await expect(page.locator('.grid-plot-cell[data-x-index="0"][data-y-index="0"]'))
     .toHaveAttribute("data-grid-row", "2");
   await expect(page.locator('.grid-plot-cell[data-x-index="1"][data-y-index="1"]'))
@@ -1005,6 +1036,31 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
   expect(gridBackingSizes).toHaveLength(9);
   expect(gridBackingSizes.every(({ width, height }) => width === 512 && height === 512)).toBe(true);
 
+  await page.locator("#export-data").click();
+  await page.waitForFunction(() =>
+    (window as unknown as { __gridSave?: { closedCount: number } }).__gridSave?.closedCount === 1);
+  const gridSave = await page.evaluate(() =>
+    (window as unknown as { __gridSave: { suggestedName: string; bytes: number[] } }).__gridSave);
+  expect(gridSave.suggestedName).toBe(
+    "moddotplot-grid-alpha_three-beta_three-gamma_three.zip",
+  );
+  const gridCommandEntries = readStoredZip(Buffer.from(gridSave.bytes));
+  const gridBedpeNames = [...gridCommandEntries.keys()].filter((name) => name.endsWith(".bedpe"));
+  expect(gridBedpeNames).toHaveLength(6);
+  const gridConfigName = [...gridCommandEntries.keys()].find((name) => name.endsWith(".config.json"));
+  if (!gridConfigName) throw new Error("Grid ModDotPlot command ZIP has no config entry");
+  const gridConfig = JSON.parse(gridCommandEntries.get(gridConfigName)!.toString("utf8"));
+  expect(gridConfig).toMatchObject({
+    sequence: ["alpha", "beta", "gamma"],
+    grid_only: true,
+    compare_only: false,
+  });
+  expect(gridConfig.load).toHaveLength(6);
+  expect(gridConfig.load).toEqual(gridBedpeNames.map((name) => `./${name}`));
+  expect(gridConfig._moddotplot_browser.command).toBe(
+    `moddotplot --grid-only -c ${gridConfigName} -l ${gridBedpeNames.join(" ")}`,
+  );
+
   const openedGridCell = page.locator('.grid-plot-cell[data-grid-row="0"][data-grid-column="0"]');
   await openedGridCell.click();
   await expect(page.locator("#plot-mode-pairwise")).toHaveAttribute("aria-selected", "true");
@@ -1021,7 +1077,7 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
   await expect(openedGridCell).toBeFocused();
   await expect(page.locator("#plot-grid-view")).toBeVisible();
   await expect(page.locator("#back-to-grid")).toBeHidden();
-  await expect(page.locator("#plot-window-size")).toHaveText("Varies by grid plot");
+  await expect(page.locator("#plot-window-size")).toHaveText("1 bp per cell");
   await expect(page.locator(".grid-plot-cell.is-ready")).toHaveCount(9);
 
   const transposedGridCell = page.locator('.grid-plot-cell[data-grid-row="2"][data-grid-column="2"]');
@@ -1144,6 +1200,10 @@ test("grid plots share the largest selected genomic scale through reciprocal and
   });
   await expect(page.locator(".grid-plot-cell.is-ready")).toHaveCount(9);
   await expect(page.locator("#plot-grid")).toHaveAttribute("data-domain-length", "32768");
+  await expect(page.locator("#plot-window-size")).toHaveText("64 bp per cell");
+  await expect(page.locator("#plot-window-size-note")).toHaveText(
+    "Each pixel represents a genomic interval of 64 bases across the shared grid scale",
+  );
 
   const longSelf = page.locator(
     '.grid-plot-cell[data-x-index="0"][data-y-index="0"] canvas',
