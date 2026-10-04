@@ -196,7 +196,7 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator(".landing-notes")).toHaveCount(0);
   await expect(page.locator("#drop-title")).toHaveText("Drop FASTA files here");
   await expect(page.locator(".drop-detail")).toHaveText(
-    "or click to choose files · FASTA, gzip, and BGZF · optional fai/gzi indixes (faster loading)",
+    "or click to choose files · FASTA, gzip, and BGZF optional fai/gzi indices (faster loading)",
   );
   await expect(page.locator(".annotation-drop-title")).toHaveText("Drop annotation files here");
   await expect(page.locator(".annotation-drop-detail")).toContainText("BED, GFF3, or GTF");
@@ -210,11 +210,10 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot-Browser"]')).toBeVisible();
   await expect(page.locator(".github-link .github-icon")).toHaveCount(2);
   await expect(page.locator(".publication-warning")).toHaveText(
-    "This experimental, vibe-coded WebAssembly version of ModDotPlot should not be used for publications. Please use the official ModDotPlot CLI instead.",
+    "This web application uses WebAssembly to run ModDotPlot locally in your browser. Your files stay on your device and are not uploaded to a server. If you use ModDotPlot in your research, please cite our ModDotPlot publication. For analyses intended for publication, please use the official ModDotPlot CLI.",
   );
-  await expect(page.locator(".publication-warning strong em")).toHaveText(
-    "should not be used for publications",
-  );
+  await expect(page.locator('.publication-warning a[href="https://doi.org/10.1093/bioinformatics/btae493"]')).toHaveText("ModDotPlot publication");
+  await expect(page.locator('.publication-warning a[href="https://github.com/marbl/moddotplot"]')).toHaveText("ModDotPlot CLI");
   const landingVersion = await page.locator("#landing-version").textContent();
   const progressStyle = await page.locator("#compute-progress svg").evaluate((element) => {
     const style = getComputedStyle(element);

@@ -41,7 +41,10 @@
           <div class="drop-zone-frame">
             <button id="drop-zone" class="drop-zone" type="button">
               <span id="drop-title" class="drop-title">Drop FASTA files here</span>
-              <span class="drop-detail">or click to choose files · FASTA, gzip, and BGZF · optional fai/gzi indixes (faster loading)</span>
+              <span class="drop-detail">
+                <span>or click to choose files · FASTA, gzip, and BGZF</span>
+                <span>optional fai/gzi indices (faster loading)</span>
+              </span>
               <span id="fasta-selection" class="landing-file-selection" aria-live="polite">No FASTA selected</span>
             </button>
             <button id="annotation-drop-zone" class="annotation-drop-zone" type="button">
@@ -62,7 +65,14 @@
                   <span>ModDotPlot Browser GitHub</span>
                 </a>
               </nav>
-              <p class="publication-warning">This experimental, vibe-coded WebAssembly version of ModDotPlot <strong><em>should not be used for publications</em></strong>. Please use the official ModDotPlot CLI instead.</p>
+              <p class="publication-warning">
+                This web application uses WebAssembly to run ModDotPlot locally in your browser.
+                Your files stay on your device and are not uploaded to a server. If you use
+                ModDotPlot in your research, please cite our
+                <a href="https://doi.org/10.1093/bioinformatics/btae493" target="_blank" rel="noreferrer">ModDotPlot publication</a>.
+                For analyses intended for publication, please use the official
+                <a href="https://github.com/marbl/moddotplot" target="_blank" rel="noreferrer">ModDotPlot CLI</a>.
+              </p>
             </div>
             <div id="example-progress" class="example-progress" role="status" aria-live="polite" hidden>
               <div class="example-progress-heading">

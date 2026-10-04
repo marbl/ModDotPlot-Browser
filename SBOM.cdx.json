@@ -6,7 +6,7 @@
     "component": {
       "type": "application",
       "name": "moddotplot-interactive",
-      "version": "0.9.7",
+      "version": "0.9.8",
       "licenses": [
         {
           "license": {

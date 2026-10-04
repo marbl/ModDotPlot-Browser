@@ -21,7 +21,22 @@ export default defineConfig({
     },
     {
       name: "firefox",
-      use: { ...devices["Desktop Firefox"] },
+      use: {
+        ...devices["Desktop Firefox"],
+        // GitHub's Linux runners do not expose a display-backed WebGL2 context to
+        // headless Firefox. CI wraps Playwright in Xvfb so Firefox can exercise the
+        // same renderer through Mesa's software backend.
+        headless: process.env.CI ? false : true,
+        launchOptions: {
+          firefoxUserPrefs: {
+            "webgl.disabled": false,
+            "webgl.enable-webgl2": true,
+            "webgl.forbid-software": false,
+            "webgl.force-enabled": true,
+            "webgl.ignore-blocklist": true,
+          },
+        },
+      },
     },
     {
       name: "webkit",
