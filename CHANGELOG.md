@@ -21,6 +21,9 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Run Firefox end-to-end coverage against an Xvfb display on Linux CI and explicitly
   enable its software WebGL2 backend. This prevents renderer startup from collapsing
   the landing page and turning the Firefox suite into repeated locator timeouts.
+* Preserve the WebGL back buffer only inside the exact-render pixel test so Linux
+  WebKit screenshots measure the rendered categories instead of a discarded black
+  buffer.
 
 ## [0.9.7] - 2026-10-03
 
