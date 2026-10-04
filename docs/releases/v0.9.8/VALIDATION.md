@@ -13,6 +13,7 @@ Validation date: 2026-10-03
 | Documentation contracts | Pass: 90 generated Markdown documents and implementation contracts checked |
 | Chromium, Firefox, and WebKit end-to-end tests | Pass: 102 passed, 6 platform-specific skips |
 | Firefox CI display path | Pass: focused startup and mobile-layout tests pass with `CI=1` |
+| WebKit exact-render readback | Pass: categorical pixel oracle passed 3 consecutive runs |
 | Landing-page content and links | Pass: input guidance uses two lines and both publication/CLI targets are asserted |
 
 The Firefox CI regression is validated both through the regular local headless project

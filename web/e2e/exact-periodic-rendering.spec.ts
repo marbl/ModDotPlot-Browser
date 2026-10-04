@@ -117,6 +117,22 @@ test("periodic exact mode remains categorical across DPR, resize, and exact view
 
 async function installExactTileProbe(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
+    // WebKit on a display-less Linux runner may discard a WebGL back buffer before
+    // Playwright's element screenshot reads it, producing a fully opaque black PNG
+    // even though the composited plot is correct. Preserve only this test canvas so
+    // the pixel oracle measures the shader output rather than that readback artifact.
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      writable: true,
+      value(this: HTMLCanvasElement, contextId: string, options?: unknown) {
+        const contextOptions = this.id === "plot-canvas" && contextId === "webgl2"
+          ? { ...(options as object | undefined), preserveDrawingBuffer: true }
+          : options;
+        return Reflect.apply(nativeGetContext, this, [contextId, contextOptions]);
+      },
+    });
+
     // Chromium's headless DPR emulation reports CSS-pixel values through
     // devicePixelContentBoxSize even though window.devicePixelRatio is changed. Hide that
     // optional field so every engine takes the application's standards-compatible DPR
