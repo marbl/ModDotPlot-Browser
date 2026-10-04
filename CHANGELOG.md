@@ -7,6 +7,21 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-10-03
+
+### Changed
+
+* Split the FASTA compatibility and optional-index guidance across two landing-page
+  lines, and corrected `indixes` to `indices`.
+* Replaced the landing-page publication warning with a privacy explanation, a link to
+  the ModDotPlot publication, and guidance linking to the official CLI.
+
+### Fixed
+
+* Run Firefox end-to-end coverage against an Xvfb display on Linux CI and explicitly
+  enable its software WebGL2 backend. This prevents renderer startup from collapsing
+  the landing page and turning the Firefox suite into repeated locator timeouts.
+
 ## [0.9.7] - 2026-10-03
 
 ### Added
@@ -718,7 +733,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.7...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.8...HEAD
+[0.9.8]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.4...v0.9.5

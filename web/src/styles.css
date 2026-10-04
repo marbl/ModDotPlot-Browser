@@ -133,7 +133,13 @@ h1 {
   letter-spacing: -0.025em;
 }
 
-.drop-detail { color: var(--muted); font-size: 14px; }
+.drop-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 14px;
+}
 .annotation-drop-zone {
   width: 100%;
   min-height: 94px;
@@ -238,6 +244,12 @@ h1 {
   line-height: 1.4;
   text-align: center;
 }
+.publication-warning a {
+  color: #5d6873;
+  font-weight: 650;
+  text-underline-offset: 2px;
+}
+.publication-warning a:hover, .publication-warning a:focus-visible { color: #315f78; }
 .github-link:hover, .github-link:focus-visible {
   border-color: #6a6570;
   color: #27242a;
