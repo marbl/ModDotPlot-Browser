@@ -13,6 +13,7 @@ import {
   type RgbaColor,
 } from "./heatmap";
 import { paletteDefaultColorCount } from "./palettes";
+import type { NumericTileView } from "./export";
 import type { MatrixTilePayload } from "./protocol";
 
 const MISSING_IDENTITY = 65_535;
@@ -139,6 +140,23 @@ export class GridPairRenderer {
         + (tile.bases?.byteLength ?? 0);
     }
     return bytes;
+  }
+
+  /** Exposes the retained scientific grid tiles for reproducible BEDPE export. */
+  exportTileViews(): NumericTileView[] {
+    this.#assertAlive();
+    return [...this.#tiles.values()].map((tile) => ({
+      configDigest: tile.configDigest,
+      quality: tile.quality,
+      resolution: tile.resolution,
+      x: tile.x,
+      y: tile.y,
+      width: tile.width,
+      height: tile.height,
+      identity: tile.identity,
+      direction: tile.direction,
+      directionSupport: tile.directionSupport,
+    }));
   }
 
   /** Releases retained tile arrays and restores both canvases to the selected background. */

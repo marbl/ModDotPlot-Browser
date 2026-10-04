@@ -8,7 +8,7 @@ import {
   type NumericExportContext,
 } from "./export";
 import type { DotplotRenderer } from "./renderer";
-import { createZipArchive } from "./zip";
+import { createZipArchive, type ZipEntry } from "./zip";
 
 type ExportKind = "data" | "image";
 
@@ -23,6 +23,7 @@ interface ExportControllerOptions {
   provenance: () => ExportProvenance;
   numericContext: () => NumericExportContext | null;
   cliConfig: () => Blob | null;
+  gridCommandEntries: (onProgress: (message: string, progress?: number) => void) => Promise<readonly ZipEntry[] | null>;
   prepareDetailedExport: (onProgress: (message: string, progress?: number) => void) => Promise<void>;
   progressDialog: HTMLDialogElement;
   progressMessage: HTMLElement;
@@ -106,27 +107,33 @@ export class ExportController {
       if (!this.#options.progressDialog.open) this.#options.progressDialog.showModal();
     };
     try {
-      reportProgress("Checking detailed tiles");
-      await this.#options.prepareDetailedExport(reportProgress);
       const baseName = this.#options.baseName();
       const fileName = withExtension(baseName, format);
-      const provenance = this.#options.provenance();
       let output: Blob;
-      let configOutput: Blob | null = null;
       if (kind === "data") {
-        reportProgress("Building data export");
-        const context = this.#options.numericContext();
-        const tiles = this.#options.renderer.exportTileViews(true);
-        if (!context || tiles.length === 0) throw new Error("No rendered plot data is available to export yet.");
-        const bedpeOutput = createNumericExport(tiles, context, provenance, "bedpe");
-        configOutput = this.#options.cliConfig();
-        if (!configOutput) throw new Error("No active comparison is available for the ModDotPlot CLI config.");
-        reportProgress("Packaging BEDPE and config");
-        output = await createZipArchive([
-          { name: `${baseName}.bedpe`, data: bedpeOutput },
-          { name: `${baseName}.config.json`, data: configOutput },
-        ]);
+        const gridEntries = await this.#options.gridCommandEntries(reportProgress);
+        if (gridEntries) {
+          reportProgress("Packaging grid BEDPE files and config");
+          output = await createZipArchive(gridEntries);
+        } else {
+          reportProgress("Checking detailed tiles");
+          await this.#options.prepareDetailedExport(reportProgress);
+          reportProgress("Building data export");
+          const context = this.#options.numericContext();
+          const tiles = this.#options.renderer.exportTileViews(true);
+          if (!context || tiles.length === 0) throw new Error("No rendered plot data is available to export yet.");
+          const bedpeOutput = createNumericExport(tiles, context, this.#options.provenance(), "bedpe");
+          const configOutput = this.#options.cliConfig();
+          if (!configOutput) throw new Error("No active comparison is available for the ModDotPlot CLI config.");
+          reportProgress("Packaging BEDPE and config");
+          output = await createZipArchive([
+            { name: `${baseName}.bedpe`, data: bedpeOutput },
+            { name: `${baseName}.config.json`, data: configOutput },
+          ]);
+        }
       } else {
+        reportProgress("Checking detailed tiles");
+        await this.#options.prepareDetailedExport(reportProgress);
         reportProgress("Rendering image");
         const plot = await this.#options.renderer.exportPng(2);
         const scene = await createCompositeExportScene(
@@ -134,10 +141,10 @@ export class ExportController {
           this.#options.plotFrame,
           plot,
           this.#options.axes.exportGeometry(),
-          provenance,
+          this.#options.provenance(),
         );
         output = await renderCompositeExport(scene, format as ImageExportFormat);
-        if (format === "png") output = await embedPngProvenance(output, provenance);
+        if (format === "png") output = await embedPngProvenance(output, this.#options.provenance());
       }
       reportProgress("Saving file", 1);
       if (handle) {

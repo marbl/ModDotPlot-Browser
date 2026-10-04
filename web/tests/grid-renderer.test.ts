@@ -175,9 +175,18 @@ describe("grid pair renderer", () => {
       [...identityColorRgba(10_000, "Spectral", range, false)],
     );
     expect(renderer.estimatedBytes()).toBe(6);
+    expect(renderer.exportTileViews()).toMatchObject([{
+      quality: "refined",
+      resolution: 1,
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    }]);
 
     renderer.clearTiles();
     expect(renderer.estimatedBytes()).toBe(0);
+    expect(renderer.exportTileViews()).toEqual([]);
     expect(pixel(target.context, 0, 0)).toEqual([255, 255, 255, 255]);
   });
 

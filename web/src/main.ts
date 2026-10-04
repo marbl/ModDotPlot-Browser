@@ -18,7 +18,7 @@ import {
   type ArabidopsisExampleStartup,
 } from "./example-loader";
 import { ExportController } from "./export-controller";
-import { exportBaseName, type ExportProvenance, type NumericExportContext } from "./export";
+import { createNumericExport, exportBaseName, type ExportProvenance, type NumericExportContext } from "./export";
 import { createModDotPlotCliConfigBlob } from "./moddotplot-config";
 import {
   DEFAULT_EXACT_KMER_GEOMETRY,
@@ -348,6 +348,8 @@ interface GridRunEntry {
   comparison: GridComparison;
   renderer: GridPairRenderer;
   cells: HTMLButtonElement[];
+  parameters: ComparisonParameters;
+  configurations: ScientificConfigMetadata[];
 }
 interface GridRun {
   entries: GridRunEntry[];
@@ -463,7 +465,11 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       break;
     case "comparison-ready":
       if (message.generation !== generation) return;
-      if (gridRun?.activeGeneration === message.generation) break;
+      if (gridRun?.activeGeneration === message.generation) {
+        const entry = gridRun.entries[gridRun.activeEntry];
+        if (entry) entry.configurations = message.configurations;
+        break;
+      }
       comparisonReady = true;
       activeConfigurations = message.configurations;
       exportDataButton.disabled = renderer.exportTileViews().length === 0;
@@ -810,12 +816,15 @@ new ExportController({
   provenance: currentExportProvenance,
   numericContext: currentNumericExportContext,
   cliConfig: currentModDotPlotCliConfig,
+  gridCommandEntries: currentGridCommandEntries,
   prepareDetailedExport,
   progressDialog: exportProgressDialog,
   progressMessage: exportProgressMessage,
   progressBar: exportProgressBar,
   onError: showError,
-  canExport: () => comparisonReady && renderer.exportTileViews().length > 0,
+  canExport: () => plotMode === "grid"
+    ? gridCommandReady()
+    : comparisonReady && renderer.exportTileViews().length > 0,
 });
 clearButton.addEventListener("click", clearSession);
 retryEngineButton.addEventListener("click", restartEngine);
@@ -1229,7 +1238,9 @@ function setPlotMode(
   plotGridView.hidden = !gridActive;
   backToGridButton.hidden = gridActive || !gridReturnAvailable;
   featureTrackControls.hidden = gridActive;
-  plotActions.hidden = gridActive;
+  plotActions.hidden = false;
+  resetViewButton.hidden = gridActive;
+  exportImageButton.hidden = gridActive;
   histogramCanvas.hidden = gridActive;
   hoverCard.hidden = true;
   cursorGuideController.hide();
@@ -1245,7 +1256,7 @@ function setPlotMode(
     exportImageButton.disabled = true;
     setPlotLoading(false);
     scientificProvenance.textContent = `Grid overview · up to ${GRID_OVERVIEW_RESOLUTION.toLocaleString()} × ${GRID_OVERVIEW_RESOLUTION.toLocaleString()} cells · quick-view accuracy`;
-    scientificProvenance.title = "Open a grid cell for the fully interactive view and detailed export.";
+    scientificProvenance.title = "Export the complete overview grid, or open a cell for the fully interactive view and detailed export.";
     if (navigation.restoreGrid && gridRun) {
       gridReturnAvailable = false;
       backToGridButton.hidden = true;
@@ -1254,6 +1265,7 @@ function setPlotMode(
       status.textContent = plotStatusText;
       hideProgress();
       updateGridAppearance();
+      exportDataButton.disabled = !gridCommandReady();
     } else {
       queueGrid(0);
     }
@@ -1332,6 +1344,7 @@ function updateGridSelections(requestedSize: number, focusPosition?: number): vo
 function queueGrid(delay: number): void {
   window.clearTimeout(gridPrepareTimer);
   if (plotMode !== "grid" || gridSelectedIndices.length < 2) return;
+  exportDataButton.disabled = true;
   const activeGeneration = gridRun?.activeGeneration;
   if (activeGeneration !== null && activeGeneration !== undefined) {
     tileRequestId += 1;
@@ -1443,6 +1456,7 @@ function createGridEntries(comparisons: readonly GridComparison[]): GridRunEntry
     const y = selectedByIndex.get(comparison.yIndex);
     if (!x || !y) throw new Error("Grid planner referenced an unavailable sequence");
     const pairDomainLength = Math.max(1, x.length, y.length);
+    const overviewRegisters = Number(previewRegisterSelect.value);
     const entryCells = mirror ? [normal.button, mirror.button] : [normal.button];
     return {
       comparison,
@@ -1452,6 +1466,16 @@ function createGridEntries(comparisons: readonly GridComparison[]): GridRunEntry
         pairDomainLength / gridDomainLength,
       ),
       cells: entryCells,
+      parameters: {
+        xIndex: x.index,
+        yIndex: y.index,
+        resolution: Math.min(GRID_OVERVIEW_RESOLUTION, pairDomainLength),
+        previewRegisterCount: overviewRegisters,
+        detailedRegisterCount: overviewRegisters,
+        k: Number(kmerInput.value),
+        exactGeometry,
+      },
+      configurations: [],
     };
   });
 }
@@ -1629,6 +1653,7 @@ function prepareNextGridEntry(run: GridRun): void {
     plotStatusText = `Ready · ${run.entries.length} grid comparisons`;
     status.textContent = plotStatusText;
     hideProgress();
+    exportDataButton.disabled = !gridCommandReady(run);
     updateMemory();
     return;
   }
@@ -1644,22 +1669,11 @@ function prepareNextGridEntry(run: GridRun): void {
   generation += 1;
   tileRequestId += 1;
   run.activeGeneration = generation;
-  const domainLength = Math.max(x.length, y.length);
-  const overviewRegisters = Number(previewRegisterSelect.value);
-  const parameters: ComparisonParameters = {
-    xIndex: x.index,
-    yIndex: y.index,
-    resolution: Math.min(GRID_OVERVIEW_RESOLUTION, Math.max(1, domainLength)),
-    previewRegisterCount: overviewRegisters,
-    detailedRegisterCount: overviewRegisters,
-    k: Number(kmerInput.value),
-    exactGeometry,
-  };
   const position = run.activeEntry + 1;
   plotStatusText = `Grid ${position}/${run.entries.length} · ${x.selectionId} vs ${y.selectionId}`;
   status.textContent = plotStatusText;
   showProgress(plotStatusText, run.activeEntry / run.entries.length);
-  post({ type: "prepare", generation, requestId: tileRequestId, parameters });
+  post({ type: "prepare", generation, requestId: tileRequestId, parameters: entry.parameters });
 }
 
 function completeGridEntry(completedGeneration: number, estimatedBytes: number): void {
@@ -2350,8 +2364,15 @@ function updateParameterNotes(): void {
 
 function updatePlotWindowSize(): void {
   if (plotMode === "grid") {
-    plotWindowSize.value = "Varies by grid plot";
-    plotWindowSizeNote.textContent = "Open a grid plot to see the genomic interval represented by each pixel";
+    const selected = gridSelectedIndices.map((index) => sequences.find((sequence) => sequence.index === index))
+      .filter((sequence): sequence is SequenceMetadata => Boolean(sequence));
+    const domainLength = selected.length > 0 ? Math.max(...selected.map((sequence) => sequence.length)) : 0;
+    const resolution = Math.min(GRID_OVERVIEW_RESOLUTION, Math.max(1, domainLength));
+    plotWindowSize.value = formatPlotWindowSize(domainLength, resolution);
+    const bases = plotWindowSizeBases(domainLength, resolution);
+    plotWindowSizeNote.textContent = bases === null
+      ? "Available after grid sequence selection"
+      : `Each pixel represents a genomic interval of ${bases.toLocaleString("en-US")} bases across the shared grid scale`;
     return;
   }
   const selection = selectedSingleComparison();
@@ -2753,9 +2774,131 @@ function cancelPendingDetailedExport(error: Error): void {
 }
 
 function currentExportBaseName(): string {
+  if (plotMode === "grid") {
+    const names = gridSelectedIndices.map((index) =>
+      sequences.find((sequence) => sequence.index === index)?.selectionId ?? `sequence-${index + 1}`);
+    const safeNames = names.map((name) => name.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "sequence");
+    return `moddotplot-grid-${safeNames.join("-")}`;
+  }
   const x = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.selectionId ?? "x";
   const y = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.selectionId ?? "y";
   return exportBaseName(x, y);
+}
+
+function gridCommandReady(run = gridRun): boolean {
+  return plotMode === "grid"
+    && Boolean(run)
+    && run!.activeGeneration === null
+    && run!.activeEntry >= run!.entries.length
+    && run!.entries.length > 0
+    && run!.entries.every((entry) => entry.renderer.exportTileViews().length > 0);
+}
+
+async function currentGridCommandEntries(
+  onProgress: (message: string, progress?: number) => void,
+): Promise<Array<{ name: string; data: Blob }> | null> {
+  const run = gridRun;
+  if (plotMode !== "grid") return null;
+  if (!gridCommandReady(run) || !run) throw new Error("Wait for every grid comparison to finish before exporting.");
+
+  const archiveEntries: Array<{ name: string; data: Blob }> = [];
+  const loadFiles: string[] = [];
+  const exportedAt = new Date().toISOString();
+  for (let index = 0; index < run.entries.length; index += 1) {
+    const entry = run.entries[index]!;
+    const x = sequences.find((sequence) => sequence.index === entry.comparison.xIndex);
+    const y = sequences.find((sequence) => sequence.index === entry.comparison.yIndex);
+    if (!x || !y) throw new Error("A selected grid sequence is no longer available.");
+    onProgress(
+      `Building grid BEDPE ${index + 1}/${run.entries.length} · ${x.selectionId} vs ${y.selectionId}`,
+      index / (run.entries.length + 1),
+    );
+    const fileName = `${exportBaseName(x.selectionId, y.selectionId)}.bedpe`;
+    const domainLength = Math.max(1, x.length, y.length);
+    const resolution = entry.parameters.resolution;
+    const viewport = { x: 0, y: 0, width: resolution, height: resolution };
+    const provenance = gridExportProvenance(entry, x, y, viewport, exportedAt);
+    archiveEntries.push({
+      name: fileName,
+      data: createNumericExport(entry.renderer.exportTileViews(), {
+        domainLength,
+        baseResolution: resolution,
+        viewport,
+        xName: x.name,
+        yName: y.name,
+      }, provenance, "bedpe"),
+    });
+    loadFiles.push(fileName);
+  }
+
+  const selected = gridSelectedIndices.map((index) => sequences.find((sequence) => sequence.index === index))
+    .filter((sequence): sequence is SequenceMetadata => Boolean(sequence));
+  const domainLength = Math.max(1, ...selected.map((sequence) => sequence.length));
+  const resolution = Math.min(GRID_OVERVIEW_RESOLUTION, domainLength);
+  const firstIndex = selected[0]?.index ?? 0;
+  const template = run.entries[0]!.parameters;
+  const baseName = currentExportBaseName();
+  onProgress("Building grid-only ModDotPlot config", run.entries.length / (run.entries.length + 1));
+  archiveEntries.push({
+    name: `${baseName}.config.json`,
+    data: createModDotPlotCliConfigBlob({
+      appVersion: __APP_VERSION__,
+      baseName,
+      plotMode: "grid",
+      sequences,
+      gridSequenceIndices: gridSelectedIndices,
+      parameters: {
+        ...template,
+        xIndex: firstIndex,
+        yIndex: firstIndex,
+        resolution,
+      },
+      domainLength,
+      currentResolution: resolution,
+      viewport: { x: 0, y: 0, width: resolution, height: resolution, domain: resolution, minSize: 1 },
+      palette: selectedHeatmapPalette(),
+      paletteReversed,
+      paletteColors: activeHeatmapColors(),
+      heatmapRange,
+      colorMode: selectedColorMode(),
+      loadFiles,
+    }),
+  });
+  return archiveEntries;
+}
+
+function gridExportProvenance(
+  entry: GridRunEntry,
+  x: SequenceMetadata,
+  y: SequenceMetadata,
+  viewport: { x: number; y: number; width: number; height: number },
+  exportedAt: string,
+): ExportProvenance {
+  const darkBackground = backgroundButtons.some(
+    (button) => button.dataset.backgroundMode === "black" && button.getAttribute("aria-pressed") === "true",
+  );
+  return {
+    software: __APP_VERSION__,
+    exportedAt,
+    method: "ANI_c=C^(1/k), the historical containment-derived ModDotPlot display score; exact complete distinct canonical k-mer-set containment is the validation oracle, not alignment-derived ANI_m.",
+    schedulerPolicyVersion: REFINEMENT_POLICY_VERSION,
+    comparison: entry.parameters,
+    configurations: entry.configurations,
+    display: {
+      measurement: "sketch",
+      colorMode: selectedColorMode(),
+      exactVisualization: null,
+      exactGeometry: null,
+      palette: selectedHeatmapPalette(),
+      paletteColorCount: selectedHeatmapColorCount(),
+      paletteReversed,
+      paletteColors: activeHeatmapColors(),
+      heatmapRange,
+      background: darkBackground ? "black" : "white",
+    },
+    viewport,
+    sequences: { x, y },
+  };
 }
 
 function currentNumericExportContext(): NumericExportContext | null {
