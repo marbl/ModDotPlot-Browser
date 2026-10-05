@@ -515,6 +515,22 @@ details[open] summary { margin-bottom: 4px; }
   margin: 0;
   accent-color: var(--accent);
 }
+.feature-track-placement-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.feature-track-placement-controls legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.feature-track-placement-controls label { min-width: 0; }
 .add-track-button,
 .track-import-dialog button {
   border: 1px solid var(--line);
@@ -805,16 +821,22 @@ details[open] summary { margin-bottom: 4px; }
 .control-version { display: block; margin-top: 3px; }
 
 .plot-shell {
+  --x-track-top-height: var(--x-track-height);
+  --x-track-bottom-height: 0px;
+  --y-track-left-width: var(--y-track-width);
+  --y-track-right-width: 0px;
   display: grid;
   grid-template-columns:
     var(--y-axis-width)
-    var(--y-track-width)
+    var(--y-track-left-width)
     minmax(0, 1fr)
+    var(--y-track-right-width)
     var(--y-label-width);
   grid-template-rows:
     var(--x-axis-height)
-    var(--x-track-height)
+    var(--x-track-top-height)
     minmax(0, auto)
+    var(--x-track-bottom-height)
     var(--x-label-height);
   width: min(
     100%,
@@ -827,6 +849,14 @@ details[open] summary { margin-bottom: 4px; }
   );
   max-width: 100%;
   margin-inline: auto;
+}
+.plot-shell[data-x-track-position="bottom"] {
+  --x-track-top-height: 0px;
+  --x-track-bottom-height: var(--x-track-height);
+}
+.plot-shell[data-y-track-position="right"] {
+  --y-track-left-width: 0px;
+  --y-track-right-width: var(--y-track-width);
 }
 
 .plot-frame {
@@ -1183,7 +1213,7 @@ details[open] summary { margin-bottom: 4px; }
 }
 .sequence-label-x {
   grid-column: 3;
-  grid-row: 4;
+  grid-row: 5;
   align-self: center;
   padding: 0 8px;
   text-align: center;
@@ -1191,7 +1221,7 @@ details[open] summary { margin-bottom: 4px; }
   white-space: nowrap;
 }
 .sequence-label-y {
-  grid-column: 4;
+  grid-column: 5;
   grid-row: 3;
   display: flex;
   align-items: center;
@@ -1214,10 +1244,18 @@ details[open] summary { margin-bottom: 4px; }
   grid-row: 2;
   flex-direction: column-reverse;
 }
+.plot-shell[data-x-track-position="bottom"] .feature-track-stack-x {
+  grid-row: 4;
+  flex-direction: column;
+}
 .feature-track-stack-y {
   grid-column: 2;
   grid-row: 3;
   flex-direction: row-reverse;
+}
+.plot-shell[data-y-track-position="right"] .feature-track-stack-y {
+  grid-column: 4;
+  flex-direction: row;
 }
 .feature-track-panel {
   flex: 0 0 var(--feature-track-size);
@@ -1238,10 +1276,22 @@ body.is-track-pointer-dragging * { cursor: grabbing !important; }
   border: 1px solid var(--line);
   border-bottom: 0;
 }
+.plot-shell[data-x-track-position="bottom"] .feature-track-panel-x {
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+}
 .feature-track-panel-y {
   border: 1px solid var(--line);
   border-right: 0;
 }
+.plot-shell[data-y-track-position="right"] .feature-track-panel-y {
+  border-right: 1px solid var(--line);
+  border-left: 0;
+}
+.plot-shell[data-x-track-position="bottom"]
+  .feature-track-panel-x:not(.imported-feature-track-panel) canvas { transform: scaleY(-1); }
+.plot-shell[data-y-track-position="right"]
+  .feature-track-panel-y:not(.imported-feature-track-panel) canvas { transform: scaleX(-1); }
 .feature-track-panel canvas {
   position: absolute;
   inset: 0;

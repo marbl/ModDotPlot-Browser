@@ -207,12 +207,16 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   );
   await expect(page.locator("#example-button i")).toHaveText("Arabidopsis thaliana");
   await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot"]')).toBeVisible();
-  await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot-Browser"]')).toBeVisible();
+  const tutorialLink = page.locator(
+    '.github-link[href="https://github.com/marbl/ModDotPlot-Browser/blob/develop/docs/USER_GUIDE.md"]',
+  );
+  await expect(tutorialLink).toBeVisible();
+  await expect(tutorialLink).toContainText("Browser Tutorial");
   await expect(page.locator(".github-link .github-icon")).toHaveCount(2);
   await expect(page.locator(".publication-warning")).toHaveText(
-    "This web application uses WebAssembly to run ModDotPlot locally in your browser. Your files stay on your device and are not uploaded to a server. If you use ModDotPlot in your research, please cite our ModDotPlot publication. For analyses intended for publication, please use the official ModDotPlot CLI.",
+    "This web application uses WebAssembly to run ModDotPlot locally in your browser. Your files stay on your device and are not uploaded to a server. If you use ModDotPlot in your research, please cite our ModDotPlot paper. For analyses intended for publication, please use the official ModDotPlot CLI.",
   );
-  await expect(page.locator('.publication-warning a[href="https://doi.org/10.1093/bioinformatics/btae493"]')).toHaveText("ModDotPlot publication");
+  await expect(page.locator('.publication-warning a[href="https://doi.org/10.1093/bioinformatics/btae493"]')).toHaveText("ModDotPlot paper");
   await expect(page.locator('.publication-warning a[href="https://github.com/marbl/moddotplot"]')).toHaveText("ModDotPlot CLI");
   const landingVersion = await page.locator("#landing-version").textContent();
   const progressStyle = await page.locator("#compute-progress svg").evaluate((element) => {
@@ -2068,6 +2072,35 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
   expect(layout.memoryInsideControls).toBe(true);
   expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
   expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
+
+  await page.locator("#x-track-position").selectOption("bottom");
+  await page.locator("#y-track-position").selectOption("right");
+  const movedLayout = await page.evaluate(() => {
+    const shell = document.querySelector<HTMLElement>("#plot-shell")!;
+    const plot = document.querySelector("#plot-frame")!.getBoundingClientRect();
+    const xTrack = document.querySelector("#gc-track-x-panel")!.getBoundingClientRect();
+    const yTrack = document.querySelector("#gc-track-y-panel")!.getBoundingClientRect();
+    const xLabel = document.querySelector("#x-sequence-label")!.getBoundingClientRect();
+    const yLabel = document.querySelector("#y-sequence-label")!.getBoundingClientRect();
+    return {
+      xPosition: shell.dataset.xTrackPosition,
+      yPosition: shell.dataset.yTrackPosition,
+      plotBottom: plot.bottom,
+      plotRight: plot.right,
+      xTrackTop: xTrack.top,
+      xTrackBottom: xTrack.bottom,
+      yTrackLeft: yTrack.left,
+      yTrackRight: yTrack.right,
+      xLabelTop: xLabel.top,
+      yLabelLeft: yLabel.left,
+    };
+  });
+  expect(movedLayout.xPosition).toBe("bottom");
+  expect(movedLayout.yPosition).toBe("right");
+  expect(movedLayout.xTrackTop).toBeGreaterThanOrEqual(movedLayout.plotBottom - 1);
+  expect(movedLayout.xTrackBottom).toBeLessThanOrEqual(movedLayout.xLabelTop + 1);
+  expect(movedLayout.yTrackLeft).toBeGreaterThanOrEqual(movedLayout.plotRight - 1);
+  expect(movedLayout.yTrackRight).toBeLessThanOrEqual(movedLayout.yLabelLeft + 1);
 });
 
 test("BED and GFF logical tracks span matching sequences and disable by dragging away", async ({ page }) => {

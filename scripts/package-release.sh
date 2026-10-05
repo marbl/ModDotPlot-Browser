@@ -27,12 +27,6 @@ for manifest_version in "$cargo_version" "$npm_version" "$citation_version"; do
     exit 1
   fi
 done
-release_notes="docs/releases/v$release_version.md"
-if [ ! -f "$release_notes" ]; then
-  echo "missing release notes: $release_notes" >&2
-  exit 1
-fi
-
 npm --prefix web run build
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "release build changed tracked generated files; regenerate and commit them first" >&2
@@ -53,9 +47,8 @@ trap 'rm -rf "$staging_directory"' EXIT INT TERM
 binary_root="$staging_directory/moddotplot-interactive-$release_version-web"
 mkdir -p "$binary_root/docs"
 cp -R web/dist/. "$binary_root/"
-cp LICENSE CITATION.cff SBOM.cdx.json THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.txt "$binary_root/"
-cp docs/USER_GUIDE.md docs/PRIVACY.md docs/SCIENTIFIC_SPEC.md docs/CURRENT_PARAMETERS.md docs/CITATIONS.md docs/PROVENANCE.md docs/EXPORT_FORMATS.md "$binary_root/docs/"
-cp "$release_notes" "$binary_root/docs/"
+cp README.md LICENSE CITATION.cff SBOM.cdx.json THIRD_PARTY_LICENSES.txt "$binary_root/"
+cp docs/CITATIONS.md docs/DEPLOYMENT.md docs/METHODS.md docs/PRIVACY.md docs/RELEASE_CHECKLIST.md docs/USER_GUIDE.md "$binary_root/docs/"
 find "$binary_root" -exec touch -t 198001010000 {} +
 (
   cd "$staging_directory"
