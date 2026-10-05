@@ -1,0 +1,13 @@
+/target/
+/node_modules/
+/web/dist/
+/web/node_modules/
+/web/public/examples/Col-CEN_v1.2.fasta
+/web/src/wasm/
+/web/playwright-report/
+/web/test-results/
+/release-artifacts/
+*.log
+.DS_Store
+.idea/
+.vscode/

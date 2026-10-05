@@ -1,0 +1,225 @@
+cff-version: 1.2.0
+message: >-
+  If you use ModDotPlot Browser, please cite the original ModDotPlot paper listed as the
+  preferred citation and credit the relevant method papers listed in references.
+title: "ModDotPlot Browser"
+type: software
+version: 1.0.0
+date-released: 2026-10-04
+repository-code: "https://github.com/marbl/ModDotPlot-Browser"
+license: MIT-0
+abstract: >-
+  Browser-native genomic dotplot software written by ChatGPT 5.6 Sol under the
+  direction of Adam Phillippy.
+authors:
+  - name: "ChatGPT 5.6 Sol"
+  - family-names: "Phillippy"
+    given-names: "Adam M."
+
+preferred-citation:
+  type: article
+  title: "ModDotPlot-rapid and interactive visualization of tandem repeats"
+  authors:
+    - family-names: "Sweeten"
+      given-names: "Alexander P."
+    - family-names: "Schatz"
+      given-names: "Michael C."
+    - family-names: "Phillippy"
+      given-names: "Adam M."
+  journal: "Bioinformatics"
+  year: 2024
+  month: 8
+  volume: 40
+  issue: 8
+  pages: "btae493"
+  doi: "10.1093/bioinformatics/btae493"
+  url: "https://pubmed.ncbi.nlm.nih.gov/39110522/"
+  notes: "PMID: 39110522; PMCID: PMC11321072."
+
+references:
+  - type: article
+    title: "Mash: fast genome and metagenome distance estimation using MinHash"
+    authors:
+      - family-names: "Ondov"
+        given-names: "Brian D."
+      - family-names: "Treangen"
+        given-names: "Todd J."
+      - family-names: "Melsted"
+        given-names: "Páll"
+      - family-names: "Mallonee"
+        given-names: "Adam B."
+      - family-names: "Bergman"
+        given-names: "Nicholas H."
+      - family-names: "Koren"
+        given-names: "Sergey"
+      - family-names: "Phillippy"
+        given-names: "Adam M."
+    journal: "Genome Biology"
+    year: 2016
+    volume: 17
+    issue: 1
+    pages: "132"
+    doi: "10.1186/s13059-016-0997-x"
+    url: "https://pubmed.ncbi.nlm.nih.gov/27323842/"
+
+  - type: article
+    title: "A fast approximate algorithm for mapping long reads to large reference databases"
+    authors:
+      - family-names: "Jain"
+        given-names: "Chirag"
+      - family-names: "Dilthey"
+        given-names: "Alexander"
+      - family-names: "Koren"
+        given-names: "Sergey"
+      - family-names: "Aluru"
+        given-names: "Srinivas"
+      - family-names: "Phillippy"
+        given-names: "Adam M."
+    journal: "Journal of Computational Biology"
+    year: 2018
+    volume: 25
+    issue: 7
+    pages: "766-779"
+    doi: "10.1089/cmb.2018.0036"
+    url: "https://pubmed.ncbi.nlm.nih.gov/29708767/"
+
+  - type: article
+    title: "Minmers are a generalization of minimizers that enable unbiased local Jaccard estimation"
+    authors:
+      - family-names: "Kille"
+        given-names: "Bryce"
+      - family-names: "Garrison"
+        given-names: "Erik"
+      - family-names: "Treangen"
+        given-names: "Todd J."
+      - family-names: "Phillippy"
+        given-names: "Adam M."
+    journal: "Bioinformatics"
+    year: 2023
+    volume: 39
+    issue: 9
+    pages: "btad512"
+    doi: "10.1093/bioinformatics/btad512"
+    url: "https://academic.oup.com/bioinformatics/article/39/9/btad512/7246743"
+
+  - type: article
+    title: "ntHash2: recursive spaced seed hashing for nucleotide sequences"
+    authors:
+      - family-names: "Kazemi"
+        given-names: "Parham"
+      - family-names: "Wong"
+        given-names: "Johnathan"
+      - family-names: "Nikolić"
+        given-names: "Vladimir"
+      - family-names: "Mohamadi"
+        given-names: "Hamid"
+      - family-names: "Warren"
+        given-names: "René L."
+      - family-names: "Birol"
+        given-names: "Inanç"
+    journal: "Bioinformatics"
+    year: 2022
+    volume: 38
+    issue: 20
+    pages: "4812-4813"
+    doi: "10.1093/bioinformatics/btac564"
+    url: "https://academic.oup.com/bioinformatics/article/38/20/4812/6674501"
+
+  - type: conference-paper
+    title: "b-Bit minwise hashing"
+    authors:
+      - family-names: "Li"
+        given-names: "Ping"
+      - family-names: "König"
+        given-names: "Arnd Christian"
+    collection-title: "Proceedings of the 19th International Conference on World Wide Web"
+    year: 2010
+    pages: "671-680"
+    doi: "10.1145/1772690.1772759"
+    url: "https://doi.org/10.1145/1772690.1772759"
+
+  - type: conference-paper
+    title: "One permutation hashing"
+    authors:
+      - family-names: "Li"
+        given-names: "Ping"
+      - family-names: "Owen"
+        given-names: "Art B."
+      - family-names: "Zhang"
+        given-names: "Cun-Hui"
+    collection-title: "Advances in Neural Information Processing Systems 25"
+    year: 2012
+    pages: "3122-3130"
+    url: "https://papers.nips.cc/paper_files/paper/2012/hash/eaa32c96f620053cf442ad32258076b9-Abstract.html"
+
+  - type: conference-paper
+    title: "HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm"
+    authors:
+      - family-names: "Flajolet"
+        given-names: "Philippe"
+      - family-names: "Fusy"
+        given-names: "Éric"
+      - family-names: "Gandouet"
+        given-names: "Olivier"
+      - family-names: "Meunier"
+        given-names: "Frédéric"
+    collection-title: "Discrete Mathematics and Theoretical Computer Science Proceedings, Analysis of Algorithms 2007"
+    year: 2007
+    volume: "AH"
+    pages: "127-146"
+    url: "https://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf"
+
+  - type: conference-paper
+    title: "On the resemblance and containment of documents"
+    authors:
+      - family-names: "Broder"
+        given-names: "Andrei Z."
+    collection-title: "Compression and Complexity of Sequences 1997"
+    year: 1997
+    pages: "21-29"
+    doi: "10.1109/SEQUEN.1997.666900"
+    url: "https://doi.org/10.1109/SEQUEN.1997.666900"
+
+  - type: software
+    title: "ModDotPlot"
+    authors:
+      - family-names: "Sweeten"
+        given-names: "Alexander P."
+      - family-names: "Schatz"
+        given-names: "Michael C."
+      - family-names: "Phillippy"
+        given-names: "Adam M."
+    repository-code: "https://github.com/marbl/moddotplot"
+
+  - type: software
+    title: "MashMap"
+    authors:
+      - name: "MashMap contributors"
+    repository-code: "https://github.com/marbl/MashMap"
+    commit: "1a07d0e"
+
+  - type: software
+    title: "ntHash"
+    authors:
+      - name: "BCGSC ntHash contributors"
+    repository-code: "https://github.com/bcgsc/ntHash"
+    commit: "c26bd4572a19de81e30d55042dbd33c1fd21d4b6"
+
+  - type: software
+    title: "SMHasher and the MurmurHash3 reference implementation"
+    authors:
+      - family-names: "Appleby"
+        given-names: "Austin"
+    url: "https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp"
+
+  - type: software
+    title: "ColorBrewer 2"
+    version: "2.0"
+    authors:
+      - family-names: "Brewer"
+        given-names: "Cynthia"
+      - family-names: "Harrower"
+        given-names: "Mark"
+      - name: "The Pennsylvania State University"
+    repository-code: "https://github.com/axismaps/colorbrewer"
+    url: "https://colorbrewer2.org/"
