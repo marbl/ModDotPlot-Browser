@@ -1,7 +1,7 @@
 ![](web/public/moddotplot-browser.gif)
 # ModDotPlot Browser
 
-`ModDotPlot Browser` is a web-based, interactive genomic dotplot viewer designed to visualize entire chromosomes in *seconds*. Input data remain local to your web browser and are not stored in any database or server.
+`ModDotPlot Browser` is a web-based, interactive genomic dotplot viewer designed to visualize entire chromosomes in *seconds*. Input data remains local to your web browser and is not stored in any database or server.
 
 **Live application:** [marbl.github.io/ModDotPlot-Browser](https://marbl.github.io/ModDotPlot-Browser/)
 
