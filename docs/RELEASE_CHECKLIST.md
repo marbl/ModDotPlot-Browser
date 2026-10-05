@@ -103,4 +103,4 @@ npm --prefix web run verify
 - [ ] Create and verify an annotated tag from a clean tree as the final source action.
 - [ ] Produce source/binary archives, checksums, provenance, release notes, and known
   limitations under the local ignored `release-artifacts/` directory.
-- [ ] Push the verified v1.0.0 release commit to the `develop` branch.
+- [ ] Push the verified v1.0.0 release commit to the `main` branch.

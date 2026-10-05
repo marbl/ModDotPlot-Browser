@@ -208,7 +208,7 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#example-button i")).toHaveText("Arabidopsis thaliana");
   await expect(page.locator('.github-link[href="https://github.com/marbl/ModDotPlot"]')).toBeVisible();
   const tutorialLink = page.locator(
-    '.github-link[href="https://github.com/marbl/ModDotPlot-Browser/blob/develop/docs/USER_GUIDE.md"]',
+    '.github-link[href="https://github.com/marbl/ModDotPlot-Browser/blob/main/docs/USER_GUIDE.md"]',
   );
   await expect(tutorialLink).toBeVisible();
   await expect(tutorialLink).toContainText("Browser Tutorial");
