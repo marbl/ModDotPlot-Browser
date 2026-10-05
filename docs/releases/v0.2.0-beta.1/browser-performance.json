@@ -1,0 +1,72 @@
+{
+  "generatedAt": "2026-08-29T04:42:43.541Z",
+  "software": {
+    "version": "0.2.0-beta.1",
+    "commit": "7695b3125935d81fa39a162ba84a1a82b2bed94d",
+    "worktreeDirty": false
+  },
+  "host": {
+    "platform": "darwin",
+    "release": "25.5.0",
+    "architecture": "arm64",
+    "processor": "Apple M5 Pro",
+    "logicalCores": 18,
+    "totalMemoryBytes": 51539607552
+  },
+  "browser": "152.0.7977.64",
+  "viewport": { "width": 1440, "height": 1000 },
+  "parameters": {
+    "overviewResolution": 1000,
+    "previewRegisters": 256,
+    "detailedRegisters": 1024,
+    "k": 21,
+    "sparseCorrection": false
+  },
+  "inputs": {
+    "chm13": {
+      "accession": "NC_060925.1",
+      "bases": 248387328,
+      "bytes": 251935807,
+      "sha256": "8471eac90037b6886d110288712bb46b2af620e47965a672a7d1555ba0e36c4f"
+    },
+    "hg002Paternal": {
+      "accession": "CP139546.2",
+      "bases": 252060741,
+      "bytes": 255661664,
+      "sha256": "8cc00c7b8b4a96adb1a71f16524ab4aff166648eae427724cb99d612c2db9041"
+    }
+  },
+  "self": {
+    "sequenceLoadMs": 2136,
+    "firstPreviewTileMs": 2963,
+    "coherentPreviewMs": 4777,
+    "firstRefinedTileMs": 5446,
+    "stableViewportMs": 7592,
+    "workerElapsedMs": 5457,
+    "finalMemoryText": "Memory ~155.5 MiB",
+    "wasmEstimatedBytes": 139001856,
+    "jsHeapBytes": 15557472
+  },
+  "pairwise": {
+    "sequenceLoadMs": 4280,
+    "firstPreviewTileMs": 600,
+    "coherentPreviewMs": 5474,
+    "firstRefinedTileMs": 6831,
+    "stableViewportMs": 11148,
+    "workerElapsedMs": 10547,
+    "finalMemoryText": "Memory ~253.8 MiB",
+    "wasmEstimatedBytes": 242089984,
+    "jsHeapBytes": 28206174
+  },
+  "cacheTrace": {
+    "cycles": [
+      ["Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB"],
+      ["Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB", "Memory ~391.5 MiB"]
+    ]
+  },
+  "cancellation": {
+    "firstReplacementPreviewMs": 1030,
+    "replacementResolution": 8000
+  },
+  "unexpectedRequests": []
+}
