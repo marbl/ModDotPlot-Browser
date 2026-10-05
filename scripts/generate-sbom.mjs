@@ -87,7 +87,11 @@ if (!applicationVersion) throw new Error("root npm package version is missing");
 for (const [relativePath, pkg] of Object.entries(npmLock.packages)) {
   if (!relativePath.startsWith("node_modules/") || !pkg.version) continue;
   const name = relativePath.slice("node_modules/".length);
-  const purl = `pkg:npm/${name.replace("/", "%2F")}@${encodeURIComponent(pkg.version)}`;
+  const scopeSeparator = name.startsWith("@") ? name.indexOf("/") : -1;
+  const purlName = scopeSeparator > 0
+    ? `${encodeURIComponent(name.slice(0, scopeSeparator))}/${encodeURIComponent(name.slice(scopeSeparator + 1))}`
+    : encodeURIComponent(name);
+  const purl = `pkg:npm/${purlName}@${encodeURIComponent(pkg.version)}`;
   const component = {
     type: "library",
     name,
