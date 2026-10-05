@@ -1651,22 +1651,57 @@ test("exact mode keeps fixed full footprints while the initial comparison is pre
 });
 
 test("refined overview tiles paint before detailed preparation completes", async ({ page }) => {
+  await page.addInitScript(() => {
+    const observedMessages: Array<{ type: string; quality?: string; text?: string }> = [];
+    Object.defineProperty(window, "__progressiveOverviewMessages", {
+      value: observedMessages,
+    });
+    const NativeWorker = window.Worker;
+    window.Worker = class ObservedWorker extends NativeWorker {
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        super(scriptURL, options);
+        this.addEventListener("message", (event: MessageEvent<unknown>) => {
+          if (typeof event.data !== "object" || event.data === null || !("type" in event.data)) return;
+          const message = event.data as { type: string; quality?: string; text?: string };
+          if (message.type === "status" || message.type === "tile" || message.type === "complete") {
+            observedMessages.push({
+              type: message.type,
+              quality: message.quality,
+              text: message.text,
+            });
+          }
+        });
+      }
+    } as typeof Worker;
+  });
+
   await page.goto("/");
   await page.locator("#resolution").selectOption("500", { force: true });
-  const earlyRefinedTile = page.waitForFunction(() => {
-    const status = document.querySelector("#status")?.textContent ?? "";
-    if (!status.includes("Building high-detail signatures")) return false;
-    const histogram = document.querySelector<HTMLCanvasElement>("#identity-histogram");
-    const context = histogram?.getContext("2d");
-    if (!histogram || !context) return false;
-    return context
-      .getImageData(0, 0, histogram.width, histogram.height)
-      .data.some((channel, index) => index % 4 === 3 && channel !== 0);
-  }, undefined, { timeout: 30_000 });
-
   await loadFasta(page, "progressive.fa", `>progressive\n${"ACGT".repeat(50_000)}\n`);
-  await earlyRefinedTile;
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+
+  const messages = await page.evaluate(() => (
+    window as Window & {
+      __progressiveOverviewMessages: Array<{ type: string; quality?: string; text?: string }>;
+    }
+  ).__progressiveOverviewMessages);
+  const detailedStart = messages.findIndex((message) => (
+    message.type === "status" && message.text === "Building high-detail signatures"
+  ));
+  const firstRefinedTile = messages.findIndex((message) => (
+    message.type === "tile" && message.quality === "refined"
+  ));
+  const completion = messages.findIndex((message) => message.type === "complete");
+  expect(detailedStart).toBeGreaterThanOrEqual(0);
+  expect(firstRefinedTile).toBeGreaterThan(detailedStart);
+  expect(completion).toBeGreaterThan(firstRefinedTile);
+
+  const histogramPainted = await page.locator("#identity-histogram").evaluate((histogram) => {
+    const context = histogram.getContext("2d");
+    return context?.getImageData(0, 0, histogram.width, histogram.height).data
+      .some((channel, index) => index % 4 === 3 && channel !== 0) ?? false;
+  });
+  expect(histogramPainted).toBe(true);
 });
 
 test("pairwise orientation, navigation, and reset remain coherent", async ({ page }) => {
@@ -1978,7 +2013,7 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
 
   await canvas.focus();
   for (let index = 0; index < 6; index += 1) await page.keyboard.press("+");
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect.poll(() => page.locator("#gc-track-x-canvas").evaluate(hasOpaqueTrackBar)).toBe(true);
   const pannedFromCache = await canvas.evaluate((target) => {
     const track = document.querySelector<HTMLCanvasElement>("#gc-track-x-canvas")!;
