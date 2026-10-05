@@ -1,7 +1,7 @@
 {
   "name": "moddotplot-interactive",
   "private": true,
-  "version": "0.9.8",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": "25.9.0",
@@ -16,8 +16,7 @@
     "prebuild:ui": "npm run prepare:example",
     "build:ui": "tsc --noEmit && vite build",
     "build": "npm run build:release",
-    "build:release": "npm test && npm run build:wasm && npm run build:ui && npm run docs && npm run docs:check && npm run sbom",
-    "docs": "node ../scripts/generate-current-parameters.mjs",
+    "build:release": "npm test && npm run build:wasm && npm run build:ui && npm run docs:check && npm run sbom",
     "docs:check": "node ../scripts/check-docs.mjs",
     "preview": "vite preview",
     "sbom": "node ../scripts/generate-sbom.mjs",

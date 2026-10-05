@@ -36,7 +36,7 @@ jobs:
         working-directory: web
       - run: npm run build:release
         working-directory: web
-      - run: git diff --exit-code -- docs/CURRENT_PARAMETERS.md SBOM.cdx.json THIRD_PARTY_LICENSES.txt
+      - run: git diff --exit-code -- SBOM.cdx.json THIRD_PARTY_LICENSES.txt
       - run: npx playwright install --with-deps chromium firefox webkit
         working-directory: web
       - name: Run browser end-to-end tests

@@ -180,6 +180,8 @@ const featureTrackPanels = {
 };
 const xFeatureTrackStack = element<HTMLElement>("x-feature-track-stack");
 const yFeatureTrackStack = element<HTMLElement>("y-feature-track-stack");
+const xTrackPosition = element<HTMLSelectElement>("x-track-position");
+const yTrackPosition = element<HTMLSelectElement>("y-track-position");
 const xAxisPanel = element<HTMLElement>("x-axis-panel");
 const yAxisPanel = element<HTMLElement>("y-axis-panel");
 const featureTrackControls = element<HTMLElement>("feature-track-controls");
@@ -289,6 +291,8 @@ for (const kind of ["gc", "cpg"] as const) {
     });
   }
 }
+xTrackPosition.addEventListener("change", updateFeatureTrackPlacement);
+yTrackPosition.addEventListener("change", updateFeatureTrackPlacement);
 featureTracks.onHover((hover, event) => importedTracks.showQuantitativeHover(hover, event));
 let worker: Worker;
 let sequences: SequenceMetadata[] = [];
@@ -1925,6 +1929,11 @@ function updateFeatureTrackLayout(): void {
   }, 0);
   plotColumn.style.setProperty("--x-track-height", `${total(xFeatureTrackStack)}px`);
   plotColumn.style.setProperty("--y-track-width", `${total(yFeatureTrackStack)}px`);
+}
+
+function updateFeatureTrackPlacement(): void {
+  plotShell.dataset.xTrackPosition = xTrackPosition.value === "bottom" ? "bottom" : "top";
+  plotShell.dataset.yTrackPosition = yTrackPosition.value === "right" ? "right" : "left";
 }
 
 function currentFeatureTrackSelection(): FeatureTrackSelection {
