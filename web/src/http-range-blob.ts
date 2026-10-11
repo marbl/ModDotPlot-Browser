@@ -11,6 +11,8 @@ export type HttpRangeFetcher = (
 export interface CreateHttpRangeBlobOptions {
   /** Base document URL used both to resolve relative paths and enforce same-origin access. */
   readonly baseUrl?: string | URL;
+  /** Permit a CORS-enabled HTTPS source while continuing to omit credentials and referrer data. */
+  readonly allowCrossOrigin?: boolean;
   /** Injectable for deterministic tests. Production callers normally use `fetch`. */
   readonly fetcher?: HttpRangeFetcher;
   /** Cancels the initial two-byte range probe. */
@@ -20,11 +22,12 @@ export interface CreateHttpRangeBlobOptions {
 
 interface RemoteDescriptor {
   readonly url: URL;
-  readonly origin: string;
   readonly size: number;
   readonly fetcher: HttpRangeFetcher;
   readonly prefix: Uint8Array;
   readonly validator: string | null;
+  readonly credentials: RequestCredentials;
+  readonly referrerPolicy: ReferrerPolicy;
 }
 
 interface ParsedContentRange {
@@ -135,11 +138,17 @@ export async function createHttpRangeBlob(
 ): Promise<HttpRangeBlob> {
   const baseUrl = resolveBaseUrl(options.baseUrl);
   const url = new URL(input.toString(), baseUrl);
-  if (url.origin !== baseUrl.origin) {
+  const crossOrigin = url.origin !== baseUrl.origin;
+  if (crossOrigin && !options.allowCrossOrigin) {
     throw new Error(
       `Remote FASTA must be same-origin (${baseUrl.origin}); received ${url.origin}.`,
     );
   }
+  if (crossOrigin && url.protocol !== "https:") {
+    throw new Error("Cross-origin remote FASTA ranges must use HTTPS.");
+  }
+  const credentials: RequestCredentials = crossOrigin ? "omit" : "same-origin";
+  const referrerPolicy: ReferrerPolicy = crossOrigin ? "no-referrer" : "same-origin";
   options.signal?.throwIfAborted();
   const sourceFetcher = options.fetcher ?? globalThis.fetch;
   // WorkerGlobalScope.fetch is brand-checked in WebKit/Safari. Keep one wrapper in
@@ -151,8 +160,9 @@ export async function createHttpRangeBlob(
   const response = await fetcher(url, {
     method: "GET",
     headers: { Range: `bytes=0-${PROBE_BYTES - 1}` },
-    credentials: "same-origin",
+    credentials,
     redirect: "error",
+    referrerPolicy,
     signal: options.signal,
   });
   const parsed = await validateRangeResponse(
@@ -169,11 +179,12 @@ export async function createHttpRangeBlob(
   const prefix = await readResponseExactly(response, PROBE_BYTES, options.signal);
   const descriptor: RemoteDescriptor = Object.freeze({
     url,
-    origin: baseUrl.origin,
     size: parsed.total,
     fetcher,
     prefix,
     validator: responseValidator(response),
+    credentials,
+    referrerPolicy,
   });
   return HttpRangeBlob.fromVerifiedDescriptor(descriptor, options.mediaType ?? "text/plain");
 }
@@ -211,8 +222,9 @@ function validatedRangeStream(
     const response = await descriptor.fetcher(descriptor.url, {
       method: "GET",
       headers,
-      credentials: "same-origin",
+      credentials: descriptor.credentials,
       redirect: "error",
+      referrerPolicy: descriptor.referrerPolicy,
       signal: requestController.signal,
     });
     await validateRangeResponse(
