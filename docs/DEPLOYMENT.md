@@ -124,9 +124,8 @@ The deployable website is written to:
 web/dist/
 ```
 
-The build also runs the TypeScript tests, prepares the bundled *Arabidopsis thaliana*
-example, generates the WebAssembly bindings, checks the documentation contracts, and
-updates the software dependency inventory.
+The build also runs the TypeScript tests, generates the WebAssembly bindings, checks
+the documentation contracts, and updates the software dependency inventory.
 
 ### 5. Launch locally
 
@@ -423,12 +422,11 @@ The static server should:
 - Serve `.wasm` files using the MIME type `application/wasm`.
 - Support HTTP byte-range requests.
 - Preserve `Range`, `Content-Range`, and `Content-Length` headers.
-- Serve bundled `.gz` files as binary files without automatically adding a
-  `Content-Encoding` header.
 - Permit JavaScript module workers.
 - Use HTTPS for a remotely shared deployment.
 
-Byte-range support is important for indexed access to the bundled example FASTA.
+The example button streams Col-CEN from GitHub, so deployed pages must allow outbound
+HTTPS requests to that host through their Content Security Policy.
 
 ### Open OnDemand
 

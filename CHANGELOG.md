@@ -25,6 +25,9 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ### Changed
 
+* Removed the cached Col-CEN FASTA, annotation, and precomputed overview assets. The
+  existing *Arabidopsis thaliana* example button now streams the Col-CEN v1.2 FASTA
+  from the Schatz lab GitHub release through the same URL-import pipeline.
 * Merged the landing-page FASTA and annotation targets into one drop zone that routes
   FASTA/index files and BED, GFF3, or GTF annotations automatically.
 * Restored Viridis on a black background as the initial plot appearance.

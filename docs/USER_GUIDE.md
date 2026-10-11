@@ -33,7 +33,10 @@ ModDotPlot will index and validate the provided assembly or streamed URL and, up
 
 ![](../web/public/tutorial_images/explore.png)
 
-The following tutorial will use the provided *Arabidopsis thaliana* genome assembly from [Naish *et al.* 2021](https://doi.org/10.1126/science.abi7489).
+The following tutorial uses the *Arabidopsis thaliana* Col-CEN v1.2 genome assembly
+from [Naish *et al.* 2021](https://doi.org/10.1126/science.abi7489). Select the
+*Arabidopsis thaliana* example button to stream that FASTA from the
+[Schatz lab Col-CEN release](https://github.com/schatzlab/Col-CEN/tree/main/v1.2).
 
 ![](../web/public/tutorial_images/self-similarity_level1.png)
 
