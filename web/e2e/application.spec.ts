@@ -351,114 +351,49 @@ test("Clear restores Bases with similarity coloring for a new exact session", as
   await expect(page.locator("#exact-base-legend")).toBeVisible();
 });
 
-test("the bundled Arabidopsis overview reaches Ready before FASTA or annotations", async ({ page }) => {
-  const examplesDirectory = new URL("../public/examples/", import.meta.url);
-  const exampleFai = await readFile(new URL("Col-CEN_v1.2.fasta.fai", examplesDirectory));
-  const exampleGff = await readFile(new URL("ColCEN_CEN180.gff3", examplesDirectory));
-  const requestedAssets: string[] = [];
-  const fastaRequests: Array<{ range: string | null }> = [];
-  let releaseAnnotation = (): void => undefined;
-  const annotationGate = new Promise<void>((resolve) => {
-    releaseAnnotation = resolve;
+test("the Arabidopsis example button streams the online Col-CEN FASTA", async ({ page }) => {
+  const requestedUrl = "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const normalizedUrl = "https://raw.githubusercontent.com/schatzlab/Col-CEN/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const remoteFasta = bgzfBlock([
+    `>Chr1 online example\n${deterministicDna(96, 31)}`,
+    `>Chr2\n${deterministicDna(80, 37)}`,
+  ].join("\n"));
+  const cachedAssetRequests: string[] = [];
+  let remoteRequestSeen = false;
+  page.on("request", (request) => {
+    if (request.url().includes("/examples/")) cachedAssetRequests.push(request.url());
   });
-
-  await page.route(/\/examples\/Col-CEN_v1\.2\.fasta$/, async (route) => {
-    requestedAssets.push("fasta");
-    const range = route.request().headers().range ?? null;
-    fastaRequests.push({ range });
-    if (!range) {
-      await route.abort("blockedbyclient");
-      return;
-    }
-    await route.continue();
+  await page.route(`${normalizedUrl}.fai`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
   });
-  await page.route(/\/examples\/Col-CEN_v1\.2\.fasta\.fai$/, async (route) => {
-    requestedAssets.push("fai");
-    await route.fulfill({ status: 200, contentType: "text/plain", body: exampleFai });
+  await page.route(`${normalizedUrl}.gzi`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
   });
-  await page.route(/\/examples\/Col-CEN_v1\.2\.Chr1\.mdp-overview-v1\.gz$/, async (route) => {
-    requestedAssets.push("overview");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await route.continue();
-  });
-  await page.route(/\/examples\/Col-CEN_v1\.2\.Chr1\.(?:2000|4000)\.mdp-overview-v1\.gz$/, async (route) => {
-    requestedAssets.push(route.request().url().includes(".2000.") ? "overview-2000" : "overview-4000");
-    await route.continue();
-  });
-  await page.route(/\/examples\/ColCEN_CEN180\.gff3$/, async (route) => {
-    requestedAssets.push("gff3");
-    await annotationGate;
-    await route.fulfill({ status: 200, contentType: "text/plain", body: exampleGff });
+  await page.route(normalizedUrl, async (route) => {
+    remoteRequestSeen = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/octet-stream",
+      headers: {
+        "access-control-allow-origin": "*",
+        "content-length": String(remoteFasta.byteLength),
+      },
+      body: remoteFasta,
+    });
   });
 
   await page.goto("/");
   await page.locator("#example-button").click();
+
+  await expect(page.locator("#remote-fasta-url")).toHaveValue(requestedUrl);
   await expect(page.locator("#workspace")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator("#landing")).toBeHidden();
-  await expect(page.locator("#self-sequence option")).toHaveCount(7);
-  await expect(page.locator("#self-sequence option").first())
-    .toHaveText("Chr1_Col-CEN_v1.2 · 32.5 Mb");
-  await expect(page.locator("#self-sequence")).toHaveValue("0");
-  await expect(page.locator("#fasta-selection")).toContainText("Col-CEN_v1.2.fasta");
-  await expect(page.locator("#fasta-selection")).toContainText("ready to explore");
-  await expect(page.locator("#annotation-selection")).toContainText("Loading included CEN180");
-  await expect(page.locator("#status")).toHaveText(
-    /^Ready · (?:precomputed|bundled overview cached)$/u,
-    {
-      timeout: 15_000,
-    },
-  );
-  await expect(page.locator("#plot-loading")).toBeHidden();
-  await expect(page.locator("#export-data")).toBeEnabled();
-  await expect(page.locator("#export-image")).toBeEnabled();
-  expect(requestedAssets).toContain("fai");
-  expect(requestedAssets).toContain("overview");
-  expect(requestedAssets).toContain("gff3");
-  expect(fastaRequests).toEqual([]);
-
-  const summary = await hoverPlotCenter(page);
-  expect(summary).toMatch(/identity 100\.00%/u);
-  expect(summary).toMatch(/x Chr1 ·/u);
-  expect(summary).toMatch(/y Chr1 ·/u);
-  await expect.poll(() => page.locator("#identity-histogram").evaluate((canvas: HTMLCanvasElement) => {
-    const pixels = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
-    return pixels?.filter((channel, index) => index % 4 === 3 && channel !== 0).length ?? 0;
-  })).toBeGreaterThan(0);
-
-  await expect.poll(() => requestedAssets.filter((asset) => asset.startsWith("overview-")).sort())
-    .toEqual(["overview-2000", "overview-4000"]);
-  await expect(page.locator("body")).toHaveAttribute("data-bundled-detail-cache", "ready", {
-    timeout: 15_000,
-  });
-  const plotCanvas = page.locator("#plot-canvas");
-  await plotCanvas.focus();
-  await page.keyboard.press("+");
-  await expect(page.locator("#status")).toHaveText("Ready · bundled overview cached", {
-    timeout: 15_000,
-  });
-  expect(fastaRequests).toEqual([]);
-  await page.keyboard.press("Home");
-  await expect(page.locator("#status")).toHaveText("Ready · bundled overview cached", {
-    timeout: 15_000,
-  });
-
-  const firstRangeResponse = page.waitForResponse((response) => (
-    response.url().endsWith("/examples/Col-CEN_v1.2.fasta")
-    && response.request().headers().range !== undefined
-    && response.status() === 206
-  ), { timeout: 20_000 });
-  await page.locator("#self-sequence").selectOption("1");
-  const rangeResponse = await firstRangeResponse;
-  expect(rangeResponse.request().headers().range).toMatch(/^bytes=\d+-\d+$/u);
-  expect(await rangeResponse.headerValue("content-range"))
-    .toMatch(/^bytes \d+-\d+\/134282475$/u);
-  expect(fastaRequests.length).toBeGreaterThan(0);
-  expect(fastaRequests.every(({ range }) => /^bytes=\d+-\d+$/u.test(range ?? ""))).toBe(true);
-
-  releaseAnnotation();
-  await expect(page.locator("#annotation-selection")).toHaveText("ColCEN_CEN180.gff3 loaded", {
-    timeout: 15_000,
-  });
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  await expect(page.locator("#self-sequence option").first()).toContainText("Chr1");
+  await expect(page.locator("#fasta-selection")).toHaveText("Col-CEN_v1.2.fasta.gz ready to explore");
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  expect(remoteRequestSeen).toBe(true);
+  expect(cachedAssetRequests).toEqual([]);
 });
 
 test("cursor guides follow the pointer and advanced controls change their appearance", async ({ page }) => {

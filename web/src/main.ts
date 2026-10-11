@@ -11,12 +11,6 @@ import {
 } from "./palettes";
 import { selectDetailResolution, selectTiles } from "./detail";
 import { DnaLoader } from "./dna-loader";
-import {
-  loadBundledArabidopsisAnnotation,
-  loadBundledArabidopsisDetailOverviews,
-  loadBundledArabidopsisExample,
-  type ArabidopsisExampleStartup,
-} from "./example-loader";
 import { ExportController } from "./export-controller";
 import { createNumericExport, exportBaseName, type ExportProvenance, type NumericExportContext } from "./export";
 import { createModDotPlotCliConfigBlob } from "./moddotplot-config";
@@ -74,7 +68,6 @@ import {
 } from "./ruler";
 import { sequenceAxisLabel } from "./sequence-metadata";
 import { parseRemoteFastaUrl } from "./remote-fasta";
-import type { PrecomputedOverviewArtifact } from "./precomputed-overview";
 import {
   decideResourceAdmission,
   totalResourceBytes,
@@ -150,6 +143,7 @@ const exactModeBanner = element<HTMLElement>("exact-mode-banner");
 const exactBaseLegend = element<HTMLElement>("exact-base-legend");
 const dnaLoader = new DnaLoader();
 plotLoading.append(dnaLoader.canvas);
+const EXAMPLE_FASTA_URL = "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz";
 const versionLabel = `v${__APP_VERSION__}`;
 landingVersion.textContent = versionLabel;
 controlVersion.textContent = versionLabel;
@@ -323,12 +317,6 @@ let pendingLandingAnnotations: File[] = [];
 let launchValidationPending = false;
 let launchReady = false;
 let launchExampleWhenReady = false;
-let exampleLoadController: AbortController | null = null;
-let exampleAnnotationController: AbortController | null = null;
-let exampleDetailController: AbortController | null = null;
-const bundledDetailCacheResolutions = new Set<number>();
-let activeBundledExample: ArabidopsisExampleStartup | null = null;
-let recoveryBundledExample: ArabidopsisExampleStartup | null = null;
 let gridReturnAvailable = false;
 let gridReturnCell: HTMLButtonElement | null = null;
 let recoveryFiles: File[] | null = null;
@@ -391,16 +379,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
   const message = event.data;
   switch (message.type) {
     case "ready":
-      if (recoveryBundledExample) {
-        const example = recoveryBundledExample;
-        recoveryBundledExample = null;
-        post({
-          type: "load-precomputed-overview",
-          generation,
-          source: example.source,
-          artifact: example.artifact,
-        });
-      } else if (recoveryFiles) {
+      if (recoveryFiles) {
         const files = recoveryFiles;
         recoveryFiles = null;
         loadFiles(files, false);
@@ -423,10 +402,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
           : ` · ${Math.min(99, Math.floor(message.progress * 100))}%`;
         fastaSelection.textContent = `${message.text}${progress}`;
         if (launchExampleWhenReady) {
-          const indexedProgress = message.progress === undefined
-            ? 0.95
-            : 0.95 + Math.min(1, message.progress) * 0.05;
-          showExampleProgress(message.text, indexedProgress);
+          showExampleProgress(message.text, message.progress ?? 0);
         }
       }
       if (plotMode === "grid" && gridRun && gridRun.activeGeneration !== null) {
@@ -446,16 +422,6 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (message.busy) showProgress(message.text, message.progress);
       else hideProgress();
       break;
-    case "precomputed-overview-cached":
-      if (message.generation !== generation || !activeBundledExample) break;
-      bundledDetailCacheResolutions.add(message.resolution);
-      if (
-        bundledDetailCacheResolutions.has(2_000)
-        && bundledDetailCacheResolutions.has(4_000)
-      ) {
-        document.body.dataset.bundledDetailCache = "ready";
-      }
-      break;
     case "sequences":
       if (message.generation !== generation) return;
       sequences = message.sequences;
@@ -465,7 +431,6 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       }
       sequenceLoadPending = false;
       populateSelectors();
-      if (activeBundledExample) void cacheBundledDetailOverviews(activeBundledExample);
       if (launchValidationPending) {
         launchValidationPending = false;
         launchReady = true;
@@ -478,10 +443,9 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
         hideProgress();
         if (launchExampleWhenReady) {
           launchExampleWhenReady = false;
-          showExampleProgress("Included genome ready", 1);
+          showExampleProgress("Online genome ready", 1);
           resetExampleButton();
           enterWorkspace();
-          if (activeBundledExample) void loadBundledAnnotation(activeBundledExample);
         }
         break;
       }
@@ -665,7 +629,7 @@ remoteFastaForm.addEventListener("submit", (event) => {
   }
 });
 exploreButton.addEventListener("click", enterWorkspace);
-exampleButton.addEventListener("click", () => void launchBundledExample());
+exampleButton.addEventListener("click", launchOnlineExample);
 
 function enterWorkspace(): void {
   if (!launchReady || sequences.length === 0) return;
@@ -906,8 +870,6 @@ function stageFastaFiles(files: File[], launchAutomatically = false): void {
     );
     return;
   }
-  activeBundledExample = null;
-  recoveryBundledExample = null;
   stagedFastaFiles = [...files];
   launchReady = false;
   fastaSelection.textContent = `Reading and validating ${fileList(files)}…`;
@@ -916,16 +878,15 @@ function stageFastaFiles(files: File[], launchAutomatically = false): void {
   exploreButton.hidden = true;
   if (launchAutomatically) {
     exampleButton.disabled = true;
-    exampleButton.textContent = "Preparing included genome…";
+    exampleButton.textContent = "Preparing example genome…";
   }
   if (workerFailed) startWorker();
   loadFiles(files, true, true);
 }
 
-function stageRemoteFasta(source: RemoteFastaDownloadDescriptor): void {
+function stageRemoteFasta(source: RemoteFastaDownloadDescriptor, launchAutomatically = false): void {
   cancelExampleLoad();
-  activeBundledExample = null;
-  recoveryBundledExample = null;
+  launchExampleWhenReady = launchAutomatically;
   stagedFastaFiles = [];
   launchReady = false;
   fastaSelection.textContent = `Connecting to ${new URL(source.url).hostname}…`;
@@ -934,153 +895,32 @@ function stageRemoteFasta(source: RemoteFastaDownloadDescriptor): void {
   exploreButton.hidden = true;
   remoteFastaSubmit.disabled = true;
   remoteFastaSubmit.textContent = "Streaming…";
+  if (launchAutomatically) {
+    exampleButton.disabled = true;
+    exampleButton.textContent = "Streaming example genome…";
+    showExampleProgress("Connecting to online Arabidopsis genome", 0);
+  }
   if (workerFailed) startWorker();
   loadRemoteFasta(source, true, true);
 }
 
-async function launchBundledExample(): Promise<void> {
+function launchOnlineExample(): void {
   clearSession();
-  const controller = new AbortController();
-  exampleLoadController = controller;
-  exampleButton.disabled = true;
-  exampleButton.textContent = "Loading included genome…";
-  fastaSelection.textContent = "Loading precomputed Col-CEN_v1.2 overview…";
-  annotationSelection.textContent = "Annotations load after the plot opens";
-  showExampleProgress("Loading precomputed Arabidopsis overview", 0);
-
   try {
-    const example = await loadBundledArabidopsisExample({
-      signal: controller.signal,
-      onProgress: (message, progress) => {
-        if (controller.signal.aborted || exampleLoadController !== controller) return;
-        showExampleProgress(message, progress);
-        fastaSelection.textContent = `${message} · ${Math.floor(progress * 100)}%`;
-      },
-    });
-    if (controller.signal.aborted || exampleLoadController !== controller) return;
-    exampleLoadController = null;
-    stagePrecomputedExample(example);
+    remoteFastaUrl.value = EXAMPLE_FASTA_URL;
+    stageRemoteFasta(parseRemoteFastaUrl(EXAMPLE_FASTA_URL), true);
   } catch (error) {
-    if (isAbortError(error) || exampleLoadController !== controller) return;
-    exampleLoadController = null;
     resetExampleButton();
     hideExampleProgress();
-    fastaSelection.textContent = "No FASTA selected";
-    annotationSelection.textContent = "No annotations selected";
     showSequenceLoadDialog(
-      "The included Arabidopsis example could not be loaded.",
-      [error instanceof Error ? error.message : String(error), "Reload the page or choose local FASTA files instead."],
+      "The online Arabidopsis example could not be started.",
+      [error instanceof Error ? error.message : String(error)],
     );
   }
 }
 
-function stagePrecomputedExample(example: ArabidopsisExampleStartup): void {
-  activeBundledExample = example;
-  recoveryBundledExample = null;
-  lastFiles = [];
-  stagedFastaFiles = [];
-  stagedAnnotationFiles = [];
-  pendingLandingAnnotations = [];
-  generation += 1;
-  tileRequestId += 1;
-  featureTrackRequestId += 1;
-  sequenceLoadPending = true;
-  launchValidationPending = true;
-  launchExampleWhenReady = true;
-  launchReady = false;
-  fastaSelection.textContent = `Validating ${example.source.fileName} overview…`;
-  fastaSelection.title = `${example.source.fileName} · remote ranges load only when needed`;
-  annotationSelection.textContent = "Annotations load after the plot opens";
-  dropZone.classList.add("has-selection");
-  exploreButton.hidden = true;
-  if (workerFailed) startWorker();
-  post({
-    type: "load-precomputed-overview",
-    generation,
-    source: example.source,
-    artifact: example.artifact,
-  });
-}
-
-async function loadBundledAnnotation(
-  example: ArabidopsisExampleStartup,
-): Promise<void> {
-  exampleAnnotationController?.abort(new DOMException("Annotation load was replaced.", "AbortError"));
-  const controller = new AbortController();
-  exampleAnnotationController = controller;
-  annotationSelection.textContent = "Loading included CEN180 annotations · 0%";
-  try {
-    const annotation = await loadBundledArabidopsisAnnotation({
-      signal: controller.signal,
-      onProgress: (_message, progress) => {
-        if (
-          controller.signal.aborted
-          || exampleAnnotationController !== controller
-          || activeBundledExample !== example
-        ) return;
-        annotationSelection.textContent = `Loading included CEN180 annotations · ${Math.floor(progress * 100)}%`;
-      },
-    });
-    if (
-      controller.signal.aborted
-      || exampleAnnotationController !== controller
-      || activeBundledExample !== example
-    ) return;
-    exampleAnnotationController = null;
-    stagedAnnotationFiles = [annotation];
-    annotationSelection.textContent = `${annotation.name} loaded`;
-    annotationSelection.title = annotation.name;
-    dropZone.classList.add("has-selection");
-    if (comparisonReady && renderer.exportTileViews().length > 0) {
-      importedTracks.importFilesForSequences([annotation], sequences);
-    } else {
-      pendingLandingAnnotations = [annotation];
-    }
-  } catch (error: unknown) {
-    if (isAbortError(error) || exampleAnnotationController !== controller) return;
-    exampleAnnotationController = null;
-    annotationSelection.textContent = "Included CEN180 annotations unavailable";
-    annotationSelection.title = error instanceof Error ? error.message : String(error);
-    dropZone.classList.toggle("has-selection", activeBundledExample !== null || stagedFastaFiles.length > 0);
-  }
-}
-
-async function cacheBundledDetailOverviews(
-  example: ArabidopsisExampleStartup,
-): Promise<void> {
-  exampleDetailController?.abort(new DOMException("Detail cache load was replaced.", "AbortError"));
-  const controller = new AbortController();
-  exampleDetailController = controller;
-  try {
-    const artifacts = await loadBundledArabidopsisDetailOverviews({ signal: controller.signal });
-    if (
-      controller.signal.aborted
-      || exampleDetailController !== controller
-      || activeBundledExample !== example
-    ) return;
-    exampleDetailController = null;
-    bundledDetailCacheResolutions.clear();
-    document.body.dataset.bundledDetailCache = "loading";
-    for (const artifact of artifacts) postCachedOverview(artifact);
-  } catch (error) {
-    if (isAbortError(error) || exampleDetailController !== controller) return;
-    exampleDetailController = null;
-    document.body.dataset.bundledDetailCache = "unavailable";
-    console.warn("Static Arabidopsis zoom cache is unavailable; falling back to local computation.", error);
-  }
-}
-
 function cancelExampleLoad(): void {
-  const wasLoading = exampleLoadController !== null
-    || exampleAnnotationController !== null
-    || exampleDetailController !== null;
-  const reason = new DOMException("The example load was cancelled.", "AbortError");
-  exampleLoadController?.abort(reason);
-  exampleAnnotationController?.abort(reason);
-  exampleDetailController?.abort(reason);
-  exampleLoadController = null;
-  exampleAnnotationController = null;
-  exampleDetailController = null;
+  const wasLoading = launchExampleWhenReady;
   launchExampleWhenReady = false;
   resetExampleButton();
   if (wasLoading && !landing.hidden) {
@@ -1111,7 +951,7 @@ function hideExampleProgress(): void {
 }
 
 function restoreLandingSelections(): void {
-  fastaSelection.textContent = activeBundledExample || lastRemoteFasta || stagedFastaFiles.length > 0
+  fastaSelection.textContent = lastRemoteFasta || stagedFastaFiles.length > 0
     ? `${currentFastaLabel()} ready to explore`
     : "No FASTA selected";
   annotationSelection.textContent = stagedAnnotationFiles.length > 0
@@ -1119,17 +959,13 @@ function restoreLandingSelections(): void {
     : "No annotations selected";
   dropZone.classList.toggle(
     "has-selection",
-    activeBundledExample !== null || lastRemoteFasta !== null || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
+    lastRemoteFasta !== null || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
   );
   exploreButton.hidden = !launchReady;
 }
 
-function isAbortError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
-}
-
 function stageAnnotationFiles(files: File[]): void {
-  if (exampleLoadController || exampleAnnotationController) cancelExampleLoad();
+  if (launchExampleWhenReady) cancelExampleLoad();
   const unsupported = files.filter((file) => !isAnnotationFileName(file.name));
   if (unsupported.length > 0) {
     showSequenceLoadDialog(
@@ -2588,16 +2424,9 @@ function updateCursorGuideControlState(): void {
 function updateMemory(): void {
   const rendererBytes = renderer.estimatedByteBreakdown();
   const gridBytes = estimatedGridBytes();
-  const retainedBundledOverviewBytes = activeBundledExample?.artifact.tiles.reduce(
-    (total, tile) => total
-      + tile.identity.byteLength
-      + tile.direction.byteLength
-      + tile.directionSupport.byteLength,
-    0,
-  ) ?? 0;
   const usage: ResourceUsage = {
     wasm: wasmBytes,
-    jsTiles: rendererBytes.jsTiles + gridBytes + retainedBundledOverviewBytes,
+    jsTiles: rendererBytes.jsTiles + gridBytes,
     gpuTextures: rendererBytes.gpuTextures,
     annotations: importedTracks.estimatedBytes(),
     featureTracks: featureTracks.estimatedBytes(),
@@ -2643,12 +2472,8 @@ function clearSession(): void {
   launchValidationPending = false;
   launchReady = false;
   launchExampleWhenReady = false;
-  activeBundledExample = null;
-  bundledDetailCacheResolutions.clear();
-  recoveryBundledExample = null;
   recoveryFiles = null;
   recoveryRemoteFasta = null;
-  delete document.body.dataset.bundledDetailCache;
   comparisonReady = false;
   currentMeasurement = "sketch";
   exactVisualization = DEFAULT_EXACT_VISUALIZATION;
@@ -2743,7 +2568,6 @@ function rejectSequenceLoad(message: string): void {
 }
 
 function currentFastaLabel(): string {
-  if (activeBundledExample) return activeBundledExample.source.fileName;
   if (lastRemoteFasta) return lastRemoteFasta.fileName;
   return fileList(stagedFastaFiles);
 }
@@ -2811,40 +2635,33 @@ function handleWorkerFailure(message: string): void {
   worker.terminate();
   setPlotLoading(false);
   if (launchFailure) {
+    if (launchExampleWhenReady) {
+      launchExampleWhenReady = false;
+      resetExampleButton();
+      hideExampleProgress();
+    }
     launchValidationPending = false;
     launchReady = false;
     exploreButton.hidden = true;
     resetRemoteFastaButton();
-    fastaSelection.textContent = activeBundledExample
-      ? "Unable to open the precomputed overview · retry the compute engine"
-      : lastRemoteFasta
-        ? "Unable to load this remote FASTA · check the URL and try again"
+    fastaSelection.textContent = lastRemoteFasta
+      ? "Unable to load this remote FASTA · check the URL and try again"
       : "Unable to validate this FASTA · choose it again to retry";
-    dropZone.classList.toggle("has-selection", activeBundledExample !== null || lastRemoteFasta !== null);
+    dropZone.classList.toggle("has-selection", lastRemoteFasta !== null);
   }
   showError(launchFailure
-    ? activeBundledExample
-      ? `${message} Restart the compute engine to retry the included overview.`
-      : lastRemoteFasta
-        ? `${message} Check the URL and remote host, then try again.`
+    ? lastRemoteFasta
+      ? `${message} Check the URL and remote host, then try again.`
         : `${message} Choose the FASTA files again to retry.`
     : `${message} Restart the compute engine to reload the selected FASTA files.`);
-  retryEngineButton.hidden = launchFailure && activeBundledExample === null;
+  retryEngineButton.hidden = launchFailure;
 }
 
 function restartEngine(): void {
   cancelPendingDetailedExport(new Error("Export cancelled while the compute engine restarts."));
   if (!workerFailed) worker.terminate();
-  recoveryBundledExample = activeBundledExample;
-  recoveryFiles = activeBundledExample === null && lastFiles.length > 0 ? [...lastFiles] : null;
-  recoveryRemoteFasta = activeBundledExample === null && lastRemoteFasta !== null
-    ? lastRemoteFasta
-    : null;
-  if (activeBundledExample && !landing.hidden) {
-    sequenceLoadPending = true;
-    launchValidationPending = true;
-    launchExampleWhenReady = true;
-  }
+  recoveryFiles = lastFiles.length > 0 ? [...lastFiles] : null;
+  recoveryRemoteFasta = lastRemoteFasta;
   comparisonReady = false;
   activeParameters = null;
   activeConfigurations = [];
@@ -2868,19 +2685,6 @@ function restartEngine(): void {
 
 function post(message: MainToWorkerMessage): void {
   worker.postMessage(message);
-}
-
-function postCachedOverview(artifact: PrecomputedOverviewArtifact): void {
-  const transfers = artifact.tiles.flatMap((tile) => [
-    tile.identity.buffer as ArrayBuffer,
-    tile.direction.buffer as ArrayBuffer,
-    tile.directionSupport.buffer as ArrayBuffer,
-  ]);
-  worker.postMessage({
-    type: "cache-precomputed-overview",
-    generation,
-    artifact,
-  } satisfies MainToWorkerMessage, transfers);
 }
 
 function prepareDetailedExport(
