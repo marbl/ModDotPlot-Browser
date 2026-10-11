@@ -40,16 +40,12 @@
           </h1>
           <div class="drop-zone-frame">
             <button id="drop-zone" class="drop-zone" type="button">
-              <span id="drop-title" class="drop-title">Drop FASTA files here</span>
+              <span id="drop-title" class="drop-title">Drop FASTA and annotation files here</span>
               <span class="drop-detail">
-                <span>or click to choose files · FASTA, gzip, and BGZF</span>
-                <span>optional fai/gzi indices (faster loading)</span>
+                <span>or click to choose · FASTA, BED, GFF3, or GTF</span>
+                <span>gzip/BGZF supported · optional fai/gzi indices for FASTA</span>
               </span>
               <span id="fasta-selection" class="landing-file-selection" aria-live="polite">No FASTA selected</span>
-            </button>
-            <button id="annotation-drop-zone" class="annotation-drop-zone" type="button">
-              <span class="annotation-drop-title">Drop annotation files here</span>
-              <span class="annotation-drop-detail">or click to choose · BED, GFF3, or GTF · optional</span>
               <span id="annotation-selection" class="landing-file-selection" aria-live="polite">No annotations selected</span>
             </button>
             <button id="explore-button" class="explore-button" type="button" hidden>Explore</button>
@@ -84,8 +80,7 @@
             <span id="landing-version" class="app-version landing-version"></span>
           </div>
         </div>
-        <input id="file-input" type="file" accept=".fa,.fasta,.fna,.fas,.fa.gz,.fasta.gz,.fna.gz,.gz,.bgz,.bgzf,.fai,.gzi" multiple hidden />
-        <input id="annotation-file-input" type="file" accept=".bed,.gff,.gff3,.gtf,.gff2,.bed.gz,.gff.gz,.gff3.gz,.gtf.gz,.gff2.gz,.bed.bgz,.gff.bgz,.gff3.bgz,.gtf.bgz,.gff2.bgz,.bgzf" multiple hidden />
+        <input id="file-input" type="file" accept=".fa,.fasta,.fna,.fas,.fa.gz,.fasta.gz,.fna.gz,.gz,.bgz,.bgzf,.fai,.gzi,.bed,.gff,.gff3,.gtf,.gff2,.bed.gz,.gff.gz,.gff3.gz,.gtf.gz,.gff2.gz,.bed.bgz,.gff.bgz,.gff3.bgz,.gtf.bgz,.gff2.bgz" multiple hidden />
       </section>
 
       <section id="workspace" class="workspace" hidden>
@@ -155,8 +150,8 @@
 
           <fieldset class="segmented-control">
             <legend>Background</legend>
-            <button type="button" data-background-mode="white" aria-pressed="true">White</button>
-            <button type="button" data-background-mode="black" aria-pressed="false">Black</button>
+            <button type="button" data-background-mode="white" aria-pressed="false">White</button>
+            <button type="button" data-background-mode="black" aria-pressed="true">Black</button>
           </fieldset>
 
           <div class="heatmap-control">
@@ -227,23 +222,19 @@
           </dialog>
           <details id="feature-track-controls" class="feature-track-controls">
             <summary>Feature tracks</summary>
-            <fieldset class="feature-track-placement-controls">
-              <legend>Track placement</legend>
-              <label>
-                <span>X tracks</span>
-                <select id="x-track-position">
-                  <option value="top" selected>Top</option>
-                  <option value="bottom">Bottom</option>
-                </select>
-              </label>
-              <label>
-                <span>Y tracks</span>
-                <select id="y-track-position">
-                  <option value="left" selected>Left</option>
-                  <option value="right">Right</option>
-                </select>
-              </label>
-            </fieldset>
+            <div class="feature-track-placement-controls">
+              <strong class="feature-track-placement-title">Track placement</strong>
+              <fieldset id="x-track-position" class="segmented-control track-position-control">
+                <legend>X tracks</legend>
+                <button type="button" data-track-position="top" aria-pressed="true">Top</button>
+                <button type="button" data-track-position="bottom" aria-pressed="false">Bottom</button>
+              </fieldset>
+              <fieldset id="y-track-position" class="segmented-control track-position-control">
+                <legend>Y tracks</legend>
+                <button type="button" data-track-position="left" aria-pressed="true">Left</button>
+                <button type="button" data-track-position="right" aria-pressed="false">Right</button>
+              </fieldset>
+            </div>
             <div class="feature-track-control-item">
               <div class="feature-track-control-row" role="group" aria-label="GC percent tracks">
                 <strong>GC%</strong>
@@ -365,10 +356,15 @@
             <div id="plot-frame" class="plot-frame">
               <button id="back-to-grid" class="back-to-grid-button" type="button" hidden>← Back to grid</button>
               <div id="exact-mode-banner" class="exact-mode-banner" role="status" aria-live="polite" hidden></div>
-              <canvas id="plot-canvas" tabindex="0" aria-describedby="plot-summary" aria-label="Interactive genomic dotplot. Use arrow keys to pan, plus and minus to zoom, and Home to reset. On touch screens, drag to pan and pinch to zoom."></canvas>
+              <canvas id="plot-canvas" tabindex="0" aria-describedby="plot-summary" aria-label="Interactive genomic dotplot. Use arrow keys to pan, plus and minus to zoom, Home to reset, and R to place or remove a measurement ruler. On touch screens, drag to pan and pinch to zoom."></canvas>
               <div id="cursor-guides" class="cursor-guides" aria-hidden="true" hidden>
                 <i class="cursor-guide cursor-guide-primary"></i>
                 <i class="cursor-guide cursor-guide-secondary"></i>
+              </div>
+              <div id="ruler-marker" class="ruler-marker" aria-hidden="true" hidden>
+                <i class="ruler-line ruler-line-horizontal"></i>
+                <i class="ruler-line ruler-line-vertical"></i>
+                <span>R</span>
               </div>
               <div id="plot-loading" class="plot-loading" role="status" aria-label="Drawing plot" hidden></div>
               <p id="plot-summary" class="visually-hidden">No plot position selected.</p>

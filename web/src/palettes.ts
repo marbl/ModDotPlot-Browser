@@ -15,8 +15,6 @@ import {
   COLORBREWER_PALETTES,
   COLORBREWER_QUALITATIVE_PALETTES,
   COLORBREWER_SEQUENTIAL_PALETTES,
-  DEFAULT_COLORBREWER_COLOR_COUNT,
-  DEFAULT_COLORBREWER_PALETTE,
   type ColorBrewerPaletteId,
   type PaletteColorCountRange,
 } from "./colorbrewer";
@@ -93,9 +91,9 @@ export const PALETTE_IDS: readonly PaletteId[] = Object.freeze(
   PALETTE_GROUPS.flatMap((group) => group.paletteIds),
 );
 
-export const DEFAULT_PALETTE: PaletteId = DEFAULT_COLORBREWER_PALETTE;
-export const DEFAULT_PALETTE_COLOR_COUNT = DEFAULT_COLORBREWER_COLOR_COUNT;
-export const DEFAULT_PALETTE_REVERSED = true;
+export const DEFAULT_PALETTE: PaletteId = VIRIDIS_PALETTE_ID;
+export const DEFAULT_PALETTE_COLOR_COUNT = 12;
+export const DEFAULT_PALETTE_REVERSED = false;
 
 // Published as a compact RGB table by d3-scale-chromatic. Its ramp selects
 // floor(t * 256), clamped to the final color; buildViridisPalette preserves

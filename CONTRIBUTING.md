@@ -5,9 +5,9 @@
 Thank you for improving ModDotPlot Browser. Correct and reproducible scientific output is
 the project's first priority, followed by interactive performance and maintainability.
 
-Start with the [design reference](docs/DESIGN.md),
-[scientific specification](docs/SCIENTIFIC_SPEC.md), and applicable
-[architectural decision records](docs/adr/).
+Start with the [methods reference](docs/METHODS.md), the
+[release checklist](docs/RELEASE_CHECKLIST.md), and the
+[user guide](docs/USER_GUIDE.md).
 
 ## Development environment
 
@@ -48,8 +48,8 @@ Scientific changes must:
 4. Include ambiguity, short-range, low-complexity, reverse-complement, and boundary
    cases relevant to the change.
 5. Quantify approximation error and performance when an estimator changes.
-6. Update `docs/DESIGN.md`, `docs/SCIENTIFIC_SPEC.md`, `docs/STATUS.md`, and an ADR when
-   the decision is durable.
+6. Update `docs/METHODS.md`, `docs/RELEASE_CHECKLIST.md`, the user guide, and the
+   changelog when the decision is durable.
 
 Never loosen a correctness threshold to make an optimization pass without documenting
 and scientifically justifying the changed error model.
@@ -86,7 +86,7 @@ reference and statistical gates.
 Update [CHANGELOG.md](CHANGELOG.md) for user-visible changes. Documentation should call
 zero-based and one-based coordinates explicitly, distinguish exact from estimated
 values, and avoid claiming research validation until the gates in
-[STATUS.md](docs/STATUS.md) are complete.
+[release checklist](docs/RELEASE_CHECKLIST.md) are complete.
 
 ModDotPlot Browser is MIT-0 licensed. By contributing, you agree that your contribution is
 provided under that license.

@@ -56,10 +56,10 @@ describe("application palette catalog", () => {
     expect(PALETTE_IDS.slice(0, 2)).toEqual(["Spectral", "Viridis"]);
   });
 
-  it("defaults to reversed eleven-class Spectral", () => {
-    expect(DEFAULT_PALETTE).toBe("Spectral");
-    expect(DEFAULT_PALETTE_COLOR_COUNT).toBe(11);
-    expect(DEFAULT_PALETTE_REVERSED).toBe(true);
+  it("defaults to canonical twelve-class Viridis", () => {
+    expect(DEFAULT_PALETTE).toBe("Viridis");
+    expect(DEFAULT_PALETTE_COLOR_COUNT).toBe(12);
+    expect(DEFAULT_PALETTE_REVERSED).toBe(false);
   });
 
   it("provides Viridis variants from three through twelve colors", () => {

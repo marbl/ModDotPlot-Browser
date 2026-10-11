@@ -46,7 +46,7 @@ interface ParseState {
 }
 
 interface RecordAdmission {
-  records: number;
+  features: number;
 }
 
 interface TranscriptBuilder {
@@ -142,7 +142,7 @@ async function parseFile(
   request: Extract<TrackParserRequest, { type: "parse" }>,
   signal: AbortSignal,
 ): Promise<void> {
-  const state = createParseState(request.file, request.targetSequence, { records: 0 });
+  const state = createParseState(request.file, request.targetSequence, { features: 0 });
   await readLines(request.file, signal, (line) => parseLine(state, line), (progress) => {
     post({ type: "progress", requestId: request.requestId, progress, text: `Reading ${request.file.name}` });
   });
@@ -166,7 +166,7 @@ async function parseBatchFile(
   signal: AbortSignal,
 ): Promise<void> {
   const candidates = [...new Map(request.candidates.map((candidate) => [candidate.index, candidate])).values()];
-  const admission: RecordAdmission = { records: 0 };
+  const admission: RecordAdmission = { features: 0 };
   const states = new Map(candidates.map((candidate) => [
     candidate.index,
     createParseState(request.file, candidate, admission),
@@ -307,7 +307,8 @@ function parseBed(state: ParseState, line: string): void {
   }
   const clipped = clipInterval(state, rawStart, rawEnd);
   if (!clipped) return;
-  admitRecord(state);
+  admitFeature(state);
+  state.validRecords += 1;
   const [start, end] = clipped;
   const name = fields[3]?.trim() || `${sequenceId}:${rawStart + 1}-${rawEnd}`;
   const strand = parseStrand(fields[5]);
@@ -404,7 +405,6 @@ function parseGff(state: ParseState, line: string, format: "gff3" | "gtf"): void
   if (!["0", "1", "2", "."].includes(phase)) {
     return invalid(state, `${format.toUpperCase()} phase must be 0, 1, 2, or .`);
   }
-  admitRecord(state);
   const strand = parseStrand(strandText);
   const details = [
     source !== "." ? `source ${source}` : "",
@@ -414,6 +414,7 @@ function parseGff(state: ParseState, line: string, format: "gff3" | "gtf"): void
   ].filter(Boolean);
   const lowerType = type.toLowerCase();
   if (lowerType === "gene" || lowerType === "pseudogene") {
+    if (!state.genes.has(id)) admitFeature(state);
     state.genes.set(id, {
       id,
       name,
@@ -450,21 +451,23 @@ function parseGff(state: ParseState, line: string, format: "gff3" | "gtf"): void
       }
     }
   } else if (parents.length === 0) {
+    admitFeature(state);
     state.otherGff.push({ id, name, type, start, end, strand, color: gffFeatureColor(type, attributes), blocks: [start, end], lane: 0, details });
   }
+  state.validRecords += 1;
 }
 
-function admitRecord(state: ParseState): void {
-  const next = state.admission.records + 1;
+function admitFeature(state: ParseState): void {
+  const next = state.admission.features + 1;
   const admissionError = annotationAdmissionError(0, next);
   if (admissionError) throw new Error(admissionError);
-  state.admission.records = next;
-  state.validRecords += 1;
+  state.admission.features = next;
 }
 
 function transcript(state: ParseState, id: string): TranscriptBuilder {
   let builder = state.transcripts.get(id);
   if (!builder) {
+    admitFeature(state);
     builder = {
       id,
       name: id,
@@ -672,6 +675,7 @@ async function readLines(
   const decoder = new TextDecoder();
   let pending = "";
   let chunksSinceYield = 0;
+  let consumerError: unknown = null;
   try {
     while (true) {
       if (signal.aborted) {
@@ -687,7 +691,14 @@ async function readLines(
       pending += decoder.decode(chunk.value, { stream: true });
       const lines = pending.split(/\r?\n/);
       pending = lines.pop() ?? "";
-      for (const line of lines) consume(line);
+      for (const line of lines) {
+        try {
+          consume(line);
+        } catch (error: unknown) {
+          consumerError = error;
+          throw error;
+        }
+      }
       chunksSinceYield += 1;
       if (chunksSinceYield >= 16) {
         chunksSinceYield = 0;
@@ -696,6 +707,7 @@ async function readLines(
     }
   } catch (error: unknown) {
     if (signal.aborted) return;
+    if (error === consumerError) throw error;
     if (!compressed) throw error;
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not decompress ${file.name} as gzip/BGZF: ${reason}`);

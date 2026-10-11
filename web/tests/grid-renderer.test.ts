@@ -110,7 +110,7 @@ describe("grid pair renderer", () => {
       height: 3,
     }));
     const colors = identities.map(
-      (identity) => [...identityColorRgba(identity, "Spectral", range, false)],
+      (identity) => [...identityColorRgba(identity, "Viridis", range, false)],
     );
 
     expect([
