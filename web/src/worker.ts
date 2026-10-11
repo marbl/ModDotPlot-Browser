@@ -1,11 +1,12 @@
 /// <reference lib="webworker" />
 
 import init, { ComputeSession, ScientificConfig } from "./wasm/moddotplot_wasm.js";
-import { decompressBgzfStream, isBgzfBlob } from "./bgzf";
+import { decompressBgzfStream, isBgzfBlob, isBgzfHeader } from "./bgzf";
 import type {
   ComparisonParameters,
   FeatureTrackRequest,
   MainToWorkerMessage,
+  RemoteFastaDownloadDescriptor,
   RemoteFastaSourceDescriptor,
   ScientificConfigMetadata,
   SequenceMetadata,
@@ -159,7 +160,7 @@ context.onmessage = (event: MessageEvent<MainToWorkerMessage>): void => {
     });
     return;
   }
-  if (message.type === "load" || message.type === "load-precomputed-overview" || message.type === "clear") {
+  if (message.type === "load" || message.type === "load-remote" || message.type === "load-precomputed-overview" || message.type === "clear") {
     datasetJob.cancel("dataset replaced");
     comparisonJob?.cancel("dataset replaced");
     comparisonJob = null;
@@ -190,6 +191,9 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
   switch (message.type) {
     case "load":
       await loadFiles(message.files, message.generation);
+      break;
+    case "load-remote":
+      await loadRemoteFasta(message.source, message.generation);
       break;
     case "load-precomputed-overview":
       await loadPrecomputedOverview(message.source, message.artifact, message.generation);
@@ -494,6 +498,174 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
   } finally {
     if (session !== staging) staging.free();
   }
+}
+
+async function loadRemoteFasta(
+  source: RemoteFastaDownloadDescriptor,
+  generation: number,
+): Promise<void> {
+  const requestedUrl = new URL(source.url);
+  if (requestedUrl.protocol !== "https:") {
+    throw new Error("Remote FASTA URLs must use HTTPS.");
+  }
+  const job = datasetJob;
+  post({
+    type: "status",
+    generation,
+    text: `Connecting to ${requestedUrl.hostname}`,
+    progress: 0,
+    busy: true,
+  });
+  const response = await fetch(requestedUrl, {
+    method: "GET",
+    mode: "cors",
+    credentials: "omit",
+    redirect: "follow",
+    referrerPolicy: "no-referrer",
+    signal: job.signal,
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`The remote server returned HTTP ${response.status} ${response.statusText || "while loading the FASTA"}.`);
+  }
+  if (!response.body) throw new Error("The remote server returned no readable FASTA data.");
+  if (response.url && new URL(response.url).protocol !== "https:") {
+    await response.body.cancel().catch(() => undefined);
+    throw new Error("The remote FASTA redirected to a non-HTTPS URL.");
+  }
+
+  const contentEncoding = response.headers.get("content-encoding")?.trim().toLocaleLowerCase("en-US") ?? "";
+  const browserDecodedContent = contentEncoding.length > 0 && contentEncoding !== "identity";
+  const declaredLength = Number(response.headers.get("content-length"));
+  const totalBytes = !browserDecodedContent && Number.isSafeInteger(declaredLength) && declaredLength > 0
+    ? declaredLength
+    : 0;
+  let receivedBytes = 0;
+  let lastPercentage = -1;
+  let stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      receivedBytes += chunk.byteLength;
+      const progress = totalBytes > 0 ? Math.min(1, receivedBytes / totalBytes) : undefined;
+      const percentage = progress === undefined ? receivedBytes : Math.floor(progress * 100);
+      if (percentage !== lastPercentage && job.canPublish(generation)) {
+        lastPercentage = percentage;
+        post({
+          type: "status",
+          generation,
+          text: `Streaming and validating ${source.fileName}`,
+          progress,
+          busy: true,
+        });
+      }
+      controller.enqueue(chunk);
+    },
+  }));
+  if (/\.gz$/i.test(source.fileName)) {
+    const inspected = await inspectRemoteGzipStream(stream);
+    stream = inspected.bgzf
+      ? decompressBgzfStream(inspected.stream)
+      : inspected.gzip
+        ? (inspected.stream as unknown as ReadableStream<BufferSource>)
+          .pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>
+        : inspected.stream;
+  }
+
+  const staging = new ComputeSession();
+  const loadedMetadata: Array<Omit<SequenceMetadata, "selectionId">> = [];
+  const stagedSessionIndexes = new Map<number, number>();
+  const stagedGlobalIndexes = new Map<number, number>();
+  const ingestBuffer = new ReusableSequenceIngestBuffer(SEQUENCE_INGEST_SHARD_BYTES);
+  const reader = stream.getReader();
+  staging.begin_fasta();
+  const appendMetadata = (value: unknown): void => {
+    for (const record of parsedSequenceRecords(value)) {
+      const globalIndex = loadedMetadata.length;
+      loadedMetadata.push({
+        index: globalIndex,
+        name: record.name,
+        description: record.description,
+        length: Number(record.length),
+        sourceFile: source.fileName,
+      });
+      stagedSessionIndexes.set(globalIndex, record.index);
+      stagedGlobalIndexes.set(record.index, globalIndex);
+    }
+  };
+  const consumeShard = (shard: Uint8Array): void => {
+    appendMetadata(staging.push_fasta_chunk(shard));
+  };
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (!job.canPublish(generation) || !operationIsCurrent()) {
+        await reader.cancel().catch(() => undefined);
+        return;
+      }
+      if (result.done) break;
+      ingestBuffer.append(result.value, consumeShard);
+    }
+    ingestBuffer.flush(consumeShard);
+    appendMetadata(staging.finish_fasta());
+    if (!job.canPublish(generation) || !operationIsCurrent()) return;
+    const committed = assignSequenceSelectionIds(loadedMetadata);
+    session.free();
+    session = staging;
+    indexedSequenceSources = new Map();
+    sessionSequenceIndexes = stagedSessionIndexes;
+    globalSequenceIndexes = stagedGlobalIndexes;
+    activeSessionParameters = null;
+    precomputedOverview = null;
+    precomputedOverviews.clear();
+    job.sequences = committed;
+    post({ type: "sequences", generation, sequences: job.sequences });
+    post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
+  } finally {
+    if (session !== staging) staging.free();
+    reader.releaseLock();
+  }
+}
+
+async function inspectRemoteGzipStream(
+  source: ReadableStream<Uint8Array>,
+): Promise<{ bgzf: boolean; gzip: boolean; stream: ReadableStream<Uint8Array> }> {
+  const reader = source.getReader();
+  const buffered: Uint8Array[] = [];
+  let bufferedBytes = 0;
+  while (bufferedBytes < 512) {
+    const result = await reader.read();
+    if (result.done) break;
+    buffered.push(result.value);
+    bufferedBytes += result.value.byteLength;
+  }
+  const prefix = new Uint8Array(Math.min(bufferedBytes, 512));
+  let copied = 0;
+  for (const chunk of buffered) {
+    const take = Math.min(chunk.byteLength, prefix.byteLength - copied);
+    if (take <= 0) break;
+    prefix.set(chunk.subarray(0, take), copied);
+    copied += take;
+  }
+  let bufferedIndex = 0;
+  const replayed = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (bufferedIndex < buffered.length) {
+        controller.enqueue(buffered[bufferedIndex] as Uint8Array);
+        bufferedIndex += 1;
+        return;
+      }
+      const result = await reader.read();
+      if (result.done) controller.close();
+      else controller.enqueue(result.value);
+    },
+    async cancel(reason) {
+      await reader.cancel(reason);
+    },
+  });
+  return {
+    bgzf: isBgzfHeader(prefix),
+    gzip: prefix[0] === 0x1f && prefix[1] === 0x8b,
+    stream: replayed,
+  };
 }
 
 async function loadPrecomputedOverview(

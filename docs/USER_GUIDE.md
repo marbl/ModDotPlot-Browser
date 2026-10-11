@@ -25,7 +25,9 @@ To get started, simply drop one or more plain, gzip-compressed, or BGZF FASTA as
 
 ![](../web/public/tutorial_images/accepted_files.png)
 
-ModDotPlot will index and validate the provided assembly and, upon completion, create an `Explore` button that launches the interactive browser. An annotation file selected with the assembly is matched against every loaded sequence after the first plot opens. Make sure annotation sequence identifiers match the corresponding FASTA headers.
+Alternatively, paste a direct HTTPS link ending in `.fa`, `.fasta`, `.fna`, or `.fas` (optionally followed by `.gz`) into **Insert URL** below the drop target and select **Load URL**. The browser streams the response directly through the same local parser and gzip decompressor used for selected files; it does not send the FASTA through the ModDotPlot Browser host. The remote server must permit cross-origin browser requests (CORS), and it can observe normal request metadata such as your IP address. Redirects are supported when every destination uses HTTPS.
+
+ModDotPlot will index and validate the provided assembly or streamed URL and, upon completion, create an `Explore` button that launches the interactive browser. An annotation file selected with the assembly is matched against every loaded sequence after the first plot opens. Make sure annotation sequence identifiers match the corresponding FASTA headers.
 
 ![](../web/public/tutorial_images/explore.png)
 

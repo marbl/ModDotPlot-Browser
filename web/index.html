@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'" />
     <meta
       name="description"
       content="Private, browser-native interactive genomic dotplots"
@@ -48,6 +48,21 @@
               <span id="fasta-selection" class="landing-file-selection" aria-live="polite">No FASTA selected</span>
               <span id="annotation-selection" class="landing-file-selection" aria-live="polite">No annotations selected</span>
             </button>
+            <form id="remote-fasta-form" class="remote-fasta-form" aria-label="Load FASTA from URL">
+              <label for="remote-fasta-url">Insert URL</label>
+              <div class="remote-fasta-row">
+                <input
+                  id="remote-fasta-url"
+                  type="url"
+                  inputmode="url"
+                  autocomplete="url"
+                  placeholder="https://example.org/assembly.fasta.gz"
+                  aria-describedby="remote-fasta-help"
+                />
+                <button id="remote-fasta-submit" type="submit">Load URL</button>
+              </div>
+              <small id="remote-fasta-help">HTTPS FASTA or FASTA.gz · streamed directly from its host</small>
+            </form>
             <button id="explore-button" class="explore-button" type="button" hidden>Explore</button>
             <div class="example-actions">
               <button id="example-button" class="example-button" type="button">Try ModDotPlot on an <i>Arabidopsis thaliana</i> genome</button>
@@ -63,7 +78,8 @@
               </nav>
               <p class="publication-warning">
                 This web application uses WebAssembly to run ModDotPlot locally in your browser.
-                Your files stay on your device and are not uploaded to a server. If you use
+                Local files stay on your device and are not uploaded to a server. URL imports
+                are fetched directly from the remote host. If you use
                 ModDotPlot in your research, please cite our
                 <a href="https://doi.org/10.1093/bioinformatics/btae493" target="_blank" rel="noreferrer">ModDotPlot paper</a>.
                 For analyses intended for publication, please use the official

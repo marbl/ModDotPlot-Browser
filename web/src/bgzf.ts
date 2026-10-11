@@ -63,6 +63,11 @@ export async function isBgzfBlob(blob: Blob): Promise<boolean> {
   const prefix = new Uint8Array(
     await blob.slice(0, Math.min(blob.size, BGZF_MAX_HEADER_BYTES)).arrayBuffer(),
   );
+  return isBgzfHeader(prefix);
+}
+
+/** Returns true when an already-read prefix contains a valid BGZF `BC` extra field. */
+export function isBgzfHeader(prefix: Uint8Array): boolean {
   if (prefix.byteLength < BGZF_HEADER_PREFIX_BYTES) return false;
   const extraLength = littleEndian16(prefix, 10);
   const headerLength = BGZF_HEADER_PREFIX_BYTES + extraLength;

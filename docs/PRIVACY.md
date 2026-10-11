@@ -10,6 +10,8 @@ The current application:
 
 * reads FASTA, FAI, GZI, BED, GFF3, and GTF files, including gzip- and BGZF-compressed
   sequence and annotation versions where supported, through browser file APIs;
+* can, only when a user submits a URL, fetch an HTTPS FASTA or FASTA.gz response
+  directly from that remote host and stream it through the local parser;
 * parses and sketches sequences in a dedicated Web Worker and WebAssembly instance;
 * renders numeric results through WebGL2;
 * makes no application API calls;
@@ -20,8 +22,14 @@ The current application:
 The built application is a set of static files. It still requires HTTP or HTTPS
 hosting because browsers restrict module workers and WebAssembly on `file://` pages.
 The hosting provider can observe normal requests for the application files, including
-IP address and browser metadata according to that provider's policy. Loaded genomic
-files are not part of those requests.
+IP address and browser metadata according to that provider's policy. Locally selected
+genomic files are not part of those requests.
+
+For a user-requested URL import, the remote data host receives a normal browser GET
+request and can observe request metadata such as IP address and browser headers under
+that host's policy. ModDotPlot Browser omits credentials and referrer information from
+this request, does not proxy the sequence through the application host, and does not
+send the parsed sequence elsewhere. The host must permit cross-origin requests (CORS).
 
 ## Memory and lifetime
 
