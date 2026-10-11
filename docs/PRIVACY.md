@@ -11,7 +11,8 @@ The current application:
 * reads FASTA, FAI, GZI, BED, GFF3, and GTF files, including gzip- and BGZF-compressed
   sequence and annotation versions where supported, through browser file APIs;
 * can, only when a user submits a URL, fetch an HTTPS FASTA or FASTA.gz response
-  directly from that remote host and stream it through the local parser;
+  directly from that remote host and stream it through the local parser, including
+  adjacent FAI/GZI indexes and bounded byte ranges when the host provides them;
 * parses and sketches sequences in a dedicated Web Worker and WebAssembly instance;
 * renders numeric results through WebGL2;
 * makes no application API calls;

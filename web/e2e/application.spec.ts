@@ -571,6 +571,12 @@ test("the supplied Col-CEN FASTA.gz URL streams into the landing workflow", asyn
     `>Chr2\n${deterministicDna(80, 13)}`,
   ].join("\n"));
   let remoteRequestSeen = false;
+  await page.route(`${normalizedUrl}.fai`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
+  });
+  await page.route(`${normalizedUrl}.gzi`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
+  });
   await page.route(normalizedUrl, async (route) => {
     remoteRequestSeen = true;
     await route.fulfill({
@@ -600,6 +606,84 @@ test("the supplied Col-CEN FASTA.gz URL streams into the landing workflow", asyn
   await expect(page.locator("#self-sequence option").first()).toContainText("Chr1");
 });
 
+test("remote FAI and GZI companions avoid an eager full FASTA download", async ({ page }) => {
+  const fastaUrl = "https://data.example/hg002-test.fasta.gz";
+  const first = deterministicDna(1_024, 71);
+  const second = deterministicDna(768, 89);
+  const firstHeader = ">remoteOne\n";
+  const secondHeader = ">remoteTwo\n";
+  const firstRecord = `${firstHeader}${first}\n`;
+  const secondRecord = `${secondHeader}${second}\n`;
+  const firstBlock = bgzfBlock(firstRecord);
+  const secondBlock = bgzfBlock(secondRecord);
+  const bgzf = Buffer.concat([firstBlock, secondBlock]);
+  const fai = [
+    `remoteOne\t${first.length}\t${Buffer.byteLength(firstHeader)}\t${first.length}\t${first.length + 1}`,
+    `remoteTwo\t${second.length}\t${Buffer.byteLength(firstRecord) + Buffer.byteLength(secondHeader)}\t${second.length}\t${second.length + 1}`,
+    "",
+  ].join("\n");
+  const gzi = gziBuffer([{
+    compressed: firstBlock.byteLength,
+    uncompressed: Buffer.byteLength(firstRecord),
+  }]);
+  const requestedRanges: string[] = [];
+  let fullRequestSeen = false;
+  await page.route(`${fastaUrl}.fai`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      body: fai,
+      headers: { "access-control-allow-origin": "*", "content-length": String(Buffer.byteLength(fai)) },
+    });
+  });
+  await page.route(`${fastaUrl}.gzi`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      body: gzi,
+      headers: { "access-control-allow-origin": "*", "content-length": String(gzi.byteLength) },
+    });
+  });
+  await page.route(fastaUrl, async (route) => {
+    const range = route.request().headers()["range"];
+    if (!range) {
+      fullRequestSeen = true;
+      await route.fulfill({ status: 200, body: bgzf, headers: { "access-control-allow-origin": "*" } });
+      return;
+    }
+    requestedRanges.push(range);
+    const match = /^bytes=(\d+)-(\d+)$/u.exec(range);
+    if (!match) throw new Error(`Unexpected range ${range}`);
+    const start = Number(match[1]);
+    const end = Math.min(Number(match[2]), bgzf.byteLength - 1);
+    const body = bgzf.subarray(start, end + 1);
+    await route.fulfill({
+      status: 206,
+      body,
+      headers: {
+        "accept-ranges": "bytes",
+        "access-control-allow-origin": "*",
+        "access-control-expose-headers": "Content-Range, Content-Length, Accept-Ranges",
+        "content-length": String(body.byteLength),
+        "content-range": `bytes ${start}-${end}/${bgzf.byteLength}`,
+        etag: '"indexed-fixture"',
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(fastaUrl);
+  await page.locator("#remote-fasta-submit").click();
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "hg002-test.fasta.gz ready to explore",
+    { timeout: 20_000 },
+  );
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  expect(fullRequestSeen).toBe(false);
+  expect(requestedRanges).toContain("bytes=0-1");
+  await exploreStagedFasta(page);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 20_000 });
+  expect(fullRequestSeen).toBe(false);
+});
+
 test("live Col-CEN GitHub URL normalizes and loads the real BGZF assembly", async ({ page, browserName }) => {
   test.setTimeout(150_000);
   test.skip(
@@ -617,6 +701,30 @@ test("live Col-CEN GitHub URL normalizes and loads the real BGZF assembly", asyn
   );
   await exploreStagedFasta(page);
   await expect(page.locator("#self-sequence option", { hasText: "Chr1" })).toHaveCount(1);
+});
+
+test("live HG002 URL opens from remote indexes without a full assembly request", async ({ page, browserName }) => {
+  test.setTimeout(90_000);
+  test.skip(
+    process.env.MODDOTPLOT_HG002_LIVE !== "1" || browserName !== "chromium",
+    "opt-in network regression for the indexed upstream HG002 assembly",
+  );
+  const fastaUrl = "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/HG002/assemblies/hg002v1.2.fasta.gz";
+  const fastaRequests: Array<string | undefined> = [];
+  page.on("request", (request) => {
+    if (request.url() === fastaUrl) fastaRequests.push(request.headers()["range"]);
+  });
+
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(fastaUrl);
+  await page.locator("#remote-fasta-submit").click();
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "hg002v1.2.fasta.gz ready to explore",
+    { timeout: 60_000 },
+  );
+  expect(await page.locator("#self-sequence option").count()).toBeGreaterThan(20);
+  expect(fastaRequests).toContain("bytes=0-1");
+  expect(fastaRequests).not.toContain(undefined);
 });
 
 test("the merged landing drop stages FASTA and annotations until Explore opens the workspace", async ({ page }) => {
