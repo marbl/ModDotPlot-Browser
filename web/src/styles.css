@@ -104,7 +104,7 @@ h1 {
 
 .drop-zone {
   width: 100%;
-  min-height: 250px;
+  min-height: 270px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -119,8 +119,7 @@ h1 {
   transition: border-color 150ms ease, transform 150ms ease, background 150ms ease;
 }
 
-.drop-zone:hover, .drop-zone:focus-visible, .drop-zone.is-dragging,
-.annotation-drop-zone:hover, .annotation-drop-zone:focus-visible, .annotation-drop-zone.is-dragging {
+.drop-zone:hover, .drop-zone:focus-visible, .drop-zone.is-dragging {
   border-color: #7796a0;
   background: #fffefa;
   transform: translateY(-2px);
@@ -140,23 +139,6 @@ h1 {
   color: var(--muted);
   font-size: 14px;
 }
-.annotation-drop-zone {
-  width: 100%;
-  min-height: 94px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border: 1px dashed var(--line);
-  border-radius: 14px;
-  color: inherit;
-  background: rgba(255, 254, 250, 0.62);
-  cursor: pointer;
-  transition: border-color 150ms ease, transform 150ms ease, background 150ms ease;
-}
-.annotation-drop-title { font-size: 15px; font-weight: 650; }
-.annotation-drop-detail { color: var(--muted); font-size: 11px; }
 .landing-file-selection {
   max-width: calc(100% - 32px);
   overflow: hidden;
@@ -165,10 +147,8 @@ h1 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.drop-zone.has-selection,
-.annotation-drop-zone.has-selection { border-color: rgba(49, 122, 83, 0.58); }
-.drop-zone.has-selection .landing-file-selection,
-.annotation-drop-zone.has-selection .landing-file-selection { color: #276443; }
+.drop-zone.has-selection { border-color: rgba(49, 122, 83, 0.58); }
+.drop-zone.has-selection .landing-file-selection { color: #276443; }
 .explore-button {
   justify-self: center;
   min-width: 150px;
@@ -523,14 +503,16 @@ details[open] summary { margin-bottom: 4px; }
   border: 0;
   padding: 0;
 }
-.feature-track-placement-controls legend {
+.feature-track-placement-title {
   grid-column: 1 / -1;
   margin-bottom: 2px;
-  padding: 0;
   color: var(--muted);
   font-size: 10px;
+  font-weight: 400;
 }
-.feature-track-placement-controls label { min-width: 0; }
+.track-position-control { min-width: 0; }
+.track-position-control legend { margin-bottom: 4px; font-size: 10px; }
+.track-position-control button { padding: 5px 3px; font-size: 10px; }
 .add-track-button,
 .track-import-dialog button {
   border: 1px solid var(--line);
@@ -920,6 +902,44 @@ details[open] summary { margin-bottom: 4px; }
   transform: translate(-50%, -50%) rotate(var(--cursor-guide-second-angle));
 }
 
+.ruler-marker {
+  --ruler-x: 50%;
+  --ruler-y: 50%;
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: #fff;
+  mix-blend-mode: difference;
+  pointer-events: none;
+}
+.ruler-line {
+  position: absolute;
+  left: var(--ruler-x);
+  top: var(--ruler-y);
+  display: block;
+  width: 210%;
+  height: 0;
+  border-top: 2px dashed currentColor;
+  transform-origin: center;
+}
+.ruler-line-horizontal { transform: translate(-50%, -50%); }
+.ruler-line-vertical { transform: translate(-50%, -50%) rotate(90deg); }
+.ruler-marker > span {
+  position: absolute;
+  left: calc(var(--ruler-x) + 5px);
+  top: calc(var(--ruler-y) + 5px);
+  padding: 1px 3px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .plot-loading {
   position: absolute;
   z-index: 2;
@@ -1069,9 +1089,9 @@ details[open] summary { margin-bottom: 4px; }
 .plot-grid {
   --grid-size: 2;
   display: grid;
-  grid-template-columns: minmax(78px, 0.55fr) repeat(var(--grid-size), minmax(112px, 1fr));
+  grid-template-columns: 40px repeat(var(--grid-size), minmax(112px, 1fr));
   width: 100%;
-  min-width: calc(78px + var(--grid-size) * 112px);
+  min-width: calc(40px + var(--grid-size) * 112px);
   padding: 8px;
 }
 .plot-grid-corner,
@@ -1116,8 +1136,13 @@ details[open] summary { margin-bottom: 4px; }
 }
 .plot-grid-axis-label-column { white-space: nowrap; }
 .plot-grid-axis-label-row {
-  justify-content: end;
-  text-align: right;
+  grid-auto-flow: row;
+  grid-template-columns: none;
+  grid-template-rows: auto minmax(0, auto);
+  justify-content: center;
+  text-align: center;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
 }
 .plot-grid-axis-label-text {
   min-width: 0;

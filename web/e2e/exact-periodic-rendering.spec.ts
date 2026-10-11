@@ -11,12 +11,12 @@ const EXACT_FOOTPRINT_DIGEST = "e2577c370efa7023a0e62bfe69c8ea9f5dc7d2cc91855bf7
 type Rgb = readonly [number, number, number];
 
 const IDENTITY_COLORS = new Map<string, number>([
-  ["255,255,255", 0], // Explicit mismatch / below threshold.
-  ["158,1,66", 2], // Reversed Spectral maximum, 100% identity.
+  ["5,5,6", 0], // Explicit mismatch / below threshold.
+  ["253,231,37", 2], // Canonical Viridis maximum, 100% identity.
 ]);
 
 const BASE_COLORS = new Set([
-  "255,255,255", // Explicit mismatch / below threshold.
+  "5,5,6", // Explicit mismatch / below threshold.
   "51,173,61", // A
   "31,115,224", // C
   "245,163,31", // G
@@ -58,8 +58,8 @@ test("periodic exact mode remains categorical across DPR, resize, and exact view
     expect(await page.evaluate(() => window.devicePixelRatio)).toBe(deviceScaleFactor);
     await loadPeriodicFasta(page);
 
-    await expect(page.locator("#heatmap-palette")).toHaveValue("Spectral");
-    await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
+    await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
     await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute(
       "aria-pressed",
       "true",

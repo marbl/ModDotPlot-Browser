@@ -104,10 +104,10 @@ async function canvasPaintBounds(canvas: Locator): Promise<CanvasPaintBounds> {
     for (let y = 0; y < element.height; y += 1) {
       for (let x = 0; x < element.width; x += 1) {
         const offset = (y * element.width + x) * 4;
-        const distanceFromWhite = Math.abs((pixels[offset] ?? 255) - 255)
-          + Math.abs((pixels[offset + 1] ?? 255) - 255)
-          + Math.abs((pixels[offset + 2] ?? 255) - 255);
-        if (distanceFromWhite <= 12) continue;
+        const distanceFromBackground = Math.abs((pixels[offset] ?? 5) - 5)
+          + Math.abs((pixels[offset + 1] ?? 5) - 5)
+          + Math.abs((pixels[offset + 2] ?? 6) - 6);
+        if (distanceFromBackground <= 12) continue;
         minimumX = Math.min(minimumX, x);
         minimumY = Math.min(minimumY, y);
         maximumX = Math.max(maximumX, x);
@@ -194,13 +194,11 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#landing .landing-logo-heading")).toHaveCSS("width", "575px");
   await expect(page.locator("#landing-version")).toHaveText(/^v\d/);
   await expect(page.locator(".landing-notes")).toHaveCount(0);
-  await expect(page.locator("#drop-title")).toHaveText("Drop FASTA files here");
+  await expect(page.locator("#drop-title")).toHaveText("Drop FASTA and annotation files here");
   await expect(page.locator(".drop-detail")).toHaveText(
-    "or click to choose files · FASTA, gzip, and BGZF optional fai/gzi indices (faster loading)",
+    "or click to choose · FASTA, BED, GFF3, or GTF gzip/BGZF supported · optional fai/gzi indices for FASTA",
   );
-  await expect(page.locator(".annotation-drop-title")).toHaveText("Drop annotation files here");
-  await expect(page.locator(".annotation-drop-detail")).toContainText("BED, GFF3, or GTF");
-  await expect(page.locator("#annotation-drop-zone")).toBeVisible();
+  await expect(page.locator("#annotation-drop-zone")).toHaveCount(0);
   await expect(page.locator("#explore-button")).toBeHidden();
   await expect(page.locator("#example-button")).toHaveText(
     "Try ModDotPlot on an Arabidopsis thaliana genome",
@@ -528,27 +526,64 @@ test("cursor guides follow the pointer and advanced controls change their appear
     .toBe(prepareMessages);
 });
 
-test("landing annotations stay staged until Explore opens the workspace", async ({ page }) => {
+test("R toggles a fixed ruler and hover readouts switch to relative distances", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#annotation-file-input").setInputFiles({
-    name: "landing.bed",
-    mimeType: "text/plain",
-    buffer: Buffer.from([
-      "track name=landing-track",
-      "first\t1\t20\tfirst staged feature",
-      "second\t2\t18\tsecond staged feature",
-    ].join("\n")),
-  });
+  await loadFasta(page, "ruler.fa", `>ruler\n${deterministicDna(8_000, 13)}\n`);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  const bounds = await page.locator("#plot-canvas").boundingBox();
+  if (!bounds) throw new Error("plot canvas has no bounds");
+
+  await page.mouse.move(bounds.x + bounds.width * 0.3, bounds.y + bounds.height * 0.65);
+  await expect(page.locator("#hover-card")).toContainText("x ruler");
+  await page.keyboard.press("r");
+  await expect(page.locator("#ruler-marker")).toBeVisible();
+  const anchorPosition = await page.locator("#ruler-marker").evaluate((element) => ({
+    x: (element as HTMLElement).style.getPropertyValue("--ruler-x"),
+    y: (element as HTMLElement).style.getPropertyValue("--ruler-y"),
+  }));
+
+  await page.mouse.move(bounds.x + bounds.width * 0.7, bounds.y + bounds.height * 0.25);
+  await expect(page.locator("#hover-card")).toContainText("Δx ruler");
+  await expect(page.locator("#hover-card")).toContainText("Δy ruler");
+  await expect(page.locator("#hover-card")).toContainText("Ruler active");
+  await expect.poll(() => page.locator("#ruler-marker").evaluate((element) => ({
+    x: (element as HTMLElement).style.getPropertyValue("--ruler-x"),
+    y: (element as HTMLElement).style.getPropertyValue("--ruler-y"),
+  }))).toEqual(anchorPosition);
+
+  await page.keyboard.press("R");
+  await expect(page.locator("#ruler-marker")).toBeHidden();
+  await expect(page.locator("#hover-card")).toContainText("x ruler");
+  await expect(page.locator("#hover-card")).not.toContainText("Δx");
+});
+
+test("the merged landing drop stages FASTA and annotations until Explore opens the workspace", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#file-input").setInputFiles([
+    {
+      name: "landing.bed",
+      mimeType: "text/plain",
+      buffer: Buffer.from([
+        "track name=landing-track",
+        "first\t1\t20\tfirst staged feature",
+        "second\t2\t18\tsecond staged feature",
+      ].join("\n")),
+    },
+    {
+      name: "multi.fa",
+      mimeType: "text/plain",
+      buffer: Buffer.from([
+        `>first\n${deterministicDna(64, 3)}`,
+        `>second\n${deterministicDna(64, 7)}`,
+      ].join("\n")),
+    },
+  ]);
 
   await expect(page.locator("#annotation-selection")).toHaveText("landing.bed selected");
-  await expect(page.locator("#annotation-drop-zone")).toHaveClass(/has-selection/);
-  await expect(page.locator("#explore-button")).toBeHidden();
+  await expect(page.locator("#drop-zone")).toHaveClass(/has-selection/);
+  await expect(page.locator("#fasta-selection")).toContainText("ready to explore", { timeout: 15_000 });
+  await expect(page.locator("#explore-button")).toBeVisible();
   await expect(page.locator("#workspace")).toBeHidden();
-
-  await stageFasta(page, "multi.fa", [
-    `>first\n${deterministicDna(64, 3)}`,
-    `>second\n${deterministicDna(64, 7)}`,
-  ].join("\n"));
   await expect(page.locator("#annotation-selection")).toHaveText("landing.bed selected");
   await expect(page.locator(".imported-track-control")).toHaveCount(0);
   await exploreStagedFasta(page);
@@ -614,12 +649,12 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   await expect(page.locator("#export-data-format")).toHaveCount(0);
   await expect(page.locator("#export-image-format")).toHaveCount(0);
   await expect(page.locator("#export-data")).toHaveText("Export ModDotPlot command");
-  await expect(page.locator("#heatmap-palette")).toHaveValue("Spectral");
-  await expect(page.locator("#heatmap-color-count")).toHaveValue("11");
+  await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
+  await expect(page.locator("#heatmap-color-count")).toHaveValue("12");
   await expect(page.locator("#heatmap-color-count")).toHaveAttribute("min", "3");
-  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "11");
-  await expect(page.locator('[data-background-mode="white"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "12");
+  await expect(page.locator('[data-background-mode="white"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "true");
 
   const exportImageFit = await page.locator("#export-image").evaluate((button) => ({
     clientWidth: button.clientWidth,
@@ -670,8 +705,8 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
     },
   });
   expect(cliConfig).not.toHaveProperty("fasta");
-  expect(cliConfig.colors).toHaveLength(11);
-  expect(cliConfig.breakpoints).toHaveLength(12);
+  expect(cliConfig.colors).toHaveLength(12);
+  expect(cliConfig.breakpoints).toHaveLength(13);
   expect(cliConfig.identity).toBe(cliConfig.breakpoints[0]);
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
 
@@ -814,7 +849,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
       expect(bytes.includes(Buffer.from("GC%"))).toBe(true);
       expect(bytes.includes(Buffer.from("CpG O/E"))).toBe(true);
       expect(bytes.includes(Buffer.from("ANI_c"))).toBe(true);
-      expect(bytes.includes(Buffer.from("Viridis"))).toBe(false);
+      expect(bytes.includes(Buffer.from("Viridis"))).toBe(true);
     }
   }
 });
@@ -1021,6 +1056,8 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
     .toHaveCSS("grid-row-start", "4");
   await expect(page.locator('.plot-grid-axis-label[data-grid-axis="y"][data-sequence-index="2"]'))
     .toHaveCSS("grid-row-start", "2");
+  await expect(page.locator('.plot-grid-axis-label[data-grid-axis="y"][data-sequence-index="2"]'))
+    .toHaveCSS("writing-mode", "vertical-rl");
   await expect(page.locator('.grid-plot-cell[data-grid-row="0"][data-grid-column="0"]'))
     .toHaveAttribute("aria-label", /Status: Ready$/);
   expect(await page.evaluate(() => {
@@ -1340,7 +1377,7 @@ test("realistic grid sketches preserve focus and avoid no-op recomputation", asy
   const preparesAfterDetail = await page.evaluate(() =>
     (window as Window & { __gridPrepareRequests?: number }).__gridPrepareRequests ?? 0);
   expect(preparesAfterDetail).toBeGreaterThan(preparesAfterInitialGrid);
-  await page.locator('[data-background-mode="black"]').click();
+  await page.locator('[data-background-mode="white"]').click();
   expect(await page
     .locator('.grid-plot-cell[data-grid-row="0"][data-grid-column="1"] canvas')
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL())).toBe(retainedGridImage);
@@ -1745,7 +1782,7 @@ test("pairwise orientation, navigation, and reset remain coherent", async ({ pag
   await expect(canvas).toBeVisible();
 });
 
-test("gzip FASTA and ambiguous bases load without enabling feature imports", async ({ page }) => {
+test("the merged drop accepts annotations before gzip FASTA with ambiguous bases", async ({ page }) => {
   await page.goto("/");
   const annotationDrop = await page.evaluate(() => {
     const data = new DataTransfer();
@@ -1755,11 +1792,10 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
     return event.defaultPrevented;
   });
   expect(annotationDrop).toBe(true);
-  await expect(page.locator("#sequence-load-dialog")).toBeVisible();
-  await expect(page.locator("#sequence-load-summary")).toContainText("annotation file");
+  await expect(page.locator("#annotation-selection")).toHaveText("not-sequence.bed selected");
+  await expect(page.locator("#sequence-load-dialog")).toBeHidden();
   await expect(page.locator("#landing")).toBeVisible();
   await expect(page.locator("#workspace")).toBeHidden();
-  await page.locator("#sequence-load-close").click();
 
   await page.locator("#file-input").setInputFiles({
     name: "invalid.fa",
@@ -1787,7 +1823,7 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
   await expect(page.locator("#x-sequence option")).toHaveText("ambiguous_ambiguous · 33 bp");
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#scientific-provenance")).toContainText("Exact canonical 21-mer mode");
-  await expect(page.locator("#file-input")).not.toHaveAttribute("accept", /bed|gff|gtf/i);
+  await expect(page.locator("#file-input")).toHaveAttribute("accept", /bed.*gff.*gtf/i);
 });
 
 test("BGZF multi-FASTA members load as one ordered sequence stream", async ({ page }) => {
@@ -2108,8 +2144,10 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
   expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
   expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
 
-  await page.locator("#x-track-position").selectOption("bottom");
-  await page.locator("#y-track-position").selectOption("right");
+  await page.locator('#x-track-position [data-track-position="bottom"]').click();
+  await page.locator('#y-track-position [data-track-position="right"]').click();
+  await expect(page.locator('#x-track-position [data-track-position="bottom"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('#y-track-position [data-track-position="right"]')).toHaveAttribute("aria-pressed", "true");
   const movedLayout = await page.evaluate(() => {
     const shell = document.querySelector<HTMLElement>("#plot-shell")!;
     const plot = document.querySelector("#plot-frame")!.getBoundingClientRect();
@@ -2370,14 +2408,14 @@ test("heatmap palette and plot background controls update without recomputation"
   await expect(page.locator("#heatmap-palette option")).toHaveCount(36);
   await expect(page.locator("#heatmap-palette option").nth(0)).toHaveAttribute("value", "Spectral");
   await expect(page.locator("#heatmap-palette option").nth(1)).toHaveAttribute("value", "Viridis");
-  await expect(page.locator("#heatmap-palette")).toHaveValue("Spectral");
-  await expect(page.locator("#heatmap-color-count")).toHaveValue("11");
+  await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
+  await expect(page.locator("#heatmap-color-count")).toHaveValue("12");
   await expect(page.locator("#heatmap-color-count")).toHaveAttribute("min", "3");
-  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "11");
-  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".palette-swatch")).toHaveCount(11);
-  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(94, 79, 162)");
-  await expect(page.locator(".palette-swatch").last()).toHaveCSS("background-color", "rgb(158, 1, 66)");
+  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "12");
+  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".palette-swatch")).toHaveCount(12);
+  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(68, 1, 84)");
+  await expect(page.locator(".palette-swatch").last()).toHaveCSS("background-color", "rgb(253, 231, 37)");
   const paletteOptionLayout = await page.locator(".palette-options-row").evaluate((row) => {
     const count = row.querySelector("label")!.getBoundingClientRect();
     const flip = row.querySelector(".palette-direction-control")!.getBoundingClientRect();
@@ -2408,24 +2446,24 @@ test("heatmap palette and plot background controls update without recomputation"
 
   const gradient = page.locator("#heatmap-gradient");
   const initialGradient = await gradient.evaluate((element) => element.style.backgroundImage);
-  expect(initialGradient).toContain("rgb(255, 255, 255)");
-  expect(initialGradient.indexOf("rgb(94, 79, 162)")).toBeLessThan(
-    initialGradient.indexOf("rgb(158, 1, 66)"),
-  );
-  await page.locator("#palette-flip").click();
-  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
-  const canonicalGradient = await gradient.evaluate((element) => element.style.backgroundImage);
-  expect(canonicalGradient).not.toBe(initialGradient);
-  expect(canonicalGradient.indexOf("rgb(158, 1, 66)")).toBeLessThan(
-    canonicalGradient.indexOf("rgb(94, 79, 162)"),
+  expect(initialGradient).toContain("rgb(5, 5, 6)");
+  expect(initialGradient.indexOf("rgb(68, 1, 84)")).toBeLessThan(
+    initialGradient.indexOf("rgb(253, 231, 37)"),
   );
   await page.locator("#palette-flip").click();
   await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "true");
+  const reversedGradient = await gradient.evaluate((element) => element.style.backgroundImage);
+  expect(reversedGradient).not.toBe(initialGradient);
+  expect(reversedGradient.indexOf("rgb(253, 231, 37)")).toBeLessThan(
+    reversedGradient.indexOf("rgb(68, 1, 84)"),
+  );
+  await page.locator("#palette-flip").click();
+  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
 
   const firstPaletteSwatch = page.locator(".palette-swatch").first();
   await firstPaletteSwatch.click();
   await expect(page.locator("#palette-color-editor")).toBeVisible();
-  await expect(page.locator("#palette-color-wheel")).toHaveValue("#5e4fa2");
+  await expect(page.locator("#palette-color-wheel")).toHaveValue("#440154");
   await expect(page.locator("#palette-color-hex")).toBeFocused();
   await page.locator("#palette-color-hex").fill("#123456");
   await expect(page.locator("#palette-color-hex")).toHaveAttribute("aria-invalid", "false");
@@ -2436,7 +2474,7 @@ test("heatmap palette and plot background controls update without recomputation"
     await page.screenshot({ path: process.env.MODDOTPLOT_PALETTE_QA, fullPage: true });
   }
   await page.locator("#palette-color-reset").click();
-  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(94, 79, 162)");
+  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(68, 1, 84)");
   await page.locator("#palette-color-done").click();
   await expect(page.locator("#palette-color-editor")).toBeHidden();
   await expect(firstPaletteSwatch).toBeFocused();
@@ -2446,6 +2484,7 @@ test("heatmap palette and plot background controls update without recomputation"
   await expect(page.locator("#palette-color-editor")).toBeHidden();
   await expect(firstPaletteSwatch).toBeFocused();
 
+  await page.locator("#heatmap-palette").selectOption("Spectral");
   await page.locator("#heatmap-palette").selectOption("Viridis");
   await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("#heatmap-color-count")).toHaveValue("11");
@@ -2474,9 +2513,7 @@ test("heatmap palette and plot background controls update without recomputation"
   });
   await expect(page.locator("#heatmap-min-value")).toHaveText("85.1%");
 
-  await expect(page.locator('[data-background-mode="white"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#plot-frame")).not.toHaveClass(/dark-background/);
-  await page.locator('[data-background-mode="black"]').click();
+  await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#plot-frame")).toHaveClass(/dark-background/);
   await expect.poll(() => gradient.evaluate((element) => element.style.backgroundImage))
     .toContain("rgb(5, 5, 6)");

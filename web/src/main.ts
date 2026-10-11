@@ -66,6 +66,12 @@ import {
   type ViewChange,
 } from "./renderer";
 import { REFINEMENT_POLICY_VERSION } from "./refinement";
+import {
+  createRulerAnchor,
+  rulerDelta,
+  rulerScreenPosition,
+  type RulerAnchor,
+} from "./ruler";
 import { sequenceAxisLabel } from "./sequence-metadata";
 import type { PrecomputedOverviewArtifact } from "./precomputed-overview";
 import {
@@ -85,7 +91,6 @@ import type {
 const landing = element<HTMLElement>("landing");
 const workspace = element<HTMLElement>("workspace");
 const dropZone = element<HTMLButtonElement>("drop-zone");
-const annotationDropZone = element<HTMLButtonElement>("annotation-drop-zone");
 const exploreButton = element<HTMLButtonElement>("explore-button");
 const exampleButton = element<HTMLButtonElement>("example-button");
 const exampleProgress = element<HTMLElement>("example-progress");
@@ -97,7 +102,6 @@ const annotationSelection = element<HTMLElement>("annotation-selection");
 const landingVersion = element<HTMLElement>("landing-version");
 const controlVersion = element<HTMLElement>("control-version");
 const fileInput = element<HTMLInputElement>("file-input");
-const annotationFileInput = element<HTMLInputElement>("annotation-file-input");
 const clearButton = element<HTMLButtonElement>("clear-button");
 const selfSelect = element<HTMLSelectElement>("self-sequence");
 const xSelect = element<HTMLSelectElement>("x-sequence");
@@ -147,6 +151,7 @@ controlVersion.textContent = versionLabel;
 const plotColumn = element<HTMLElement>("plot-column");
 const canvas = element<HTMLCanvasElement>("plot-canvas");
 const cursorGuideOverlay = element<HTMLElement>("cursor-guides");
+const rulerMarker = element<HTMLElement>("ruler-marker");
 const cursorGuidesEnabled = element<HTMLInputElement>("cursor-guides-enabled");
 const cursorGuideGeometry = element<HTMLSelectElement>("cursor-guide-geometry");
 const cursorGuideStyle = element<HTMLSelectElement>("cursor-guide-style");
@@ -180,8 +185,10 @@ const featureTrackPanels = {
 };
 const xFeatureTrackStack = element<HTMLElement>("x-feature-track-stack");
 const yFeatureTrackStack = element<HTMLElement>("y-feature-track-stack");
-const xTrackPosition = element<HTMLSelectElement>("x-track-position");
-const yTrackPosition = element<HTMLSelectElement>("y-track-position");
+const xTrackPosition = element<HTMLElement>("x-track-position");
+const yTrackPosition = element<HTMLElement>("y-track-position");
+const xTrackPositionButtons = [...xTrackPosition.querySelectorAll<HTMLButtonElement>("[data-track-position]")];
+const yTrackPositionButtons = [...yTrackPosition.querySelectorAll<HTMLButtonElement>("[data-track-position]")];
 const xAxisPanel = element<HTMLElement>("x-axis-panel");
 const yAxisPanel = element<HTMLElement>("y-axis-panel");
 const featureTrackControls = element<HTMLElement>("feature-track-controls");
@@ -291,8 +298,8 @@ for (const kind of ["gc", "cpg"] as const) {
     });
   }
 }
-xTrackPosition.addEventListener("change", updateFeatureTrackPlacement);
-yTrackPosition.addEventListener("change", updateFeatureTrackPlacement);
+wireTrackPositionButtons(xTrackPositionButtons);
+wireTrackPositionButtons(yTrackPositionButtons);
 featureTracks.onHover((hover, event) => importedTracks.showQuantitativeHover(hover, event));
 let worker: Worker;
 let sequences: SequenceMetadata[] = [];
@@ -332,6 +339,9 @@ let activeConfigurations: ScientificConfigMetadata[] = [];
 let activeFeatureTrackMetadata: FeatureTrackMetadata | null = null;
 let activeDomainLength = 1;
 let pendingView: ViewChange | null = null;
+let lastHoverDatum: HoverDatum | null = null;
+let lastHoverEvent: PointerEvent | null = null;
+let activeRuler: RulerAnchor | null = null;
 let currentMeasurement: "sketch" | "kmer" = "sketch";
 let exactVisualization: ExactVisualizationMode = DEFAULT_EXACT_VISUALIZATION;
 const exactGeometry: ExactKmerGeometry = DEFAULT_EXACT_KMER_GEOMETRY;
@@ -614,7 +624,7 @@ fileInput.addEventListener("change", () => {
   fileInput.value = "";
   if (files.length) {
     if (landing.hidden) loadFiles(files);
-    else stageFastaFiles(files);
+    else stageLandingFiles(files);
   }
 });
 for (const eventName of ["dragenter", "dragover"]) {
@@ -631,32 +641,7 @@ for (const eventName of ["dragleave", "drop"]) {
 }
 dropZone.addEventListener("drop", (event) => {
   const files = [...(event.dataTransfer?.files ?? [])];
-  if (files.length) stageFastaFiles(files);
-});
-
-annotationDropZone.addEventListener("click", () => annotationFileInput.click());
-annotationFileInput.addEventListener("change", () => {
-  const files = [...(annotationFileInput.files ?? [])];
-  annotationFileInput.value = "";
-  if (files.length) stageAnnotationFiles(files);
-});
-for (const eventName of ["dragenter", "dragover"]) {
-  annotationDropZone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    annotationDropZone.classList.add("is-dragging");
-  });
-}
-for (const eventName of ["dragleave", "drop"]) {
-  annotationDropZone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    annotationDropZone.classList.remove("is-dragging");
-  });
-}
-annotationDropZone.addEventListener("drop", (event) => {
-  const files = [...(event.dataTransfer?.files ?? [])];
-  if (files.length) stageAnnotationFiles(files);
+  if (files.length) stageLandingFiles(files);
 });
 exploreButton.addEventListener("click", enterWorkspace);
 exampleButton.addEventListener("click", () => void launchBundledExample());
@@ -836,6 +821,7 @@ renderer.onHover(showHover);
 renderer.onViewChange((change) => {
   cancelPendingDetailedExport(new Error("Export cancelled because the plot view changed."));
   pendingView = change;
+  updateRulerMarker(change);
   if (activeParameters && plotMode !== "grid") {
     currentMeasurement = requestedResolution(change) === Math.floor(activeDomainLength)
       ? "kmer"
@@ -852,6 +838,26 @@ renderer.onViewChange((change) => {
     cancelAndQueueVisibleDetail(240);
   }
 });
+document.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() !== "r" || event.repeat || workspace.hidden) return;
+  const target = event.target;
+  if (
+    target instanceof HTMLInputElement
+    || target instanceof HTMLSelectElement
+    || target instanceof HTMLTextAreaElement
+    || (target instanceof HTMLElement && target.isContentEditable)
+  ) return;
+  if (activeRuler) {
+    event.preventDefault();
+    clearRuler();
+    return;
+  }
+  if (!lastHoverDatum || !lastHoverEvent || plotMode === "grid") return;
+  event.preventDefault();
+  activeRuler = createRulerAnchor(lastHoverDatum);
+  updateRulerMarker(pendingView);
+  showHover(lastHoverDatum, lastHoverEvent);
+});
 renderer.onTileEvict((tile) => {
   post({ type: "evict-tiles", generation, tiles: [tile] });
 });
@@ -861,6 +867,13 @@ drawHistogram();
 updateParameterNotes();
 updateExactModeUi();
 
+function stageLandingFiles(files: File[], launchAutomatically = false): void {
+  const annotations = files.filter((file) => isAnnotationFileName(file.name));
+  const fasta = files.filter((file) => !isAnnotationFileName(file.name));
+  if (annotations.length > 0) stageAnnotationFiles(annotations);
+  if (fasta.length > 0) stageFastaFiles(fasta, launchAutomatically);
+}
+
 function stageFastaFiles(files: File[], launchAutomatically = false): void {
   cancelExampleLoad();
   launchExampleWhenReady = launchAutomatically;
@@ -868,7 +881,7 @@ function stageFastaFiles(files: File[], launchAutomatically = false): void {
   if (annotations.length > 0) {
     showSequenceLoadDialog(
       `${fileList(annotations)} ${annotations.length === 1 ? "is an annotation file" : "are annotation files"}, not FASTA sequence input.`,
-      ["Use the smaller annotation drop area underneath the FASTA drop area."],
+      ["Choose FASTA and annotation files together; the combined drop area will route each supported file automatically."],
     );
     return;
   }
@@ -980,7 +993,7 @@ async function loadBundledAnnotation(
     stagedAnnotationFiles = [annotation];
     annotationSelection.textContent = `${annotation.name} loaded`;
     annotationSelection.title = annotation.name;
-    annotationDropZone.classList.add("has-selection");
+    dropZone.classList.add("has-selection");
     if (comparisonReady && renderer.exportTileViews().length > 0) {
       importedTracks.importFilesForSequences([annotation], sequences);
     } else {
@@ -991,7 +1004,7 @@ async function loadBundledAnnotation(
     exampleAnnotationController = null;
     annotationSelection.textContent = "Included CEN180 annotations unavailable";
     annotationSelection.title = error instanceof Error ? error.message : String(error);
-    annotationDropZone.classList.remove("has-selection");
+    dropZone.classList.toggle("has-selection", activeBundledExample !== null || stagedFastaFiles.length > 0);
   }
 }
 
@@ -1069,8 +1082,10 @@ function restoreLandingSelections(): void {
   annotationSelection.textContent = stagedAnnotationFiles.length > 0
     ? `${fileList(stagedAnnotationFiles)} selected`
     : "No annotations selected";
-  dropZone.classList.toggle("has-selection", activeBundledExample !== null || stagedFastaFiles.length > 0);
-  annotationDropZone.classList.toggle("has-selection", stagedAnnotationFiles.length > 0);
+  dropZone.classList.toggle(
+    "has-selection",
+    activeBundledExample !== null || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
+  );
   exploreButton.hidden = !launchReady;
 }
 
@@ -1091,7 +1106,7 @@ function stageAnnotationFiles(files: File[]): void {
   stagedAnnotationFiles = [...files];
   annotationSelection.textContent = `${fileList(files)} selected`;
   annotationSelection.title = files.map((file) => file.name).join("\n");
-  annotationDropZone.classList.add("has-selection");
+  dropZone.classList.add("has-selection");
 }
 
 function loadFiles(files: File[], remember = true, validateForLaunch = false): void {
@@ -1766,6 +1781,7 @@ function queueComparison(delay: number): void {
 
 function prepareComparison(): void {
   cancelPendingDetailedExport(new Error("Export cancelled because the comparison changed."));
+  if (activeRuler) clearRuler();
   const selection = selectedSingleComparison();
   if (!selection) return;
   const { xIndex, yIndex } = selection;
@@ -1932,8 +1948,25 @@ function updateFeatureTrackLayout(): void {
 }
 
 function updateFeatureTrackPlacement(): void {
-  plotShell.dataset.xTrackPosition = xTrackPosition.value === "bottom" ? "bottom" : "top";
-  plotShell.dataset.yTrackPosition = yTrackPosition.value === "right" ? "right" : "left";
+  plotShell.dataset.xTrackPosition = selectedTrackPosition(xTrackPositionButtons, "top") === "bottom"
+    ? "bottom"
+    : "top";
+  plotShell.dataset.yTrackPosition = selectedTrackPosition(yTrackPositionButtons, "left") === "right"
+    ? "right"
+    : "left";
+}
+
+function wireTrackPositionButtons(buttons: HTMLButtonElement[]): void {
+  for (const button of buttons) {
+    button.addEventListener("click", () => {
+      for (const candidate of buttons) candidate.setAttribute("aria-pressed", String(candidate === button));
+      updateFeatureTrackPlacement();
+    });
+  }
+}
+
+function selectedTrackPosition(buttons: HTMLButtonElement[], fallback: string): string {
+  return buttons.find((button) => button.getAttribute("aria-pressed") === "true")?.dataset.trackPosition ?? fallback;
 }
 
 function currentFeatureTrackSelection(): FeatureTrackSelection {
@@ -1984,10 +2017,14 @@ function requestFeatureTracks(): void {
 
 function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   if (!datum) {
+    lastHoverDatum = null;
+    lastHoverEvent = null;
     hoverCard.hidden = true;
     plotSummary.textContent = "No plot position selected.";
     return;
   }
+  lastHoverDatum = datum;
+  lastHoverEvent = event;
   const identity = datum.quality === "exact"
     ? exactIdentityLabel(datum.identity)
     : datum.identity === null
@@ -1995,14 +2032,17 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
       : `identity ${datum.identity.toFixed(2)}%`;
   const xName = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "sequence";
   const yName = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "sequence";
+  const delta = activeRuler ? rulerDelta(activeRuler, datum) : null;
+  const xPosition = delta
+    ? `Δx ${xName} · ${formatSignedDistance(delta.x)}`
+    : `x ${xName} · ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}`;
+  const yPosition = delta
+    ? `Δy ${yName} · ${formatSignedDistance(delta.y)}`
+    : `y ${yName} · ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}`;
   const lines = [
     Object.assign(document.createElement("strong"), { textContent: identity }),
-    Object.assign(document.createElement("span"), {
-      textContent: `x ${xName} · ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}`,
-    }),
-    Object.assign(document.createElement("span"), {
-      textContent: `y ${yName} · ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}`,
-    }),
+    Object.assign(document.createElement("span"), { textContent: xPosition }),
+    Object.assign(document.createElement("span"), { textContent: yPosition }),
   ];
   const showBase = datum.quality === "exact"
     && exactVisualization === "bases"
@@ -2014,9 +2054,14 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
       textContent: `Base ${datum.xBase}`,
     }));
   }
+  if (delta) {
+    lines.push(Object.assign(document.createElement("small"), {
+      textContent: "Ruler active · press R to return to absolute coordinates",
+    }));
+  }
   hoverCard.replaceChildren(...lines);
   const baseSummary = showBase ? `; Base ${datum.xBase}` : "";
-  plotSummary.textContent = `${identity}; x ${xName} · ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}; y ${yName} · ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}${baseSummary}.`;
+  plotSummary.textContent = `${identity}; ${xPosition}; ${yPosition}${baseSummary}.`;
   hoverCard.hidden = false;
   const frame = hoverCard.parentElement?.getBoundingClientRect();
   if (frame) {
@@ -2025,6 +2070,39 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
     hoverCard.style.left = `${Math.min(maximumLeft, Math.max(8, event.clientX - frame.left + 14))}px`;
     hoverCard.style.top = `${Math.min(maximumTop, Math.max(8, event.clientY - frame.top + 14))}px`;
   }
+}
+
+function formatSignedDistance(value: number): string {
+  const rounded = Math.round(value);
+  if (rounded === 0) return "0 bp";
+  return `${rounded > 0 ? "+" : "−"}${formatBases(Math.abs(rounded))}`;
+}
+
+function updateRulerMarker(change: ViewChange | null): void {
+  if (!activeRuler || !change) {
+    rulerMarker.hidden = true;
+    return;
+  }
+  const canvasRect = canvas.getBoundingClientRect();
+  const frameRect = plotFrame.getBoundingClientRect();
+  const position = rulerScreenPosition(activeRuler, change, canvasRect.width, canvasRect.height);
+  if (!position) {
+    rulerMarker.hidden = true;
+    return;
+  }
+  rulerMarker.style.left = `${canvasRect.left - frameRect.left}px`;
+  rulerMarker.style.top = `${canvasRect.top - frameRect.top}px`;
+  rulerMarker.style.width = `${canvasRect.width}px`;
+  rulerMarker.style.height = `${canvasRect.height}px`;
+  rulerMarker.style.setProperty("--ruler-x", `${position.x}px`);
+  rulerMarker.style.setProperty("--ruler-y", `${position.y}px`);
+  rulerMarker.hidden = false;
+}
+
+function clearRuler(): void {
+  activeRuler = null;
+  rulerMarker.hidden = true;
+  if (lastHoverDatum && lastHoverEvent) showHover(lastHoverDatum, lastHoverEvent);
 }
 
 function updateHeatmap(changed: keyof HeatmapRange): void {
@@ -2529,6 +2607,7 @@ function clearSession(): void {
   histogramBins = new Uint32Array(101);
   histogramTiles.clear();
   clearGrid();
+  clearRuler();
   cursorGuideController.hide();
   renderer.clearTiles();
   featureTracks.clear();
@@ -2542,19 +2621,17 @@ function clearSession(): void {
   updatePaletteDirectionControl();
   renderPaletteSwatches();
   for (const button of backgroundButtons) {
-    button.setAttribute("aria-pressed", String(button.dataset.backgroundMode === "white"));
+    button.setAttribute("aria-pressed", String(button.dataset.backgroundMode === "black"));
   }
   updateHeatmapAppearance();
   if (workerFailed) startWorker();
   post({ type: "clear", generation });
   fileInput.value = "";
-  annotationFileInput.value = "";
   fastaSelection.textContent = "No FASTA selected";
   fastaSelection.removeAttribute("title");
   annotationSelection.textContent = "No annotations selected";
   annotationSelection.removeAttribute("title");
   dropZone.classList.remove("has-selection", "is-dragging");
-  annotationDropZone.classList.remove("has-selection", "is-dragging");
   exploreButton.hidden = true;
   hideExampleProgress();
   selfSelect.replaceChildren();

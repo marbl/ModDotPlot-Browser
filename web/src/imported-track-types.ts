@@ -5,15 +5,15 @@ export type ImportedTrackFormat = "bed" | "gff3" | "gtf";
 /** Maximum annotation bytes admitted to one parser job. */
 export const MAX_IMPORTED_ANNOTATION_BYTES = 512 * 1024 * 1024;
 
-/** Maximum matching annotation records admitted to one imported file. */
+/** Maximum retained features admitted to one imported file after GFF child rows are collapsed. */
 export const MAX_IMPORTED_ANNOTATION_RECORDS = 1_000_000;
 
-export function annotationAdmissionError(fileBytes: number, matchingRecords: number): string | null {
+export function annotationAdmissionError(fileBytes: number, retainedFeatures: number): string | null {
   if (fileBytes > MAX_IMPORTED_ANNOTATION_BYTES) {
     return `Annotation files are limited to ${MAX_IMPORTED_ANNOTATION_BYTES.toLocaleString()} bytes.`;
   }
-  if (matchingRecords > MAX_IMPORTED_ANNOTATION_RECORDS) {
-    return `Annotation imports are limited to ${MAX_IMPORTED_ANNOTATION_RECORDS.toLocaleString()} matching records per file.`;
+  if (retainedFeatures > MAX_IMPORTED_ANNOTATION_RECORDS) {
+    return `Annotation imports are limited to ${MAX_IMPORTED_ANNOTATION_RECORDS.toLocaleString()} retained features per file.`;
   }
   return null;
 }

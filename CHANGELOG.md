@@ -7,6 +7,32 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-11
+
+### Added
+
+* Added a keyboard ruler for interactive plots. Press `R` over the plot to anchor a
+  cross ruler, move the pointer to read signed X/Y genomic distances from it, and
+  press `R` again to return to absolute coordinates.
+* Added an opt-in regression test using the official CHM13 v2.0 RefSeq Liftoff v5.3
+  annotation across all 24 chromosomes.
+
+### Changed
+
+* Merged the landing-page FASTA and annotation targets into one drop zone that routes
+  FASTA/index files and BED, GFF3, or GTF annotations automatically.
+* Restored Viridis on a black background as the initial plot appearance.
+* Rotated grid-plot Y-axis sequence labels by 90 degrees to leave more room for plots.
+* Replaced the X- and Y-feature-track placement menus with two-option toggle controls.
+
+### Fixed
+
+* Count retained logical features, rather than every exon/CDS/UTR source row, against
+  the one-million-feature annotation limit. Large genome annotations such as the
+  4,007,856-row CHM13 file now import across every matching chromosome.
+* Preserve parser errors raised while consuming compressed annotations instead of
+  incorrectly reporting them as gzip/BGZF decompression failures.
+
 ## [0.9.8] - 2026-10-03
 
 ### Changed

@@ -21,11 +21,11 @@ There is no fixed input-size limit because files are processed locally rather th
 
 ![](../web/public/tutorial_images/landing_page.png)
 
-To get started, simply drop one or more plain, gzip-compressed, or BGZF FASTA assembly files on the large FASTA target, or use its file chooser. BGZF is detected from its header even when the suffix is `.gz`. For indexed loading, include `sample.fa.fai` with `sample.fa`, or include both `sample.fa.gz.fai` and `sample.fa.gz.gzi` with a BGZF `sample.fa.gz`:
+To get started, simply drop one or more plain, gzip-compressed, or BGZF FASTA assembly files on the landing-page target, or use its file chooser. The same target also accepts optional BED, GFF3, or GTF annotations and automatically routes each file by type. BGZF is detected from its header even when the suffix is `.gz`. For indexed loading, include `sample.fa.fai` with `sample.fa`, or include both `sample.fa.gz.fai` and `sample.fa.gz.gzi` with a BGZF `sample.fa.gz`:
 
 ![](../web/public/tutorial_images/accepted_files.png)
 
-ModDotPlot will index and validate the provided assembly and, upon completion, create an `Explore` button that launches the interactive browser. You can optionally add BED, GFF, or GTF annotation files on the smaller annotation target. Make sure their sequence identifiers match the corresponding FASTA headers.
+ModDotPlot will index and validate the provided assembly and, upon completion, create an `Explore` button that launches the interactive browser. An annotation file selected with the assembly is matched against every loaded sequence after the first plot opens. Make sure annotation sequence identifiers match the corresponding FASTA headers.
 
 ![](../web/public/tutorial_images/explore.png)
 
@@ -46,6 +46,8 @@ Zooming is limited to a minimum visible interval of approximately 100 bp on each
 ![](../web/public/tutorial_images/kmer_coloring.png)
 
 Hovering over a plot displays the X and Y sequence names, genomic intervals, and estimated identity for the cell beneath the pointer. Cursor guide lines can be configured or disabled in `Advanced options`.
+
+Press `R` while hovering over an interactive plot to anchor a cross ruler at the current position. Subsequent hover readouts show signed X and Y genomic distances from that anchor, which is useful for measuring arrays, duplications, and other structures. Press `R` again to remove the ruler and restore absolute coordinates.
 
 `ModDotPlot Browser` supports three plot modes when multiple sequences are available:
 
@@ -97,7 +99,7 @@ The `Color` control provides two display modes:
 
 ![](../web/public/tutorial_images/direction.png)
 
-The plot background can be switched between white and black. Under `Identity colors`, the palette selector contains supported ColorBrewer palettes grouped by palette class, together with Spectral and Viridis options. Spectral is the default.
+The plot background can be switched between white and black. Under `Identity colors`, the palette selector contains supported ColorBrewer palettes grouped by palette class, together with Spectral and Viridis options. Viridis on black is the default.
 
 The identity color controls can be used to:
 

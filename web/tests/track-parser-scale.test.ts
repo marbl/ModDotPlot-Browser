@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+// @ts-expect-error Vitest runs this optional fixture loader in Node; the browser package intentionally omits Node types.
+import { readFile } from "node:fs/promises";
 import {
   MAX_IMPORTED_ANNOTATION_BYTES,
   MAX_IMPORTED_ANNOTATION_RECORDS,
@@ -11,6 +13,9 @@ import { decideResourceAdmission, type ResourceUsage } from "../src/resource-pla
 const RUN_SCALE_TEST = (globalThis as typeof globalThis & {
   process?: { env?: Record<string, string | undefined> };
 }).process?.env?.MODDOTPLOT_ANNOTATION_SCALE === "1";
+const CHM13_ANNOTATION_PATH = (globalThis as typeof globalThis & {
+  process?: { env?: Record<string, string | undefined> };
+}).process?.env?.MODDOTPLOT_CHM13_ANNOTATION;
 const MAX_PARSE_AND_CLONE_MS = 10_000;
 const MAX_ESTIMATED_RETAINED_BYTES = 256 * 1024 * 1024;
 
@@ -103,6 +108,53 @@ test("batch parsing reads a file once and never duplicates ambiguous aliases", a
   expect(result.ambiguousRecords).toBe(1);
   expect(result.ambiguousIdentifiers).toEqual(["chrMT"]);
 });
+
+test.skipIf(!CHM13_ANNOTATION_PATH)(
+  "imports the official CHM13 v5.3 annotation as chromosome-wide logical tracks",
+  async () => {
+    const bytes = await readFile(CHM13_ANNOTATION_PATH as string);
+    const file = new File([bytes], "chm13v2.0_RefSeq_Liftoff_v5.3.gff.gz", { type: "application/gzip" });
+    const completed = new Promise<Extract<TrackParserMessage, { type: "batch-complete" }>>((resolve, reject) => {
+      vi.stubGlobal("self", {
+        onmessage: null as ((event: MessageEvent<TrackParserRequest>) => void) | null,
+        postMessage(message: TrackParserMessage) {
+          if (message.type === "error") reject(new Error(message.message));
+          if (message.type === "batch-complete") resolve(message);
+        },
+      });
+    });
+    await import("../src/track-parser-worker");
+    const worker = globalThis.self as unknown as {
+      onmessage: (event: MessageEvent<TrackParserRequest>) => void;
+    };
+    const names = [...Array.from({ length: 22 }, (_, index) => `chr${index + 1}`), "chrX", "chrY"];
+    worker.onmessage({
+      data: {
+        type: "parse-batch",
+        requestId: 53,
+        file,
+        candidates: names.map((name, index) => ({
+          axis: index === 0 ? "x" : "y",
+          index,
+          name,
+          length: 1_000_000_000,
+        })),
+      },
+    } as MessageEvent<TrackParserRequest>);
+
+    const result = await completed;
+    const validRecords = result.results.reduce((sum, entry) => sum + entry.report.validRecords, 0);
+    const retainedFeatures = result.results.reduce((sum, entry) => sum + entry.report.tracks.reduce(
+      (trackSum, track) => trackSum + track.features.length,
+      0,
+    ), 0);
+    expect(result.results).toHaveLength(24);
+    expect(validRecords).toBe(4_007_856);
+    expect(retainedFeatures).toBeGreaterThan(100_000);
+    expect(retainedFeatures).toBeLessThan(MAX_IMPORTED_ANNOTATION_RECORDS);
+  },
+  180_000,
+);
 
 test.skipIf(!RUN_SCALE_TEST)(
   "parses and publishes a generated million-record BED within the release envelope",

@@ -261,24 +261,24 @@ Package the generated static site:
 
 ```bash
 tar -C web/dist \
-  -czf moddotplot-browser-v1.0.0-dist.tar.gz \
+  -czf moddotplot-browser-v1.0.1-dist.tar.gz \
   .
 ```
 
 Copy it to the HPC system:
 
 ```bash
-scp moddotplot-browser-v1.0.0-dist.tar.gz \
+scp moddotplot-browser-v1.0.1-dist.tar.gz \
   USER@login.cluster.example.edu:/path/to/destination/
 ```
 
 On the HPC system:
 
 ```bash
-mkdir -p /path/to/moddotplot-browser-v1.0.0
+mkdir -p /path/to/moddotplot-browser-v1.0.1
 
-tar -xzf /path/to/destination/moddotplot-browser-v1.0.0-dist.tar.gz \
-  -C /path/to/moddotplot-browser-v1.0.0
+tar -xzf /path/to/destination/moddotplot-browser-v1.0.1-dist.tar.gz \
+  -C /path/to/moddotplot-browser-v1.0.1
 ```
 
 The extracted directory is the complete static website. It can be published through
