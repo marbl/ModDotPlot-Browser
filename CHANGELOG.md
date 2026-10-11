@@ -11,6 +11,9 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ### Added
 
+* Added an **Insert URL** field beneath the landing drop zone for HTTPS FASTA and
+  FASTA.gz sources. Remote responses and redirects stream directly through the
+  browser worker's existing parser and decompressor, with no application-server proxy.
 * Added a keyboard ruler for interactive plots. Press `R` over the plot to anchor a
   cross ruler, move the pointer to read signed X/Y genomic distances from it, and
   press `R` again to return to absolute coordinates.

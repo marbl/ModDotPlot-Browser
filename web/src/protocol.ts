@@ -75,8 +75,15 @@ export interface RemoteFastaSourceDescriptor {
   byteLength: number;
 }
 
+/** User-selected cross-origin FASTA fetched and ingested as a forward-only stream. */
+export interface RemoteFastaDownloadDescriptor {
+  url: string;
+  fileName: string;
+}
+
 export type MainToWorkerMessage =
   | { type: "load"; generation: number; files: File[] }
+  | { type: "load-remote"; generation: number; source: RemoteFastaDownloadDescriptor }
   | {
       type: "load-precomputed-overview";
       generation: number;

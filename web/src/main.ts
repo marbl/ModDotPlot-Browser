@@ -73,6 +73,7 @@ import {
   type RulerAnchor,
 } from "./ruler";
 import { sequenceAxisLabel } from "./sequence-metadata";
+import { parseRemoteFastaUrl } from "./remote-fasta";
 import type { PrecomputedOverviewArtifact } from "./precomputed-overview";
 import {
   decideResourceAdmission,
@@ -83,6 +84,7 @@ import {
 import type {
   ComparisonParameters,
   MainToWorkerMessage,
+  RemoteFastaDownloadDescriptor,
   ScientificConfigMetadata,
   SequenceMetadata,
   WorkerToMainMessage,
@@ -91,6 +93,9 @@ import type {
 const landing = element<HTMLElement>("landing");
 const workspace = element<HTMLElement>("workspace");
 const dropZone = element<HTMLButtonElement>("drop-zone");
+const remoteFastaForm = element<HTMLFormElement>("remote-fasta-form");
+const remoteFastaUrl = element<HTMLInputElement>("remote-fasta-url");
+const remoteFastaSubmit = element<HTMLButtonElement>("remote-fasta-submit");
 const exploreButton = element<HTMLButtonElement>("explore-button");
 const exampleButton = element<HTMLButtonElement>("example-button");
 const exampleProgress = element<HTMLElement>("example-progress");
@@ -311,6 +316,7 @@ let gridDraggedAxis: GridAxis | null = null;
 let gridPrepareTimer = 0;
 let gridAppearanceTimer = 0;
 let lastFiles: File[] = [];
+let lastRemoteFasta: RemoteFastaDownloadDescriptor | null = null;
 let stagedFastaFiles: File[] = [];
 let stagedAnnotationFiles: File[] = [];
 let pendingLandingAnnotations: File[] = [];
@@ -326,6 +332,7 @@ let recoveryBundledExample: ArabidopsisExampleStartup | null = null;
 let gridReturnAvailable = false;
 let gridReturnCell: HTMLButtonElement | null = null;
 let recoveryFiles: File[] | null = null;
+let recoveryRemoteFasta: RemoteFastaDownloadDescriptor | null = null;
 let workerFailed = false;
 let generation = 0;
 let prepareTimer = 0;
@@ -397,6 +404,10 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
         const files = recoveryFiles;
         recoveryFiles = null;
         loadFiles(files, false);
+      } else if (recoveryRemoteFasta) {
+        const source = recoveryRemoteFasta;
+        recoveryRemoteFasta = null;
+        loadRemoteFasta(source, false);
       } else if (!status.classList.contains("error")) {
         plotStatusText = "Ready";
         status.textContent = "Ready";
@@ -458,9 +469,8 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (launchValidationPending) {
         launchValidationPending = false;
         launchReady = true;
-        fastaSelection.textContent = activeBundledExample
-          ? `${activeBundledExample.source.fileName} ready to explore`
-          : `${fileList(stagedFastaFiles)} ready to explore`;
+        fastaSelection.textContent = `${currentFastaLabel()} ready to explore`;
+        resetRemoteFastaButton();
         dropZone.classList.add("has-selection");
         exploreButton.hidden = false;
         plotStatusText = "Ready to explore";
@@ -642,6 +652,17 @@ for (const eventName of ["dragleave", "drop"]) {
 dropZone.addEventListener("drop", (event) => {
   const files = [...(event.dataTransfer?.files ?? [])];
   if (files.length) stageLandingFiles(files);
+});
+remoteFastaForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  try {
+    stageRemoteFasta(parseRemoteFastaUrl(remoteFastaUrl.value));
+  } catch (error) {
+    showSequenceLoadDialog(
+      "The remote FASTA URL is not valid.",
+      [error instanceof Error ? error.message : String(error)],
+    );
+  }
 });
 exploreButton.addEventListener("click", enterWorkspace);
 exampleButton.addEventListener("click", () => void launchBundledExample());
@@ -901,6 +922,22 @@ function stageFastaFiles(files: File[], launchAutomatically = false): void {
   loadFiles(files, true, true);
 }
 
+function stageRemoteFasta(source: RemoteFastaDownloadDescriptor): void {
+  cancelExampleLoad();
+  activeBundledExample = null;
+  recoveryBundledExample = null;
+  stagedFastaFiles = [];
+  launchReady = false;
+  fastaSelection.textContent = `Connecting to ${new URL(source.url).hostname}…`;
+  fastaSelection.title = source.url;
+  dropZone.classList.add("has-selection");
+  exploreButton.hidden = true;
+  remoteFastaSubmit.disabled = true;
+  remoteFastaSubmit.textContent = "Streaming…";
+  if (workerFailed) startWorker();
+  loadRemoteFasta(source, true, true);
+}
+
 async function launchBundledExample(): Promise<void> {
   clearSession();
   const controller = new AbortController();
@@ -1074,17 +1111,15 @@ function hideExampleProgress(): void {
 }
 
 function restoreLandingSelections(): void {
-  fastaSelection.textContent = activeBundledExample
-    ? `${activeBundledExample.source.fileName} ready to explore`
-    : stagedFastaFiles.length > 0
-      ? `${fileList(stagedFastaFiles)} ready to explore`
-      : "No FASTA selected";
+  fastaSelection.textContent = activeBundledExample || lastRemoteFasta || stagedFastaFiles.length > 0
+    ? `${currentFastaLabel()} ready to explore`
+    : "No FASTA selected";
   annotationSelection.textContent = stagedAnnotationFiles.length > 0
     ? `${fileList(stagedAnnotationFiles)} selected`
     : "No annotations selected";
   dropZone.classList.toggle(
     "has-selection",
-    activeBundledExample !== null || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
+    activeBundledExample !== null || lastRemoteFasta !== null || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
   );
   exploreButton.hidden = !launchReady;
 }
@@ -1122,7 +1157,28 @@ function loadFiles(files: File[], remember = true, validateForLaunch = false): v
     );
     return;
   }
-  if (remember) lastFiles = [...files];
+  if (remember) {
+    lastFiles = [...files];
+    lastRemoteFasta = null;
+  }
+  beginSequenceLoad(validateForLaunch);
+  post({ type: "load", generation, files });
+}
+
+function loadRemoteFasta(
+  source: RemoteFastaDownloadDescriptor,
+  remember = true,
+  validateForLaunch = false,
+): void {
+  if (remember) {
+    lastFiles = [];
+    lastRemoteFasta = source;
+  }
+  beginSequenceLoad(validateForLaunch);
+  post({ type: "load-remote", generation, source });
+}
+
+function beginSequenceLoad(validateForLaunch: boolean): void {
   window.clearTimeout(prepareTimer);
   window.clearTimeout(detailTimer);
   window.clearTimeout(featureTrackTimer);
@@ -1168,7 +1224,6 @@ function loadFiles(files: File[], remember = true, validateForLaunch = false): v
   status.textContent = plotStatusText;
   if (validateForLaunch) hideProgress();
   else showProgress(plotStatusText);
-  post({ type: "load", generation, files });
 }
 
 function populateSelectors(): void {
@@ -2581,6 +2636,7 @@ function clearSession(): void {
   plotMode = "self";
   gridSelectedIndices = [];
   lastFiles = [];
+  lastRemoteFasta = null;
   stagedFastaFiles = [];
   stagedAnnotationFiles = [];
   pendingLandingAnnotations = [];
@@ -2591,6 +2647,7 @@ function clearSession(): void {
   bundledDetailCacheResolutions.clear();
   recoveryBundledExample = null;
   recoveryFiles = null;
+  recoveryRemoteFasta = null;
   delete document.body.dataset.bundledDetailCache;
   comparisonReady = false;
   currentMeasurement = "sketch";
@@ -2633,6 +2690,7 @@ function clearSession(): void {
   annotationSelection.removeAttribute("title");
   dropZone.classList.remove("has-selection", "is-dragging");
   exploreButton.hidden = true;
+  resetRemoteFastaButton();
   hideExampleProgress();
   selfSelect.replaceChildren();
   xSelect.replaceChildren();
@@ -2667,15 +2725,32 @@ function showError(message: string): void {
 }
 
 function rejectSequenceLoad(message: string): void {
-  const attemptedFiles = [...lastFiles];
+  const attemptedInput = currentFastaLabel();
+  const wasRemote = lastRemoteFasta !== null;
   clearSession();
   const guidance = /(?:memory|budget)/i.test(message)
     ? "The selected multi-FASTA contains more packed sequence than one browser session can retain. Load a chromosome, haplotype, or smaller record subset."
     : "Check that every sequence record begins with a > header line, then try again.";
   showSequenceLoadDialog(
-    `${fileList(attemptedFiles)} could not be parsed as FASTA. No sequence data was loaded.`,
-    [message, guidance],
+    `${attemptedInput} could not be loaded as FASTA. No sequence data was loaded.`,
+    [
+      message,
+      wasRemote
+        ? "Confirm the host permits cross-origin browser downloads (CORS), then try again."
+        : guidance,
+    ],
   );
+}
+
+function currentFastaLabel(): string {
+  if (activeBundledExample) return activeBundledExample.source.fileName;
+  if (lastRemoteFasta) return lastRemoteFasta.fileName;
+  return fileList(stagedFastaFiles);
+}
+
+function resetRemoteFastaButton(): void {
+  remoteFastaSubmit.disabled = false;
+  remoteFastaSubmit.textContent = "Load URL";
 }
 
 function showSequenceLoadDialog(summary: string, details: string[]): void {
@@ -2739,15 +2814,20 @@ function handleWorkerFailure(message: string): void {
     launchValidationPending = false;
     launchReady = false;
     exploreButton.hidden = true;
+    resetRemoteFastaButton();
     fastaSelection.textContent = activeBundledExample
       ? "Unable to open the precomputed overview · retry the compute engine"
+      : lastRemoteFasta
+        ? "Unable to load this remote FASTA · check the URL and try again"
       : "Unable to validate this FASTA · choose it again to retry";
-    dropZone.classList.toggle("has-selection", activeBundledExample !== null);
+    dropZone.classList.toggle("has-selection", activeBundledExample !== null || lastRemoteFasta !== null);
   }
   showError(launchFailure
     ? activeBundledExample
       ? `${message} Restart the compute engine to retry the included overview.`
-      : `${message} Choose the FASTA files again to retry.`
+      : lastRemoteFasta
+        ? `${message} Check the URL and remote host, then try again.`
+        : `${message} Choose the FASTA files again to retry.`
     : `${message} Restart the compute engine to reload the selected FASTA files.`);
   retryEngineButton.hidden = launchFailure && activeBundledExample === null;
 }
@@ -2757,6 +2837,9 @@ function restartEngine(): void {
   if (!workerFailed) worker.terminate();
   recoveryBundledExample = activeBundledExample;
   recoveryFiles = activeBundledExample === null && lastFiles.length > 0 ? [...lastFiles] : null;
+  recoveryRemoteFasta = activeBundledExample === null && lastRemoteFasta !== null
+    ? lastRemoteFasta
+    : null;
   if (activeBundledExample && !landing.hidden) {
     sequenceLoadPending = true;
     launchValidationPending = true;

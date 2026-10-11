@@ -149,6 +149,46 @@ h1 {
 }
 .drop-zone.has-selection { border-color: rgba(49, 122, 83, 0.58); }
 .drop-zone.has-selection .landing-file-selection { color: #276443; }
+.remote-fasta-form {
+  display: grid;
+  gap: 6px;
+  padding: 0 4px;
+}
+.remote-fasta-form label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.remote-fasta-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.remote-fasta-row input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: inherit;
+  background: rgba(255, 254, 250, 0.9);
+  font: inherit;
+}
+.remote-fasta-row input:focus-visible {
+  border-color: #7796a0;
+  outline: 2px solid rgba(119, 150, 160, 0.25);
+  outline-offset: 1px;
+}
+.remote-fasta-row button {
+  border: 1px solid #7796a0;
+  border-radius: 10px;
+  padding: 9px 16px;
+  color: #315667;
+  background: rgba(255, 254, 250, 0.9);
+  cursor: pointer;
+  font-weight: 700;
+}
+.remote-fasta-row button:disabled { cursor: wait; opacity: 0.62; }
+.remote-fasta-form small { color: var(--muted); font-size: 11px; }
 .explore-button {
   justify-self: center;
   min-width: 150px;

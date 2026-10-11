@@ -199,6 +199,12 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
     "or click to choose · FASTA, BED, GFF3, or GTF gzip/BGZF supported · optional fai/gzi indices for FASTA",
   );
   await expect(page.locator("#annotation-drop-zone")).toHaveCount(0);
+  await expect(page.locator("#remote-fasta-form")).toBeVisible();
+  await expect(page.locator("#remote-fasta-url")).toHaveAttribute(
+    "placeholder",
+    "https://example.org/assembly.fasta.gz",
+  );
+  await expect(page.locator("#remote-fasta-submit")).toHaveText("Load URL");
   await expect(page.locator("#explore-button")).toBeHidden();
   await expect(page.locator("#example-button")).toHaveText(
     "Try ModDotPlot on an Arabidopsis thaliana genome",
@@ -212,7 +218,7 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(tutorialLink).toContainText("Browser Tutorial");
   await expect(page.locator(".github-link .github-icon")).toHaveCount(2);
   await expect(page.locator(".publication-warning")).toHaveText(
-    "This web application uses WebAssembly to run ModDotPlot locally in your browser. Your files stay on your device and are not uploaded to a server. If you use ModDotPlot in your research, please cite our ModDotPlot paper. For analyses intended for publication, please use the official ModDotPlot CLI.",
+    "This web application uses WebAssembly to run ModDotPlot locally in your browser. Local files stay on your device and are not uploaded to a server. URL imports are fetched directly from the remote host. If you use ModDotPlot in your research, please cite our ModDotPlot paper. For analyses intended for publication, please use the official ModDotPlot CLI.",
   );
   await expect(page.locator('.publication-warning a[href="https://doi.org/10.1093/bioinformatics/btae493"]')).toHaveText("ModDotPlot paper");
   await expect(page.locator('.publication-warning a[href="https://github.com/marbl/moddotplot"]')).toHaveText("ModDotPlot CLI");
@@ -555,6 +561,62 @@ test("R toggles a fixed ruler and hover readouts switch to relative distances", 
   await expect(page.locator("#ruler-marker")).toBeHidden();
   await expect(page.locator("#hover-card")).toContainText("x ruler");
   await expect(page.locator("#hover-card")).not.toContainText("Δx");
+});
+
+test("the supplied Col-CEN FASTA.gz URL streams into the landing workflow", async ({ page }) => {
+  const requestedUrl = "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const normalizedUrl = "https://raw.githubusercontent.com/schatzlab/Col-CEN/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const remoteFasta = bgzfBlock([
+    `>Chr1 remote Col-CEN test\n${deterministicDna(96, 11)}`,
+    `>Chr2\n${deterministicDna(80, 13)}`,
+  ].join("\n"));
+  let remoteRequestSeen = false;
+  await page.route(normalizedUrl, async (route) => {
+    remoteRequestSeen = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/octet-stream",
+      headers: {
+        "access-control-allow-origin": "*",
+        "content-length": String(remoteFasta.byteLength),
+      },
+      body: remoteFasta,
+    });
+  });
+
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(requestedUrl);
+  await page.locator("#remote-fasta-submit").click();
+
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "Col-CEN_v1.2.fasta.gz ready to explore",
+    { timeout: 20_000 },
+  );
+  expect(remoteRequestSeen).toBe(true);
+  await expect(page.locator("#remote-fasta-submit")).toBeEnabled();
+  await expect(page.locator("#explore-button")).toBeVisible();
+  await exploreStagedFasta(page);
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  await expect(page.locator("#self-sequence option").first()).toContainText("Chr1");
+});
+
+test("live Col-CEN GitHub URL normalizes and loads the real BGZF assembly", async ({ page, browserName }) => {
+  test.setTimeout(150_000);
+  test.skip(
+    process.env.MODDOTPLOT_REMOTE_FASTA_LIVE !== "1" || browserName !== "chromium",
+    "opt-in network regression for the upstream Col-CEN archive",
+  );
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(
+    "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz",
+  );
+  await page.locator("#remote-fasta-submit").click();
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "Col-CEN_v1.2.fasta.gz ready to explore",
+    { timeout: 120_000 },
+  );
+  await exploreStagedFasta(page);
+  await expect(page.locator("#self-sequence option", { hasText: "Chr1" })).toHaveCount(1);
 });
 
 test("the merged landing drop stages FASTA and annotations until Explore opens the workspace", async ({ page }) => {
