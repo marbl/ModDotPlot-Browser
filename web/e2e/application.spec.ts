@@ -1908,7 +1908,7 @@ test("the merged drop accepts annotations before gzip FASTA with ambiguous bases
     buffer: Buffer.from("chr1\t0\t10\n"),
   });
   await expect(page.locator("#sequence-load-dialog")).toBeVisible();
-  await expect(page.locator("#sequence-load-summary")).toContainText("could not be parsed as FASTA");
+  await expect(page.locator("#sequence-load-summary")).toContainText("could not be loaded as FASTA");
   await expect(page.locator("#sequence-load-details")).toContainText("before a FASTA header");
   await expect(page.locator("#landing")).toBeVisible();
   await expect(page.locator("#workspace")).toBeHidden();
