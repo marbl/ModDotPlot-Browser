@@ -2184,6 +2184,8 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   await page.locator("#y-sequence").selectOption("1");
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await page.locator(".feature-track-controls summary").click();
+  await expect(page.locator("#track-file-input")).toHaveAttribute("accept", /(?:^|,)\.gz(?:,|$)/);
+  await expect(page.locator("#track-file-input")).toHaveAttribute("accept", /(?:^|,)\.bgz(?:,|$)/);
 
   const dropSafety = await page.evaluate(() => {
     const axis = document.querySelector("#x-axis-overlay")!;
@@ -2260,7 +2262,7 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   })).toBe(false);
 
   await page.locator("#track-file-input").setInputFiles({
-    name: "genes.gff3.gz",
+    name: "genes.gff.gz",
     mimeType: "application/gzip",
     buffer: gzipSync(Buffer.from([
       "##gff-version 3",

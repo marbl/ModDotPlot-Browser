@@ -32,6 +32,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
   4,007,856-row CHM13 file now import across every matching chromosome.
 * Preserve parser errors raised while consuming compressed annotations instead of
   incorrectly reporting them as gzip/BGZF decompression failures.
+* Allow generic `.gz` and `.bgz` suffixes in the in-plot **Add track** chooser, so
+  browsers that match only the final extension can select compressed GFF annotations.
 
 ## [0.9.8] - 2026-10-03
 
