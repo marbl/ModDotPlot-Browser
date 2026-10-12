@@ -788,7 +788,9 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.8...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.0...v1.0.1
 [0.9.8]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.5...v0.9.6
