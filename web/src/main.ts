@@ -1711,7 +1711,13 @@ function queueComparison(delay: number): void {
 
 function prepareComparison(): void {
   cancelPendingDetailedExport(new Error("Export cancelled because the comparison changed."));
-  if (activeRuler) clearRuler();
+  activeRuler = null;
+  rulerMarker.hidden = true;
+  lastHoverDatum = null;
+  lastHoverEvent = null;
+  hoverCard.hidden = true;
+  featureTracks.setPlotHover(null);
+  importedTracks.setPlotHover(null);
   const selection = selectedSingleComparison();
   if (!selection) return;
   const { xIndex, yIndex } = selection;
