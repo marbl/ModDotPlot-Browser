@@ -83,7 +83,7 @@ export interface RemoteFastaDownloadDescriptor {
 
 export type MainToWorkerMessage =
   | { type: "load"; generation: number; files: File[] }
-  | { type: "load-remote"; generation: number; source: RemoteFastaDownloadDescriptor }
+  | { type: "load-remote"; generation: number; sources: RemoteFastaDownloadDescriptor[] }
   | {
       type: "load-precomputed-overview";
       generation: number;

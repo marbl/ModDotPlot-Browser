@@ -49,19 +49,31 @@
               <span id="annotation-selection" class="landing-file-selection" aria-live="polite">No annotations selected</span>
             </button>
             <form id="remote-fasta-form" class="remote-fasta-form" aria-label="Load FASTA from URL">
-              <label for="remote-fasta-url">Insert URL</label>
-              <div class="remote-fasta-row">
-                <input
-                  id="remote-fasta-url"
-                  type="url"
-                  inputmode="url"
-                  autocomplete="url"
-                  placeholder="https://example.org/assembly.fasta.gz"
-                  aria-describedby="remote-fasta-help"
-                />
+              <label for="remote-fasta-url">Insert URL(s)</label>
+              <div id="remote-fasta-inputs" class="remote-fasta-inputs">
+                <div class="remote-fasta-row">
+                  <input
+                    id="remote-fasta-url"
+                    class="remote-fasta-url"
+                    type="url"
+                    inputmode="url"
+                    autocomplete="url"
+                    placeholder="https://example.org/assembly.fasta.gz"
+                    aria-describedby="remote-fasta-help"
+                  />
+                  <button
+                    id="remote-fasta-add"
+                    class="remote-fasta-icon-button"
+                    type="button"
+                    aria-label="Add another genome URL"
+                    title="Add another genome URL"
+                  >+</button>
+                </div>
+              </div>
+              <div class="remote-fasta-footer">
+                <small id="remote-fasta-help">HTTPS FASTA or FASTA.gz · companion FAI/GZI indexes used automatically</small>
                 <button id="remote-fasta-submit" type="submit">Load URL</button>
               </div>
-              <small id="remote-fasta-help">HTTPS FASTA or FASTA.gz · companion FAI/GZI indexes used automatically</small>
             </form>
             <button id="explore-button" class="explore-button" type="button" hidden>Explore</button>
             <div class="example-actions">

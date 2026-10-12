@@ -159,9 +159,13 @@ h1 {
   font-size: 12px;
   font-weight: 700;
 }
+.remote-fasta-inputs {
+  display: grid;
+  gap: 6px;
+}
 .remote-fasta-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 42px;
   gap: 8px;
 }
 .remote-fasta-row input {
@@ -178,16 +182,35 @@ h1 {
   outline: 2px solid rgba(119, 150, 160, 0.25);
   outline-offset: 1px;
 }
-.remote-fasta-row button {
+.remote-fasta-icon-button,
+.remote-fasta-footer button {
   border: 1px solid #7796a0;
   border-radius: 10px;
-  padding: 9px 16px;
   color: #315667;
   background: rgba(255, 254, 250, 0.9);
   cursor: pointer;
   font-weight: 700;
 }
-.remote-fasta-row button:disabled { cursor: wait; opacity: 0.62; }
+.remote-fasta-icon-button {
+  display: grid;
+  place-items: center;
+  min-height: 42px;
+  padding: 0;
+  font-size: 24px;
+  line-height: 1;
+}
+.remote-fasta-icon-button[data-action="remove"] { font-size: 20px; }
+.remote-fasta-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.remote-fasta-footer button {
+  flex: 0 0 auto;
+  padding: 9px 16px;
+}
+.remote-fasta-form button:disabled { cursor: wait; opacity: 0.62; }
 .remote-fasta-form small { color: var(--muted); font-size: 11px; }
 .explore-button {
   justify-self: center;

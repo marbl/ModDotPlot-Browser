@@ -186,6 +186,8 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
     "https://example.org/assembly.fasta.gz",
   );
   await expect(page.locator("#remote-fasta-submit")).toHaveText("Load URL");
+  await expect(page.locator("#remote-fasta-add")).toHaveAccessibleName("Add another genome URL");
+  await expect(page.locator(".remote-fasta-url")).toHaveCount(1);
   await expect(page.locator("#explore-button")).toBeHidden();
   await expect(page.locator("#example-button")).toHaveText(
     "Try ModDotPlot on an Arabidopsis thaliana genome",
@@ -516,6 +518,51 @@ test("the supplied Col-CEN FASTA.gz URL streams into the landing workflow", asyn
   await exploreStagedFasta(page);
   await expect(page.locator("#self-sequence option")).toHaveCount(2);
   await expect(page.locator("#self-sequence option").first()).toContainText("Chr1");
+});
+
+test("additional URL fields load several remote genomes into one workspace", async ({ page }) => {
+  const sources = [
+    {
+      url: "https://data.example/genome-a.fa",
+      fasta: `>genomeA\n${deterministicDna(96, 17)}\n`,
+    },
+    {
+      url: "https://data.example/genome-b.fa",
+      fasta: `>genomeB\n${deterministicDna(80, 19)}\n`,
+    },
+  ];
+  for (const source of sources) {
+    await page.route(source.url, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: {
+          "access-control-allow-origin": "*",
+          "content-length": String(Buffer.byteLength(source.fasta)),
+        },
+        body: source.fasta,
+      });
+    });
+  }
+
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(sources[0]!.url);
+  await page.locator("#remote-fasta-add").click();
+  await expect(page.locator(".remote-fasta-url")).toHaveCount(2);
+  await expect(page.locator("#remote-fasta-submit")).toHaveText("Load URLs");
+  await page.locator(".remote-fasta-url").nth(1).fill(sources[1]!.url);
+  await page.locator("#remote-fasta-submit").click();
+
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "genome-a.fa, genome-b.fa ready to explore",
+    { timeout: 20_000 },
+  );
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  await expect(page.locator("#self-sequence option").first()).toContainText("genomeA");
+  await expect(page.locator("#self-sequence option").nth(1)).toContainText("genomeB");
+  await exploreStagedFasta(page);
+  await expect(page.locator("#x-sequence option")).toHaveCount(2);
+  await expect(page.locator("#y-sequence option")).toHaveCount(2);
 });
 
 test("remote FAI and GZI companions avoid an eager full FASTA download", async ({ page }) => {

@@ -84,7 +84,9 @@ const landing = element<HTMLElement>("landing");
 const workspace = element<HTMLElement>("workspace");
 const dropZone = element<HTMLButtonElement>("drop-zone");
 const remoteFastaForm = element<HTMLFormElement>("remote-fasta-form");
+const remoteFastaInputs = element<HTMLElement>("remote-fasta-inputs");
 const remoteFastaUrl = element<HTMLInputElement>("remote-fasta-url");
+const remoteFastaAdd = element<HTMLButtonElement>("remote-fasta-add");
 const remoteFastaSubmit = element<HTMLButtonElement>("remote-fasta-submit");
 const exploreButton = element<HTMLButtonElement>("explore-button");
 const exampleButton = element<HTMLButtonElement>("example-button");
@@ -305,7 +307,7 @@ let gridDraggedAxis: GridAxis | null = null;
 let gridPrepareTimer = 0;
 let gridAppearanceTimer = 0;
 let lastFiles: File[] = [];
-let lastRemoteFasta: RemoteFastaDownloadDescriptor | null = null;
+let lastRemoteFastas: RemoteFastaDownloadDescriptor[] = [];
 let stagedFastaFiles: File[] = [];
 let stagedAnnotationFiles: File[] = [];
 let pendingLandingAnnotations: File[] = [];
@@ -315,7 +317,7 @@ let launchExampleWhenReady = false;
 let gridReturnAvailable = false;
 let gridReturnCell: HTMLButtonElement | null = null;
 let recoveryFiles: File[] | null = null;
-let recoveryRemoteFasta: RemoteFastaDownloadDescriptor | null = null;
+let recoveryRemoteFastas: RemoteFastaDownloadDescriptor[] | null = null;
 let workerFailed = false;
 let generation = 0;
 let prepareTimer = 0;
@@ -377,10 +379,10 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
         const files = recoveryFiles;
         recoveryFiles = null;
         loadFiles(files, false);
-      } else if (recoveryRemoteFasta) {
-        const source = recoveryRemoteFasta;
-        recoveryRemoteFasta = null;
-        loadRemoteFasta(source, false);
+      } else if (recoveryRemoteFastas) {
+        const sources = recoveryRemoteFastas;
+        recoveryRemoteFastas = null;
+        loadRemoteFastas(sources, false);
       } else if (!status.classList.contains("error")) {
         plotStatusText = "Ready";
         status.textContent = "Ready";
@@ -614,13 +616,25 @@ dropZone.addEventListener("drop", (event) => {
 remoteFastaForm.addEventListener("submit", (event) => {
   event.preventDefault();
   try {
-    stageRemoteFasta(parseRemoteFastaUrl(remoteFastaUrl.value));
+    const values = remoteFastaUrlInputs()
+      .map((input) => input.value.trim())
+      .filter((value) => value.length > 0);
+    if (values.length === 0) throw new Error("Enter an HTTPS URL for a FASTA file.");
+    stageRemoteFastas(values.map(parseRemoteFastaUrl));
   } catch (error) {
     showSequenceLoadDialog(
       "The remote FASTA URL is not valid.",
       [error instanceof Error ? error.message : String(error)],
     );
   }
+});
+remoteFastaAdd.addEventListener("click", () => addRemoteFastaUrlInput());
+remoteFastaInputs.addEventListener("click", (event) => {
+  const button = (event.target as Element).closest<HTMLButtonElement>("[data-action='remove']");
+  if (!button) return;
+  button.closest(".remote-fasta-row")?.remove();
+  remoteFastaSubmit.textContent = remoteFastaUrlInputs().length === 1 ? "Load URL" : "Load URLs";
+  remoteFastaUrlInputs().at(-1)?.focus();
 });
 exploreButton.addEventListener("click", enterWorkspace);
 exampleButton.addEventListener("click", launchOnlineExample);
@@ -845,6 +859,43 @@ function stageLandingFiles(files: File[], launchAutomatically = false): void {
   if (fasta.length > 0) stageFastaFiles(fasta, launchAutomatically);
 }
 
+function remoteFastaUrlInputs(): HTMLInputElement[] {
+  return [...remoteFastaInputs.querySelectorAll<HTMLInputElement>(".remote-fasta-url")];
+}
+
+function addRemoteFastaUrlInput(value = ""): HTMLInputElement {
+  const row = document.createElement("div");
+  row.className = "remote-fasta-row";
+  const input = document.createElement("input");
+  input.className = "remote-fasta-url";
+  input.type = "url";
+  input.inputMode = "url";
+  input.setAttribute("autocomplete", "url");
+  input.placeholder = "https://example.org/another-genome.fasta.gz";
+  input.setAttribute("aria-label", "Additional genome URL");
+  input.setAttribute("aria-describedby", "remote-fasta-help");
+  input.value = value;
+  const remove = document.createElement("button");
+  remove.className = "remote-fasta-icon-button";
+  remove.type = "button";
+  remove.dataset.action = "remove";
+  remove.setAttribute("aria-label", "Remove genome URL");
+  remove.title = "Remove genome URL";
+  remove.textContent = "−";
+  row.append(input, remove);
+  remoteFastaInputs.append(row);
+  remoteFastaSubmit.textContent = "Load URLs";
+  input.focus();
+  return input;
+}
+
+function setRemoteFastaUrlValues(values: string[]): void {
+  for (const row of [...remoteFastaInputs.querySelectorAll(".remote-fasta-row")].slice(1)) row.remove();
+  remoteFastaUrl.value = values[0] ?? "";
+  for (const value of values.slice(1)) addRemoteFastaUrlInput(value);
+  remoteFastaUrl.focus();
+}
+
 function stageFastaFiles(files: File[], launchAutomatically = false): void {
   cancelExampleLoad();
   launchExampleWhenReady = launchAutomatically;
@@ -870,16 +921,18 @@ function stageFastaFiles(files: File[], launchAutomatically = false): void {
   loadFiles(files, true, true);
 }
 
-function stageRemoteFasta(source: RemoteFastaDownloadDescriptor, launchAutomatically = false): void {
+function stageRemoteFastas(sources: RemoteFastaDownloadDescriptor[], launchAutomatically = false): void {
   cancelExampleLoad();
   launchExampleWhenReady = launchAutomatically;
   stagedFastaFiles = [];
   launchReady = false;
-  fastaSelection.textContent = `Connecting to ${new URL(source.url).hostname}…`;
-  fastaSelection.title = source.url;
+  fastaSelection.textContent = sources.length === 1
+    ? `Connecting to ${new URL(sources[0]!.url).hostname}…`
+    : `Connecting to ${sources.length} genome URLs…`;
+  fastaSelection.title = sources.map((source) => source.url).join("\n");
   dropZone.classList.add("has-selection");
   exploreButton.hidden = true;
-  remoteFastaSubmit.disabled = true;
+  setRemoteFastaControlsDisabled(true);
   remoteFastaSubmit.textContent = "Streaming…";
   if (launchAutomatically) {
     exampleButton.disabled = true;
@@ -887,14 +940,14 @@ function stageRemoteFasta(source: RemoteFastaDownloadDescriptor, launchAutomatic
     showExampleProgress("Connecting to online Arabidopsis genome", 0);
   }
   if (workerFailed) startWorker();
-  loadRemoteFasta(source, true, true);
+  loadRemoteFastas(sources, true, true);
 }
 
 function launchOnlineExample(): void {
   clearSession();
   try {
-    remoteFastaUrl.value = EXAMPLE_FASTA_URL;
-    stageRemoteFasta(parseRemoteFastaUrl(EXAMPLE_FASTA_URL), true);
+    setRemoteFastaUrlValues([EXAMPLE_FASTA_URL]);
+    stageRemoteFastas([parseRemoteFastaUrl(EXAMPLE_FASTA_URL)], true);
   } catch (error) {
     resetExampleButton();
     hideExampleProgress();
@@ -937,7 +990,7 @@ function hideExampleProgress(): void {
 }
 
 function restoreLandingSelections(): void {
-  fastaSelection.textContent = lastRemoteFasta || stagedFastaFiles.length > 0
+  fastaSelection.textContent = lastRemoteFastas.length > 0 || stagedFastaFiles.length > 0
     ? `${currentFastaLabel()} ready to explore`
     : "No FASTA selected";
   annotationSelection.textContent = stagedAnnotationFiles.length > 0
@@ -945,7 +998,7 @@ function restoreLandingSelections(): void {
     : "No annotations selected";
   dropZone.classList.toggle(
     "has-selection",
-    lastRemoteFasta !== null || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
+    lastRemoteFastas.length > 0 || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
   );
   exploreButton.hidden = !launchReady;
 }
@@ -981,23 +1034,23 @@ function loadFiles(files: File[], remember = true, validateForLaunch = false): v
   }
   if (remember) {
     lastFiles = [...files];
-    lastRemoteFasta = null;
+    lastRemoteFastas = [];
   }
   beginSequenceLoad(validateForLaunch);
   post({ type: "load", generation, files });
 }
 
-function loadRemoteFasta(
-  source: RemoteFastaDownloadDescriptor,
+function loadRemoteFastas(
+  sources: RemoteFastaDownloadDescriptor[],
   remember = true,
   validateForLaunch = false,
 ): void {
   if (remember) {
     lastFiles = [];
-    lastRemoteFasta = source;
+    lastRemoteFastas = [...sources];
   }
   beginSequenceLoad(validateForLaunch);
-  post({ type: "load-remote", generation, source });
+  post({ type: "load-remote", generation, sources });
 }
 
 function beginSequenceLoad(validateForLaunch: boolean): void {
@@ -2436,7 +2489,7 @@ function clearSession(): void {
   plotMode = "self";
   gridSelectedIndices = [];
   lastFiles = [];
-  lastRemoteFasta = null;
+  lastRemoteFastas = [];
   stagedFastaFiles = [];
   stagedAnnotationFiles = [];
   pendingLandingAnnotations = [];
@@ -2444,7 +2497,7 @@ function clearSession(): void {
   launchReady = false;
   launchExampleWhenReady = false;
   recoveryFiles = null;
-  recoveryRemoteFasta = null;
+  recoveryRemoteFastas = null;
   comparisonReady = false;
   currentMeasurement = "sketch";
   activeParameters = null;
@@ -2520,7 +2573,7 @@ function showError(message: string): void {
 
 function rejectSequenceLoad(message: string): void {
   const attemptedInput = currentFastaLabel();
-  const wasRemote = lastRemoteFasta !== null;
+  const wasRemote = lastRemoteFastas.length > 0;
   clearSession();
   const guidance = /(?:memory|budget)/i.test(message)
     ? "The selected multi-FASTA contains more packed sequence than one browser session can retain. Load a chromosome, haplotype, or smaller record subset."
@@ -2537,13 +2590,19 @@ function rejectSequenceLoad(message: string): void {
 }
 
 function currentFastaLabel(): string {
-  if (lastRemoteFasta) return lastRemoteFasta.fileName;
+  if (lastRemoteFastas.length > 0) return descriptorList(lastRemoteFastas);
   return fileList(stagedFastaFiles);
 }
 
 function resetRemoteFastaButton(): void {
-  remoteFastaSubmit.disabled = false;
-  remoteFastaSubmit.textContent = "Load URL";
+  setRemoteFastaControlsDisabled(false);
+  remoteFastaSubmit.textContent = remoteFastaUrlInputs().length === 1 ? "Load URL" : "Load URLs";
+}
+
+function setRemoteFastaControlsDisabled(disabled: boolean): void {
+  for (const control of remoteFastaForm.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")) {
+    control.disabled = disabled;
+  }
 }
 
 function showSequenceLoadDialog(summary: string, details: string[]): void {
@@ -2564,6 +2623,11 @@ function fileList(files: File[]): string {
   if (files.length === 0) return "The selected input";
   const shown = files.slice(0, 3).map((file) => file.name).join(", ");
   return files.length > 3 ? `${shown}, and ${files.length - 3} more files` : shown;
+}
+
+function descriptorList(sources: RemoteFastaDownloadDescriptor[]): string {
+  const shown = sources.slice(0, 3).map((source) => source.fileName).join(", ");
+  return sources.length > 3 ? `${shown}, and ${sources.length - 3} more` : shown;
 }
 
 function showTrackImportStatus(text: string, progress?: number): void {
@@ -2613,13 +2677,13 @@ function handleWorkerFailure(message: string): void {
     launchReady = false;
     exploreButton.hidden = true;
     resetRemoteFastaButton();
-    fastaSelection.textContent = lastRemoteFasta
+    fastaSelection.textContent = lastRemoteFastas.length > 0
       ? "Unable to load this remote FASTA · check the URL and try again"
       : "Unable to validate this FASTA · choose it again to retry";
-    dropZone.classList.toggle("has-selection", lastRemoteFasta !== null);
+    dropZone.classList.toggle("has-selection", lastRemoteFastas.length > 0);
   }
   showError(launchFailure
-    ? lastRemoteFasta
+    ? lastRemoteFastas.length > 0
       ? `${message} Check the URL and remote host, then try again.`
         : `${message} Choose the FASTA files again to retry.`
     : `${message} Restart the compute engine to reload the selected FASTA files.`);
@@ -2630,7 +2694,7 @@ function restartEngine(): void {
   cancelPendingDetailedExport(new Error("Export cancelled while the compute engine restarts."));
   if (!workerFailed) worker.terminate();
   recoveryFiles = lastFiles.length > 0 ? [...lastFiles] : null;
-  recoveryRemoteFasta = lastRemoteFasta;
+  recoveryRemoteFastas = lastRemoteFastas.length > 0 ? [...lastRemoteFastas] : null;
   comparisonReady = false;
   activeParameters = null;
   activeConfigurations = [];
