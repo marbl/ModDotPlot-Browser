@@ -154,16 +154,6 @@
             <button type="button" data-color-mode="direction" aria-pressed="false">Direction</button>
           </fieldset>
 
-          <section id="exact-mode-controls" class="exact-mode-controls" aria-labelledby="exact-mode-controls-title" hidden>
-            <strong id="exact-mode-controls-title">Exact k-mer options</strong>
-            <fieldset class="segmented-control exact-option-control">
-              <legend>Exact view</legend>
-              <button type="button" data-exact-view="identity" aria-pressed="false">Identity</button>
-              <button type="button" data-exact-view="bases" aria-pressed="true">Bases</button>
-            </fieldset>
-            <small>Exact cells are computed at one base per cell using full k-mer footprints. Exact view changes coloring only.</small>
-          </section>
-
           <fieldset class="segmented-control">
             <legend>Background</legend>
             <button type="button" data-background-mode="white" aria-pressed="false">White</button>
@@ -345,7 +335,7 @@
 
           <div id="plot-actions" class="plot-actions" role="group" aria-label="Plot actions">
             <button id="reset-view" class="quiet-button" type="button">Reset view</button>
-            <button id="export-data" class="quiet-button" type="button" disabled>Export ModDotPlot command</button>
+            <button id="export-data" class="quiet-button" type="button" disabled>Export ModDotPlot config</button>
             <button id="export-image" class="quiet-button" type="button" disabled>Export image</button>
           </div>
           <div class="control-footer">

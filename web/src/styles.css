@@ -637,24 +637,6 @@ details[open] summary { margin-bottom: 4px; }
 .segmented-control button:last-of-type { border-left: 0; border-radius: 0 8px 8px 0; }
 .segmented-control button[aria-pressed="true"] { color: white; background: var(--accent); border-color: var(--accent); }
 
-.exact-mode-controls {
-  display: grid;
-  gap: 9px;
-  border: 1px solid rgba(58, 87, 104, 0.32);
-  border-radius: 10px;
-  padding: 10px;
-  background: rgba(230, 239, 243, 0.52);
-  box-shadow: inset 3px 0 0 rgba(58, 87, 104, 0.68);
-}
-.exact-mode-controls > strong {
-  color: #294655;
-  font-size: 12px;
-}
-.exact-option-control button {
-  padding-inline: 3px;
-  font-size: 10px;
-  line-height: 1.2;
-}
 .control-title { color: var(--muted); font-size: 12px; }
 .heatmap-control { display: grid; gap: 5px; }
 .palette-options-row {
@@ -704,19 +686,26 @@ details[open] summary { margin-bottom: 4px; }
 }
 .palette-color-editor {
   width: min(300px, calc(100vw - 32px));
+  height: fit-content;
+  max-height: min(360px, calc(100dvh - 32px));
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 16px;
+  padding: 12px;
   color: var(--ink);
   background: var(--panel);
   box-shadow: 0 16px 48px rgba(20, 18, 22, 0.2);
 }
-.palette-color-editor[open] { display: grid; gap: 12px; }
+.palette-color-editor[open] {
+  display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 8px;
+}
 .palette-color-editor::backdrop { background: rgba(20, 18, 22, 0.12); }
 .palette-color-editor label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 .palette-color-editor input[type="color"] {
   width: 100%;
-  min-height: 52px;
+  min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 4px;
@@ -725,7 +714,7 @@ details[open] summary { margin-bottom: 4px; }
 }
 .palette-color-editor input[type="text"] {
   width: 100%;
-  min-height: 36px;
+  min-height: 32px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 9px;

@@ -1,14 +1,11 @@
 import type { AxisOverlay } from "./axes";
 import { createCompositeExportScene, renderCompositeExport, type ImageExportFormat } from "./composite-export";
 import {
-  createNumericExport,
   downloadBlob,
   embedPngProvenance,
   type ExportProvenance,
-  type NumericExportContext,
 } from "./export";
 import type { DotplotRenderer } from "./renderer";
-import { createZipArchive, type ZipEntry } from "./zip";
 
 type ExportKind = "data" | "image";
 
@@ -21,9 +18,7 @@ interface ExportControllerOptions {
   axes: AxisOverlay;
   baseName: () => string;
   provenance: () => ExportProvenance;
-  numericContext: () => NumericExportContext | null;
   cliConfig: () => Blob | null;
-  gridCommandEntries: (onProgress: (message: string, progress?: number) => void) => Promise<readonly ZipEntry[] | null>;
   prepareDetailedExport: (onProgress: (message: string, progress?: number) => void) => Promise<void>;
   progressDialog: HTMLDialogElement;
   progressMessage: HTMLElement;
@@ -33,14 +28,14 @@ interface ExportControllerOptions {
 }
 
 interface FormatOption {
-  value: ImageExportFormat | "zip";
+  value: ImageExportFormat | "json";
   label: string;
   mime: string;
 }
 
 const FORMAT_OPTIONS: Record<ExportKind, FormatOption[]> = {
   data: [
-    { value: "zip", label: "ModDotPlot command package", mime: "application/zip" },
+    { value: "json", label: "ModDotPlot config", mime: "application/json" },
   ],
   image: [
     { value: "png", label: "PNG", mime: "image/png" },
@@ -79,13 +74,15 @@ export class ExportController {
   async #save(kind: ExportKind): Promise<void> {
     if (!this.#options.canExport()) return;
     const button = kind === "data" ? this.#options.dataButton : this.#options.imageButton;
-    let format: string = kind === "data" ? "zip" : "png";
+    let format: string = kind === "data" ? "json" : "png";
     let handle: NativeFileHandle | null = null;
     const picker = (window as unknown as { showSaveFilePicker?: NativeSavePicker }).showSaveFilePicker;
     if (picker) {
       try {
         handle = await picker.call(window, {
-          suggestedName: withExtension(this.#options.baseName(), format),
+          suggestedName: kind === "data"
+            ? "moddotplot_config.json"
+            : withExtension(this.#options.baseName(), format),
           startIn: "downloads",
           excludeAcceptAllOption: true,
           types: FORMAT_OPTIONS[kind].map((option) => ({
@@ -108,29 +105,13 @@ export class ExportController {
     };
     try {
       const baseName = this.#options.baseName();
-      const fileName = withExtension(baseName, format);
+      const fileName = kind === "data" ? "moddotplot_config.json" : withExtension(baseName, format);
       let output: Blob;
       if (kind === "data") {
-        const gridEntries = await this.#options.gridCommandEntries(reportProgress);
-        if (gridEntries) {
-          reportProgress("Packaging grid BEDPE files and config");
-          output = await createZipArchive(gridEntries);
-        } else {
-          reportProgress("Checking detailed tiles");
-          await this.#options.prepareDetailedExport(reportProgress);
-          reportProgress("Building data export");
-          const context = this.#options.numericContext();
-          const tiles = this.#options.renderer.exportTileViews(true);
-          if (!context || tiles.length === 0) throw new Error("No rendered plot data is available to export yet.");
-          const bedpeOutput = createNumericExport(tiles, context, this.#options.provenance(), "bedpe");
-          const configOutput = this.#options.cliConfig();
-          if (!configOutput) throw new Error("No active comparison is available for the ModDotPlot CLI config.");
-          reportProgress("Packaging BEDPE and config");
-          output = await createZipArchive([
-            { name: `${baseName}.bedpe`, data: bedpeOutput },
-            { name: `${baseName}.config.json`, data: configOutput },
-          ]);
-        }
+        reportProgress("Building ModDotPlot config");
+        const configOutput = this.#options.cliConfig();
+        if (!configOutput) throw new Error("No active comparison is available for the ModDotPlot config.");
+        output = configOutput;
       } else {
         reportProgress("Checking detailed tiles");
         await this.#options.prepareDetailedExport(reportProgress);
@@ -173,6 +154,6 @@ export function formatFromFileName(
 }
 
 function withExtension(value: string, extension: string): string {
-  const trimmed = value.trim().replace(/\.(bedpe|csv|zip|png|svg|pdf)$/i, "") || "moddotplot";
+  const trimmed = value.trim().replace(/\.(json|png|svg|pdf)$/i, "") || "moddotplot";
   return `${trimmed}.${extension}`;
 }

@@ -41,7 +41,7 @@ function context(): ModDotPlotConfigContext {
 describe("official ModDotPlot CLI config export", () => {
   it("maps pairwise sequence, viewport, cell size, and display settings", () => {
     const config = createModDotPlotCliConfig(context());
-    expect(config.load).toEqual(["./moddotplot-Chr1-vs-Chr2.bedpe"]);
+    expect(config).not.toHaveProperty("load");
     expect(config).not.toHaveProperty("fasta");
     expect(config.sequence).toEqual(["Chr1", "Chr2"]);
     expect(config.region).toEqual(["Chr1:101-600", "Chr2:201-500"]);
@@ -54,7 +54,7 @@ describe("official ModDotPlot CLI config export", () => {
     expect(config.identity).toBe(config.breakpoints[0]);
     expect(config._moddotplot_browser.requested_bp_per_cell).toBe(5);
     expect(config._moddotplot_browser.command).toBe(
-      "moddotplot -c moddotplot-Chr1-vs-Chr2.config.json -l moddotplot-Chr1-vs-Chr2.bedpe",
+      "moddotplot -c moddotplot_config.json",
     );
   });
 
@@ -68,26 +68,17 @@ describe("official ModDotPlot CLI config export", () => {
     expect(config.compare_only).toBe(false);
   });
 
-  it("preserves grid ordering and references the companion BEDPE", () => {
+  it("preserves grid ordering without companion data files", () => {
     const input = context();
     input.plotMode = "grid";
     input.gridSequenceIndices = [1, 0];
-    input.loadFiles = [
-      "moddotplot-Chr2-vs-Chr2.bedpe",
-      "moddotplot-Chr1-vs-Chr2.bedpe",
-      "moddotplot-Chr1-vs-Chr1.bedpe",
-    ];
     const config = createModDotPlotCliConfig(input);
     expect(config.sequence).toEqual(["Chr2", "Chr1"]);
-    expect(config.load).toEqual([
-      "./moddotplot-Chr2-vs-Chr2.bedpe",
-      "./moddotplot-Chr1-vs-Chr2.bedpe",
-      "./moddotplot-Chr1-vs-Chr1.bedpe",
-    ]);
+    expect(config).not.toHaveProperty("load");
     expect(config.region).toBeUndefined();
     expect(config.grid_only).toBe(true);
     expect(config._moddotplot_browser.command).toBe(
-      "moddotplot --grid-only -c moddotplot-Chr1-vs-Chr2.config.json -l moddotplot-Chr2-vs-Chr2.bedpe moddotplot-Chr1-vs-Chr2.bedpe moddotplot-Chr1-vs-Chr1.bedpe",
+      "moddotplot --grid-only -c moddotplot_config.json",
     );
   });
 

@@ -18,11 +18,9 @@ export interface ModDotPlotConfigContext {
   paletteColors: readonly string[];
   heatmapRange: HeatmapRange;
   colorMode: "similarity" | "direction";
-  loadFiles?: readonly string[];
 }
 
 export interface ModDotPlotCliConfig {
-  load: string[];
   sequence: string[];
   region?: string[];
   kmer: number;
@@ -67,15 +65,11 @@ export function createModDotPlotCliConfig(context: ModDotPlotConfigContext): Mod
   // the browser's exact requested cell size in the metadata block.
   const window = Math.max(10, context.parameters.k, requestedWindow);
   const outputBase = safePathPart(context.baseName) || "moddotplot-browser";
-  const loadFiles = context.loadFiles?.length
-    ? context.loadFiles.map((fileName) => `./${safePathPart(fileName) || "plot.bedpe"}`)
-    : [`./${outputBase}.bedpe`];
   const regions = context.plotMode === "grid"
     ? undefined
     : visibleRegions(context);
 
   return {
-    load: loadFiles,
     sequence: selected.map((sequence) => sequence.name),
     ...(regions && regions.length > 0 ? { region: regions } : {}),
     kmer: context.parameters.k,
@@ -101,11 +95,9 @@ export function createModDotPlotCliConfig(context: ModDotPlotConfigContext): Mod
     _moddotplot_browser: {
       version: context.appVersion,
       command: context.plotMode === "grid"
-        ? `moddotplot --grid-only -c ${outputBase}.config.json -l ${loadFiles.map((file) => file.slice(2)).join(" ")}`
-        : `moddotplot -c ${outputBase}.config.json -l ${loadFiles[0]!.slice(2)}`,
-      note: context.plotMode === "grid"
-        ? "Loads every companion browser-exported self and unique pairwise BEDPE into a grid-only plot. Keep the config and BEDPE files together after extracting the ZIP package."
-        : "Loads the companion browser-exported BEDPE. Keep the config and BEDPE together after extracting the ZIP package.",
+        ? "moddotplot --grid-only -c moddotplot_config.json"
+        : "moddotplot -c moddotplot_config.json",
+      note: "Browser display settings only. Add source FASTA or BEDPE inputs when running this config with ModDotPlot.",
       requested_bp_per_cell: requestedWindow,
       exported_viewport: { ...context.viewport },
     },

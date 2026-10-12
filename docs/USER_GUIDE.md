@@ -48,7 +48,7 @@ To navigate an interactive plot:
 - Click and drag to pan across the plot.
 - Select `Reset view` to return to the complete plot, and `Clear` to return back to the landing page.
 
-Zooming is limited to a minimum visible interval of approximately 100 bp on each eligible axis. At the closest zoom levels, the browser switches to exact *k*-mer rendering. The default exact view colors matching cells by nucleotide base, while the `Identity` option applies the selected identity palette.
+Zooming is limited to a minimum visible interval of approximately 100 bp on each eligible axis. At the closest zoom levels, the browser switches to exact *k*-mer rendering and colors matching cells by nucleotide base.
 
 ![](../web/public/tutorial_images/kmer_coloring.png)
 
@@ -106,7 +106,7 @@ The `Color` control provides two display modes:
 
 ![](../web/public/tutorial_images/direction.png)
 
-The plot background can be switched between white and black. Under `Identity colors`, the palette selector contains supported ColorBrewer palettes grouped by palette class, together with Spectral and Viridis options. Viridis on black is the default.
+The plot background can be switched between white and black. Under `Identity colors`, the palette selector contains Blues, Greens, Reds, and Greys; Paired, Pastel1, and Pastel2; BrBG, PuOr, and RdGy; plus Spectral and Viridis. Viridis on black is the default.
 
 The identity color controls can be used to:
 
@@ -127,42 +127,29 @@ The `Feature tracks` panel can display the following computed tracks on the X ax
 BED, GFF3, and GTF annotation files can also be added from the landing page or with the `Add track` button. Plain-text, gzip-compressed, and BGZF-compressed annotations are supported. A multi-sequence annotation file is represented by one logical track, and features are automatically matched to the sequence currently displayed on each axis.
 
 Use the `Track placement` controls to display X-axis tracks above or below the plot and Y-axis tracks to its left or right. The selected placement applies to computed and imported feature tracks.
+Computed bins and imported features beneath the current plot cursor are highlighted on
+their respective X or Y track.
 
 Select `Export image` to save a high-quality rendering of the current interactive view. *Please do not use plots generated this way for official publications; use the validated [ModDotPlot CLI](https://github.com/marbl/ModDotPlot) instead.* Depending on browser support and the selected filename extension, plots can be exported as PNG, SVG, or PDF. Image exports include the visible axes, sequence labels, feature tracks, and legend. SVG and PDF exports retain vector axes, labels, tracks, and legends around the rasterized heatmap.
 
-## Exporting Data to ModDotPlot CLI
+## Exporting a config for ModDotPlot CLI
 
-As a reminder, ***this browser is meant for exploratory analysis only!*** Once you have styled a plot to your liking, select `Export ModDotPlot command` to download files for use in the [ModDotPlot CLI](https://github.com/marbl/ModDotPlot). The browser will finish preparing detailed data for the visible view and download a ZIP archive.
+As a reminder, ***this browser is meant for exploratory analysis only!*** Once you have styled a plot to your liking, select `Export ModDotPlot config` to download `moddotplot_config.json` for use in the [ModDotPlot CLI](https://github.com/marbl/ModDotPlot). The config records browser display settings only; add the original FASTA or BEDPE inputs when running it with the CLI.
 
 ![](../web/public/tutorial_images/export_mdp.png)
 
-For a Self or Pairwise plot, the archive contains:
-
-```text
-<plot-name>.bedpe
-<plot-name>.config.json
-```
-
-The BEDPE file contains the non-empty similarity cells from the exported view. The JSON configuration records the corresponding ModDotPlot display settings and refers to the BEDPE file through its `load` field.
-
-Extract both files into the same directory:
+The exported config can then be run with the official ModDotPlot CLI after adding
+the original input paths required for the analysis:
 ```bash
-unzip <plot-name>.zip
-cd <plot-name>
-```
-
-The exported command can then be run with the official ModDotPlot CLI:
-```bash
-moddotplot -c <plot-name>.config.json -l <plot-name>.bedpe
+moddotplot -c moddotplot_config.json <input options>
 ```
 
 ![](../web/public/tutorial_images/Chr1_TRI.png)
 ![](../web/public/tutorial_images/Chr1_HIST.png)
 
-The actual exported filenames are written into the JSON metadata, so replace `<plot-name>` with the name of the downloaded package.
-
-For a Grid plot, the ZIP archive contains one BEDPE file for every selected self-comparison and every unique pairwise comparison, together with a single configuration file. Run the exported grid with:
+For a Grid plot, use the same config with the CLI's grid-only mode and appropriate
+input paths:
 
 ```bash
-moddotplot --grid-only -c <grid-name>.config.json -l <self-and-pairwise-bedpe-files>
+moddotplot --grid-only -c moddotplot_config.json <input options>
 ```
