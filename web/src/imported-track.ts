@@ -59,9 +59,18 @@ interface BatchAliasConfirmation {
   ambiguousIdentifiers: string[];
 }
 
+interface DeferredTrackSource {
+  sourceId: number;
+  file: File;
+  candidates: Map<number, SequenceTarget>;
+  loadedSequenceIndices: Set<number>;
+  pendingSequenceIndices: Set<number>;
+  queuedSequenceIndices: Set<number>;
+}
+
 type PendingImport =
   | { kind: "parse"; axis: FeatureTrackAxis; sequence: SequenceTarget }
-  | { kind: "batch"; sourceId: number };
+  | { kind: "batch"; sourceId: number; deferredSequenceIndices?: number[] };
 
 type SequenceTarget = Pick<SequenceMetadata, "index" | "name" | "length">;
 
@@ -95,6 +104,7 @@ export class ImportedTrackManager {
   #worker: Worker | null = null;
   readonly #tracks: ImportedTrackState[] = [];
   readonly #pending = new Map<number, PendingImport>();
+  readonly #deferredSources: DeferredTrackSource[] = [];
   readonly #resizeObserver: ResizeObserver;
   #nextRequestId = 0;
   #nextTrackId = 0;
@@ -142,6 +152,7 @@ export class ImportedTrackManager {
 
   updateSequenceContext(metadata: FeatureTrackMetadata | null): void {
     this.#metadata = metadata;
+    this.#queueDeferredTracksForContext();
     this.#updateEligibilityAndDraw();
   }
 
@@ -170,6 +181,23 @@ export class ImportedTrackManager {
     this.#updateHoverHighlights();
   }
 
+  plotHoverFeatureNames(): Record<FeatureTrackAxis, string[]> {
+    const names: Record<FeatureTrackAxis, Set<string>> = {
+      x: new Set<string>(),
+      y: new Set<string>(),
+    };
+    for (const track of this.#tracks) {
+      for (const axis of ["x", "y"] as const) {
+        if (!track.enabled[axis] || track.panels[axis].hidden) continue;
+        for (const feature of track.highlighted[axis]) {
+          const name = feature.name.trim();
+          if (name) names[axis].add(name);
+        }
+      }
+    }
+    return { x: [...names.x], y: [...names.y] };
+  }
+
   estimatedBytes(): number {
     return this.#tracks.reduce((total, track) => total + [...track.sequenceData.values()].reduce(
       (sequenceTotal, sequence) => sequenceTotal + sequence.features.reduce(
@@ -185,17 +213,10 @@ export class ImportedTrackManager {
     if (files.length > 0) this.#autoImportFiles([...files]);
   }
 
-  /** Matches launch-screen annotations against every record in the loaded FASTA set. */
+  /** Retains launch-screen annotations for the visible chromosomes and loads others on demand. */
   importFilesForSequences(files: readonly File[], sequences: readonly SequenceMetadata[]): void {
     if (files.length === 0 || sequences.length === 0) return;
-    const x = this.#options.getSequence("x");
-    const candidates: TrackSequenceCandidate[] = sequences.map((sequence) => ({
-      axis: sequence.index === x?.index ? "x" : "y",
-      index: sequence.index,
-      name: sequence.name,
-      length: sequence.length,
-    }));
-    for (const file of files) this.#startBatchParse(file, candidates);
+    this.#registerDeferredFiles(files, sequences);
     this.#options.onStatus(`Reading ${files[0]?.name ?? "feature track"}`);
   }
 
@@ -208,6 +229,7 @@ export class ImportedTrackManager {
       track.row.remove();
     }
     this.#tracks.length = 0;
+    this.#deferredSources.length = 0;
     this.#hoverCoordinates = { x: null, y: null };
     if (this.#worker && this.#pending.size > 0) {
       const request: TrackParserRequest = {
@@ -283,25 +305,87 @@ export class ImportedTrackManager {
       this.#showReport("Track import unavailable", "Load a FASTA sequence before importing a feature track.", []);
       return;
     }
-    const x = this.#options.getSequence("x");
-    const y = this.#options.getSequence("y");
-    const candidates: TrackSequenceCandidate[] = sequences.map((sequence) => ({
-      axis: sequence.index === y?.index && sequence.index !== x?.index ? "y" : "x",
-      index: sequence.index,
-      name: sequence.name,
-      length: sequence.length,
-    }));
-    for (const file of files) {
-      this.#startBatchParse(file, candidates);
-    }
+    this.#registerDeferredFiles(files, sequences);
     this.#options.onStatus(`Matching ${files[0]?.name ?? "feature track"}`);
   }
 
-  #startBatchParse(file: File, candidates: TrackSequenceCandidate[]): void {
+  #registerDeferredFiles(files: readonly File[], sequences: readonly SequenceTarget[]): void {
+    for (const file of files) {
+      this.#deferredSources.push({
+        sourceId: ++this.#nextSourceId,
+        file,
+        candidates: new Map(sequences.map((sequence) => [sequence.index, {
+          index: sequence.index,
+          name: sequence.name,
+          length: sequence.length,
+        }])),
+        loadedSequenceIndices: new Set(),
+        pendingSequenceIndices: new Set(),
+        queuedSequenceIndices: new Set(),
+      });
+    }
+    this.#queueDeferredTracksForContext();
+  }
+
+  #startBatchParse(
+    file: File,
+    candidates: TrackSequenceCandidate[],
+    sourceId = ++this.#nextSourceId,
+    deferredSequenceIndices?: number[],
+  ): void {
     const requestId = ++this.#nextRequestId;
-    this.#pending.set(requestId, { kind: "batch", sourceId: ++this.#nextSourceId });
+    this.#pending.set(requestId, { kind: "batch", sourceId, deferredSequenceIndices });
     const request: TrackParserRequest = { type: "parse-batch", requestId, file, candidates };
     this.#parserWorker().postMessage(request);
+  }
+
+  #queueDeferredTracksForContext(): void {
+    const metadata = this.#metadata;
+    if (!metadata) return;
+    const desired = new Set([metadata.xIndex, metadata.yIndex]);
+    for (const source of this.#deferredSources) {
+      for (const sequenceIndex of desired) {
+        if (!source.candidates.has(sequenceIndex)
+          || source.loadedSequenceIndices.has(sequenceIndex)
+          || source.pendingSequenceIndices.has(sequenceIndex)) continue;
+        source.queuedSequenceIndices.add(sequenceIndex);
+      }
+      this.#startNextDeferredBatch(source);
+    }
+  }
+
+  #startNextDeferredBatch(source: DeferredTrackSource): void {
+    if (source.pendingSequenceIndices.size > 0 || source.queuedSequenceIndices.size === 0) return;
+    const metadata = this.#metadata;
+    const sequenceIndices = [...source.queuedSequenceIndices];
+    source.queuedSequenceIndices.clear();
+    const candidates = sequenceIndices.map((sequenceIndex): TrackSequenceCandidate | null => {
+      const sequence = source.candidates.get(sequenceIndex);
+      if (!sequence) return null;
+      const axis: FeatureTrackAxis = metadata && sequenceIndex === metadata.yIndex && metadata.yIndex !== metadata.xIndex
+        ? "y"
+        : "x";
+      return { ...sequence, axis };
+    }).filter((candidate): candidate is TrackSequenceCandidate => candidate !== null);
+    if (candidates.length === 0) return;
+    source.pendingSequenceIndices = new Set(candidates.map((candidate) => candidate.index));
+    this.#startBatchParse(
+      source.file,
+      candidates,
+      source.sourceId,
+      [...source.pendingSequenceIndices],
+    );
+  }
+
+  #finishDeferredBatch(pending: Extract<PendingImport, { kind: "batch" }>): void {
+    if (!pending.deferredSequenceIndices) return;
+    const source = this.#deferredSources.find((candidate) => candidate.sourceId === pending.sourceId);
+    if (!source) return;
+    for (const sequenceIndex of pending.deferredSequenceIndices) {
+      source.loadedSequenceIndices.add(sequenceIndex);
+      source.pendingSequenceIndices.delete(sequenceIndex);
+    }
+    this.#startNextDeferredBatch(source);
   }
 
   #importFiles(files: File[], axis: FeatureTrackAxis): void {
@@ -347,6 +431,7 @@ export class ImportedTrackManager {
     }
     this.#pending.delete(message.requestId);
     if (message.type === "error") {
+      if (pending.kind === "batch") this.#finishDeferredBatch(pending);
       this.#showReport("Track import failed", message.message, message.issues.map(
         (issue) => `Line ${issue.line.toLocaleString()}: ${issue.message}`,
       ));
@@ -358,34 +443,34 @@ export class ImportedTrackManager {
       return;
     }
     if (message.type === "batch-complete") {
-      if (pending.kind === "batch") {
-        const exactResults = message.results.filter(({ report }) => report.matchKind === "exact");
-        const aliasResults = message.results.filter(({ report }) => report.matchKind === "alias");
-        for (const { candidate, report } of exactResults) {
-          this.#addReport(
-            report,
-            { kind: "parse", axis: candidate.axis, sequence: candidate },
-            pending.sourceId,
-          );
-        }
-        if (aliasResults.length > 0) {
-          this.#confirmBatchAliases(
-            aliasResults,
-            message.ambiguousRecords,
-            message.ambiguousIdentifiers,
-            pending.sourceId,
-          );
-        } else if (message.ambiguousRecords > 0) {
-          this.#showReport(
-            "Some annotation records were skipped",
-            `${message.ambiguousRecords.toLocaleString()} records had aliases matching more than one loaded FASTA sequence.`,
-            [
-              "Ambiguous records were not duplicated.",
-              `Identifiers: ${message.ambiguousIdentifiers.slice(0, 12).join(", ")}`,
-            ],
-          );
-        }
+      if (pending.kind !== "batch") return;
+      const exactResults = message.results.filter(({ report }) => report.matchKind === "exact");
+      const aliasResults = message.results.filter(({ report }) => report.matchKind === "alias");
+      for (const { candidate, report } of exactResults) {
+        this.#addReport(
+          report,
+          { kind: "parse", axis: candidate.axis, sequence: candidate },
+          pending.sourceId,
+        );
       }
+      if (aliasResults.length > 0) {
+        this.#confirmBatchAliases(
+          aliasResults,
+          message.ambiguousRecords,
+          message.ambiguousIdentifiers,
+          pending.sourceId,
+        );
+      } else if (message.ambiguousRecords > 0) {
+        this.#showReport(
+          "Some annotation records were skipped",
+          `${message.ambiguousRecords.toLocaleString()} records had aliases matching more than one loaded FASTA sequence.`,
+          [
+            "Ambiguous records were not duplicated.",
+            `Identifiers: ${message.ambiguousIdentifiers.slice(0, 12).join(", ")}`,
+          ],
+        );
+      }
+      this.#finishDeferredBatch(pending);
       if (this.#pending.size === 0) this.#options.onIdle();
       return;
     }

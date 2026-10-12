@@ -719,8 +719,11 @@ test("the merged landing drop stages FASTA and annotations until Explore opens t
 
   const stagedTrack = page.locator(".imported-track-control", { hasText: "landing-track" });
   await expect(stagedTrack).toHaveCount(1, { timeout: 15_000 });
-  await expect(stagedTrack).toContainText("2 matching sequences · BED · 2 displayed features");
+  await expect(stagedTrack).toContainText("first · BED · 1 displayed features");
   await expect(stagedTrack.locator('input[id$="-both"]')).toBeChecked();
+
+  await page.locator("#self-sequence").selectOption("1");
+  await expect(stagedTrack).toContainText("2 matching sequences · BED · 2 displayed features", { timeout: 15_000 });
 });
 
 test("Save As exports one ModDotPlot config and complete PNG/SVG/PDF compositions", async ({ page, browserName }) => {
@@ -2135,6 +2138,10 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
     plotBoundsForHighlight.y + plotBoundsForHighlight.height / 2,
   );
   await expect.poll(computedTrackHighlightWidth).toBeGreaterThanOrEqual(6);
+  await expect(page.locator("#hover-card")).toContainText(/x GC% · \d+\.\d%/);
+  await expect(page.locator("#hover-card")).toContainText(/x CpG O\/E · \d+\.\d{3}/);
+  await expect(page.locator("#hover-card")).toContainText(/y GC% · \d+\.\d%/);
+  await expect(page.locator("#hover-card")).toContainText(/y CpG O\/E · \d+\.\d{3}/);
   const gcBounds = await page.locator("#gc-track-x-canvas").boundingBox();
   if (!gcBounds) throw new Error("GC track has no bounds");
   await page.mouse.move(gcBounds.x + gcBounds.width / 2, gcBounds.y + gcBounds.height / 2);
@@ -2364,6 +2371,18 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   );
   await expect(bedPanel).toHaveClass(/has-hover-highlight/);
   await expect(bedPanel).toHaveAttribute("data-hover-highlight-count", "1");
+  await expect(page.locator("#hover-card")).toContainText("x feature · red feature");
+  const hoverOrder = await page.locator("#hover-card > *").evaluateAll((elements) =>
+    elements.map((element) => ({
+      text: element.textContent ?? "",
+      separator: element.classList.contains("hover-card-separator"),
+    })));
+  expect(hoverOrder.findIndex(({ text }) => text.startsWith("x chr1")))
+    .toBeLessThan(hoverOrder.findIndex(({ text }) => text === "x feature · red feature"));
+  expect(hoverOrder.findIndex(({ text }) => text === "x feature · red feature"))
+    .toBeLessThan(hoverOrder.findIndex(({ separator }) => separator));
+  expect(hoverOrder.findIndex(({ separator }) => separator))
+    .toBeLessThan(hoverOrder.findIndex(({ text }) => text.startsWith("y chr2")));
   const bedHoverBounds = await bedPanel.boundingBox();
   if (!bedHoverBounds) throw new Error("BED track has no bounds");
   await page.mouse.move(

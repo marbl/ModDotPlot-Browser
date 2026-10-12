@@ -61,11 +61,11 @@ dependencies = [
 
 [[package]]
 name = "moddotplot-core"
-version = "1.0.2"
+version = "1.0.3"
 
 [[package]]
 name = "moddotplot-wasm"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "console_error_panic_hook",
  "moddotplot-core",

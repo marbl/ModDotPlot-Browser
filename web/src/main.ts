@@ -28,6 +28,7 @@ import {
   featureTrackRequests,
   type FeatureTrackMetadata,
   type FeatureTrackSelection,
+  type QuantitativeTrackHover,
 } from "./feature-track";
 import {
   DEFAULT_HEATMAP_COLOR_COUNT,
@@ -73,6 +74,7 @@ import {
 } from "./resource-plan";
 import type {
   ComparisonParameters,
+  FeatureTrackAxis,
   MainToWorkerMessage,
   RemoteFastaDownloadDescriptor,
   ScientificConfigMetadata,
@@ -1969,6 +1971,8 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   };
   featureTracks.setPlotHover(hoverCoordinates);
   importedTracks.setPlotHover(hoverCoordinates);
+  const featureNames = importedTracks.plotHoverFeatureNames();
+  const quantitativeValues = featureTracks.plotHoverValues();
   const identity = datum.identity === null
       ? "identity unavailable"
       : `identity ${datum.identity.toFixed(2)}%`;
@@ -1995,7 +1999,13 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   const lines = [
     Object.assign(document.createElement("strong"), { textContent: measurement }),
     Object.assign(document.createElement("span"), { textContent: xPosition }),
+    ...plotHoverAxisFeatureLines("x", featureNames.x, quantitativeValues.x),
+    Object.assign(document.createElement("span"), {
+      className: "hover-card-separator",
+      ariaHidden: "true",
+    }),
     Object.assign(document.createElement("span"), { textContent: yPosition }),
+    ...plotHoverAxisFeatureLines("y", featureNames.y, quantitativeValues.y),
   ];
   if (delta) {
     lines.push(Object.assign(document.createElement("small"), {
@@ -2003,7 +2013,15 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
     }));
   }
   hoverCard.replaceChildren(...lines);
-  plotSummary.textContent = `${measurement}; ${xPosition}; ${yPosition}.`;
+  const xFeatureSummary = plotHoverAxisFeatureText("x", featureNames.x, quantitativeValues.x);
+  const yFeatureSummary = plotHoverAxisFeatureText("y", featureNames.y, quantitativeValues.y);
+  plotSummary.textContent = `${[
+    measurement,
+    xPosition,
+    ...xFeatureSummary,
+    yPosition,
+    ...yFeatureSummary,
+  ].join("; ")}.`;
   hoverCard.hidden = false;
   const frame = hoverCard.parentElement?.getBoundingClientRect();
   if (frame) {
@@ -2012,6 +2030,33 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
     hoverCard.style.left = `${Math.min(maximumLeft, Math.max(8, event.clientX - frame.left + 14))}px`;
     hoverCard.style.top = `${Math.min(maximumTop, Math.max(8, event.clientY - frame.top + 14))}px`;
   }
+}
+
+function plotHoverAxisFeatureLines(
+  axis: FeatureTrackAxis,
+  names: readonly string[],
+  quantitative: readonly QuantitativeTrackHover[],
+): HTMLSpanElement[] {
+  return plotHoverAxisFeatureText(axis, names, quantitative).map((textContent) =>
+    Object.assign(document.createElement("span"), { textContent }));
+}
+
+function plotHoverAxisFeatureText(
+  axis: FeatureTrackAxis,
+  names: readonly string[],
+  quantitative: readonly QuantitativeTrackHover[],
+): string[] {
+  const featureNames = formatPlotHoverFeatureNames(names);
+  return [
+    featureNames ? `${axis} feature · ${featureNames}` : null,
+    ...quantitative.map(({ label, value }) => `${axis} ${label} · ${value}`),
+  ].filter((value): value is string => value !== null);
+}
+
+function formatPlotHoverFeatureNames(names: readonly string[]): string | null {
+  if (names.length === 0) return null;
+  const visible = names.slice(0, 3).join(", ");
+  return names.length > 3 ? `${visible} +${names.length - 3} more` : visible;
 }
 
 function formatSignedDistance(value: number): string {

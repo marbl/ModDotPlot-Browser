@@ -2,7 +2,7 @@
 
 > **Note:** This project was generated using ChatGPT 5.6 Sol (ie. vibe-coded) under the direction of Adam Phillippy and Alex Sweeten. For analyses intended for publication, please use the official [ModDotPlot CLI](https://github.com/marbl/ModDotPlot) and cite the [ModDotPlot paper](https://doi.org/10.1093/bioinformatics/btae493).
 
-This checklist applies to the v1.0.2 release. The browser remains intended for
+This checklist applies to the v1.0.3 release. The browser remains intended for
 exploratory use; analyses intended for publication should use the official ModDotPlot CLI.
 
 ## Source and identity
@@ -105,4 +105,4 @@ npm --prefix web run verify
 - [ ] Create and verify an annotated tag from a clean tree as the final source action.
 - [ ] Produce source/binary archives, checksums, provenance, release notes, and known
   limitations under the local ignored `release-artifacts/` directory.
-- [ ] Push the verified v1.0.2 release commit to the `main` branch.
+- [ ] Push the verified v1.0.3 release commit to the `main` branch.

@@ -7,6 +7,21 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-12
+
+### Added
+
+* Added intersecting imported annotation names to the main plot hover card, grouped
+  beneath their corresponding X or Y genomic coordinates.
+* Added selected GC% and CpG O/E values to the main plot hover card for both axes.
+
+### Changed
+
+* Large landing-page annotations are parsed initially for only the chromosomes in
+  the active plot and retained for on-demand parsing when other chromosomes are
+  selected, reducing startup work for whole-genome GFF/GTF files.
+* Reorganized plot hover details into distinct X and Y sections for faster reading.
+
 ## [1.0.2] - 2026-10-11
 
 ### Changed
@@ -788,7 +803,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.0...v1.0.1
 [0.9.8]: https://github.com/marbl/ModDotPlot-Browser/compare/v0.9.7...v0.9.8
