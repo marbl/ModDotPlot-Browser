@@ -19,8 +19,6 @@
 
 `ModDotPlot Browser` has been tested and works on current versions of Google Chrome, Microsoft Edge, Mozilla Firefox, and Safari. Web browsers must have WebAssembly, Web Workers, and WebGL2 enabled. Mobile browsers appear to be compatible, although navigating plots with touchscreen controls may be more challenging.
 
-There is no fixed input-size limit because files are processed locally rather than uploaded. The practical limit depends on available system memory and browser WebAssembly constraints. As a reference, the approximately 6 GB HG002 diploid human genome uses about 830 MB of browser memory at the default settings.
-
 ![](../web/public/tutorial_images/landing_page.png)
 
 To get started, simply drop one or more plain, gzip-compressed, or BGZF FASTA assembly files on the landing-page target, or use its file chooser. The same target also accepts optional BED, GFF3, or GTF annotations and automatically routes each file by type. BGZF is detected from its header even when the suffix is `.gz`. For indexed loading, include `sample.fa.fai` with `sample.fa`, or include both `sample.fa.gz.fai` and `sample.fa.gz.gzi` with a BGZF `sample.fa.gz`:
@@ -29,16 +27,13 @@ To get started, simply drop one or more plain, gzip-compressed, or BGZF FASTA as
 
 Alternatively, paste a direct HTTPS link ending in `.fa`, `.fasta`, `.fna`, or `.fas` (optionally followed by `.gz`) into **Insert URL** below the drop target and select **Load URL**. The browser streams the response directly through the same local parser and gzip decompressor used for selected files; it does not send the FASTA through the ModDotPlot Browser host. The remote server must permit cross-origin browser requests (CORS), and it can observe normal request metadata such as your IP address. Redirects are supported when every destination uses HTTPS.
 
-For URL imports, ModDotPlot automatically checks for standard companion indexes beside the assembly: `<fasta-url>.fai` for plain FASTA, or both `<fasta-url>.fai` and `<fasta-url>.gzi` for BGZF FASTA. When the host exposes those files and supports HTTP byte ranges, the sequence list opens from the small indexes and only the selected records are streamed on demand. This is strongly recommended for multi-gigabyte human assemblies. Without compatible indexes, URL loading falls back to streaming and parsing the complete file.
-
 ModDotPlot will index and validate the provided assembly or streamed URL and, upon completion, create an `Explore` button that launches the interactive browser. An annotation file selected with the assembly is matched against every loaded sequence after the first plot opens. Make sure annotation sequence identifiers match the corresponding FASTA headers.
 
 ![](../web/public/tutorial_images/explore.png)
 
 The following tutorial uses the *Arabidopsis thaliana* Col-CEN v1.2 genome assembly
 from [Naish *et al.* 2021](https://doi.org/10.1126/science.abi7489). Select the
-*Arabidopsis thaliana* example button to stream that FASTA from the
-[Schatz lab Col-CEN release](https://github.com/schatzlab/Col-CEN/tree/main/v1.2).
+*Arabidopsis thaliana* example button.
 
 ![](../web/public/tutorial_images/self-similarity_level1.png)
 
@@ -140,12 +135,10 @@ Select `Export image` to save a high-quality rendering of the current interactiv
 
 As a reminder, ***this browser is meant for exploratory analysis only!*** Once you have styled a plot to your liking, select `Export ModDotPlot config` to download `moddotplot_config.json` for use in the [ModDotPlot CLI](https://github.com/marbl/ModDotPlot). The config records browser display settings only; add the original FASTA inputs when running it with the CLI.
 
-![](../web/public/tutorial_images/export_mdp.png)
-
 The exported config can then be run with the official ModDotPlot CLI after adding
 the original input paths required for the analysis:
 ```bash
-moddotplot -c moddotplot_config.json -f fasta(s).fa
+moddotplot -c moddotplot_config.json -f input_fasta(s).fa
 ```
 
 ![](../web/public/tutorial_images/Chr1_TRI.png)
@@ -155,5 +148,5 @@ For a Grid plot, use the same config with the CLI's grid-only mode and appropria
 input paths:
 
 ```bash
-moddotplot --grid-only -c moddotplot_config.json <input options>
+moddotplot --grid-only -c moddotplot_config.json input_fasta(s).fa
 ```
