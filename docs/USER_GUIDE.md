@@ -4,14 +4,16 @@
 
 ## Table of contents
 
-- [Getting started](#getting-started)
-- [Plot Navigation](#plot-navigation)
-  - [Self Plot](#self-plot)
-  - [Pairwise Plot](#pairwise-plot)
-  - [Grid Plot](#grid-plot)
-- [Plot Resolution](#plot-resolution)
-- [Plot Customization](#plot-customization)
-- [Exporting Data to ModDotPlot CLI](#exporting-data-to-moddotplot-cli)
+- [ModDotPlot Browser User Guide \& Tutorial](#moddotplot-browser-user-guide--tutorial)
+  - [Table of contents](#table-of-contents)
+  - [Getting started](#getting-started)
+  - [Plot Navigation](#plot-navigation)
+    - [Self Plot](#self-plot)
+    - [Pairwise Plot](#pairwise-plot)
+    - [Grid plot](#grid-plot)
+  - [Plot Resolution](#plot-resolution)
+  - [Plot Customization](#plot-customization)
+  - [Exporting a config for ModDotPlot CLI](#exporting-a-config-for-moddotplot-cli)
 
 ## Getting started
 
@@ -55,6 +57,8 @@ Zooming is limited to a minimum visible interval of approximately 100 bp on each
 Hovering over a plot displays the X and Y sequence names, genomic intervals, and estimated identity for the cell beneath the pointer. Cursor guide lines can be configured or disabled in `Advanced options`.
 
 Press `R` while hovering over an interactive plot to anchor a cross ruler at the current position. Subsequent hover readouts show signed X and Y genomic distances from that anchor, which is useful for measuring arrays, duplications, and other structures. Press `R` again to remove the ruler and restore absolute coordinates.
+
+![](../web/public/tutorial_images/ruler.png)
 
 `ModDotPlot Browser` supports three plot modes when multiple sequences are available:
 
@@ -134,14 +138,14 @@ Select `Export image` to save a high-quality rendering of the current interactiv
 
 ## Exporting a config for ModDotPlot CLI
 
-As a reminder, ***this browser is meant for exploratory analysis only!*** Once you have styled a plot to your liking, select `Export ModDotPlot config` to download `moddotplot_config.json` for use in the [ModDotPlot CLI](https://github.com/marbl/ModDotPlot). The config records browser display settings only; add the original FASTA or BEDPE inputs when running it with the CLI.
+As a reminder, ***this browser is meant for exploratory analysis only!*** Once you have styled a plot to your liking, select `Export ModDotPlot config` to download `moddotplot_config.json` for use in the [ModDotPlot CLI](https://github.com/marbl/ModDotPlot). The config records browser display settings only; add the original FASTA inputs when running it with the CLI.
 
 ![](../web/public/tutorial_images/export_mdp.png)
 
 The exported config can then be run with the official ModDotPlot CLI after adding
 the original input paths required for the analysis:
 ```bash
-moddotplot -c moddotplot_config.json <input options>
+moddotplot -c moddotplot_config.json -f fasta(s).fa
 ```
 
 ![](../web/public/tutorial_images/Chr1_TRI.png)

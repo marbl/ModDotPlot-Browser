@@ -5,7 +5,6 @@ import type { ViewportState } from "./viewport";
 
 export interface ModDotPlotConfigContext {
   appVersion: string;
-  baseName: string;
   plotMode: PlotMode;
   sequences: readonly SequenceMetadata[];
   gridSequenceIndices: readonly number[];
@@ -25,7 +24,6 @@ export interface ModDotPlotCliConfig {
   region?: string[];
   kmer: number;
   window: number;
-  modimizer: number;
   identity: number;
   delta: number;
   output_dir: string;
@@ -64,7 +62,6 @@ export function createModDotPlotCliConfig(context: ModDotPlotConfigContext): Mod
   // The official CLI rejects windows below 10 bp. Keep the file runnable while recording
   // the browser's exact requested cell size in the metadata block.
   const window = Math.max(10, context.parameters.k, requestedWindow);
-  const outputBase = safePathPart(context.baseName) || "moddotplot-browser";
   const regions = context.plotMode === "grid"
     ? undefined
     : visibleRegions(context);
@@ -74,10 +71,9 @@ export function createModDotPlotCliConfig(context: ModDotPlotConfigContext): Mod
     ...(regions && regions.length > 0 ? { region: regions } : {}),
     kmer: context.parameters.k,
     window,
-    modimizer: Math.max(1, Math.min(window, context.parameters.detailedRegisterCount)),
     identity: cleanNumber(context.heatmapRange.minimum),
     delta: 0.5,
-    output_dir: `${outputBase}-moddotplot-cli`,
+    output_dir: outputDirectory(selected, regions),
     compare: false,
     compare_only: context.plotMode === "pairwise",
     compare_order: "sequential",
@@ -192,11 +188,18 @@ function intervalForAxis(
 }
 
 function officialPaletteName(palette: string, colorCount: number): string {
-  return palette === "Viridis" ? "Spectral_11" : `${palette}_${colorCount}`;
+  return palette === "Viridis" ? palette : `${palette}_${colorCount}`;
 }
 
-function safePathPart(value: string): string {
-  return value.trim().replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
+function outputDirectory(
+  sequences: readonly SequenceMetadata[],
+  regions: readonly string[] | undefined,
+): string {
+  const parts = (regions && regions.length > 0 ? regions : sequences.map((sequence) => sequence.name))
+    .map((value) => value.replace(":", "_").trim().toLowerCase())
+    .map((value) => value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, ""))
+    .filter((value) => value.length > 0);
+  return parts.join("-vs-") || "moddotplot";
 }
 
 function cleanNumber(value: number): number {
