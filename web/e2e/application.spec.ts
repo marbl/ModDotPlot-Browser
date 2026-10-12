@@ -4,25 +4,6 @@ import { gzipSync } from "node:zlib";
 
 const shortFasta = ">chrShort\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
 
-function readStoredZip(buffer: Buffer): Map<string, Buffer> {
-  const entries = new Map<string, Buffer>();
-  let offset = 0;
-  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
-    const method = buffer.readUInt16LE(offset + 8);
-    if (method !== 0) throw new Error(`Unexpected ZIP compression method ${method}`);
-    const size = buffer.readUInt32LE(offset + 18);
-    const nameLength = buffer.readUInt16LE(offset + 26);
-    const extraLength = buffer.readUInt16LE(offset + 28);
-    const nameStart = offset + 30;
-    const dataStart = nameStart + nameLength + extraLength;
-    const name = buffer.subarray(nameStart, nameStart + nameLength).toString("utf8");
-    entries.set(name, buffer.subarray(dataStart, dataStart + size));
-    offset = dataStart + size;
-  }
-  if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error("ZIP central directory is missing");
-  return entries;
-}
-
 function deterministicDna(length: number, seed = 17): string {
   let state = seed;
   return Array.from({ length }, () => {
@@ -104,10 +85,10 @@ async function canvasPaintBounds(canvas: Locator): Promise<CanvasPaintBounds> {
     for (let y = 0; y < element.height; y += 1) {
       for (let x = 0; x < element.width; x += 1) {
         const offset = (y * element.width + x) * 4;
-        const distanceFromWhite = Math.abs((pixels[offset] ?? 255) - 255)
-          + Math.abs((pixels[offset + 1] ?? 255) - 255)
-          + Math.abs((pixels[offset + 2] ?? 255) - 255);
-        if (distanceFromWhite <= 12) continue;
+        const distanceFromBackground = Math.abs((pixels[offset] ?? 5) - 5)
+          + Math.abs((pixels[offset + 1] ?? 5) - 5)
+          + Math.abs((pixels[offset + 2] ?? 6) - 6);
+        if (distanceFromBackground <= 12) continue;
         minimumX = Math.min(minimumX, x);
         minimumY = Math.min(minimumY, y);
         maximumX = Math.max(maximumX, x);
@@ -194,13 +175,19 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#landing .landing-logo-heading")).toHaveCSS("width", "575px");
   await expect(page.locator("#landing-version")).toHaveText(/^v\d/);
   await expect(page.locator(".landing-notes")).toHaveCount(0);
-  await expect(page.locator("#drop-title")).toHaveText("Drop FASTA files here");
+  await expect(page.locator("#drop-title")).toHaveText("Drop FASTA and annotation files here");
   await expect(page.locator(".drop-detail")).toHaveText(
-    "or click to choose files · FASTA, gzip, and BGZF optional fai/gzi indices (faster loading)",
+    "or click to choose · FASTA, BED, GFF3, or GTF gzip/BGZF supported · optional fai/gzi indices for FASTA",
   );
-  await expect(page.locator(".annotation-drop-title")).toHaveText("Drop annotation files here");
-  await expect(page.locator(".annotation-drop-detail")).toContainText("BED, GFF3, or GTF");
-  await expect(page.locator("#annotation-drop-zone")).toBeVisible();
+  await expect(page.locator("#annotation-drop-zone")).toHaveCount(0);
+  await expect(page.locator("#remote-fasta-form")).toBeVisible();
+  await expect(page.locator("#remote-fasta-url")).toHaveAttribute(
+    "placeholder",
+    "https://example.org/assembly.fasta.gz",
+  );
+  await expect(page.locator("#remote-fasta-submit")).toHaveText("Load URL");
+  await expect(page.locator("#remote-fasta-add")).toHaveAccessibleName("Add another genome URL");
+  await expect(page.locator(".remote-fasta-url")).toHaveCount(1);
   await expect(page.locator("#explore-button")).toBeHidden();
   await expect(page.locator("#example-button")).toHaveText(
     "Try ModDotPlot on an Arabidopsis thaliana genome",
@@ -214,7 +201,7 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(tutorialLink).toContainText("Browser Tutorial");
   await expect(page.locator(".github-link .github-icon")).toHaveCount(2);
   await expect(page.locator(".publication-warning")).toHaveText(
-    "This web application uses WebAssembly to run ModDotPlot locally in your browser. Your files stay on your device and are not uploaded to a server. If you use ModDotPlot in your research, please cite our ModDotPlot paper. For analyses intended for publication, please use the official ModDotPlot CLI.",
+    "This web application uses WebAssembly to run ModDotPlot locally in your browser. Local files stay on your device and are not uploaded to a server. URL imports are fetched directly from the remote host. If you use ModDotPlot in your research, please cite our ModDotPlot paper. For analyses intended for publication, please use the official ModDotPlot CLI.",
   );
   await expect(page.locator('.publication-warning a[href="https://doi.org/10.1093/bioinformatics/btae493"]')).toHaveText("ModDotPlot paper");
   await expect(page.locator('.publication-warning a[href="https://github.com/marbl/moddotplot"]')).toHaveText("ModDotPlot CLI");
@@ -240,9 +227,8 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#plot-canvas")).toBeVisible();
   await expect(page.locator("#plot-loading")).toBeHidden();
-  await expect(page.locator("#exact-mode-controls")).toBeVisible();
-  await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('[data-exact-view="identity"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#exact-mode-controls")).toHaveCount(0);
+  await expect(page.locator("[data-exact-view]")).toHaveCount(0);
   await expect(page.locator("[data-exact-geometry]")).toHaveCount(0);
   await expect(page.locator("#show-direction")).toHaveCount(0);
   await expect(page.locator("#exact-mode-banner")).toHaveText(
@@ -252,9 +238,6 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#exact-base-legend")).toBeVisible();
   await expect(page.locator("#exact-base-legend strong")).toHaveText("Base");
 
-  await page.locator('[data-exact-view="identity"]').click();
-  await expect(page.locator("#exact-base-legend")).toBeHidden();
-  await expect(page.locator("#exact-mode-banner")).toContainText("color = identity");
   await page.locator('[data-color-mode="direction"]').click();
   await expect(page.locator('[data-color-mode="direction"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#exact-base-legend")).toBeHidden();
@@ -342,119 +325,54 @@ test("Clear restores Bases with similarity coloring for a new exact session", as
 
   await expect(page.locator('[data-color-mode="similarity"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator('[data-color-mode="direction"]')).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-exact-view]")).toHaveCount(0);
   await expect(page.locator("#exact-mode-banner")).toContainText("color = Base");
   await expect(page.locator("#exact-base-legend")).toBeVisible();
 });
 
-test("the bundled Arabidopsis overview reaches Ready before FASTA or annotations", async ({ page }) => {
-  const examplesDirectory = new URL("../public/examples/", import.meta.url);
-  const exampleFai = await readFile(new URL("Col-CEN_v1.2.fasta.fai", examplesDirectory));
-  const exampleGff = await readFile(new URL("ColCEN_CEN180.gff3", examplesDirectory));
-  const requestedAssets: string[] = [];
-  const fastaRequests: Array<{ range: string | null }> = [];
-  let releaseAnnotation = (): void => undefined;
-  const annotationGate = new Promise<void>((resolve) => {
-    releaseAnnotation = resolve;
+test("the Arabidopsis example button streams the online Col-CEN FASTA", async ({ page }) => {
+  const requestedUrl = "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const normalizedUrl = "https://raw.githubusercontent.com/schatzlab/Col-CEN/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const remoteFasta = bgzfBlock([
+    `>Chr1 online example\n${deterministicDna(96, 31)}`,
+    `>Chr2\n${deterministicDna(80, 37)}`,
+  ].join("\n"));
+  const cachedAssetRequests: string[] = [];
+  let remoteRequestSeen = false;
+  page.on("request", (request) => {
+    if (request.url().includes("/examples/")) cachedAssetRequests.push(request.url());
   });
-
-  await page.route(/\/examples\/Col-CEN_v1\.2\.fasta$/, async (route) => {
-    requestedAssets.push("fasta");
-    const range = route.request().headers().range ?? null;
-    fastaRequests.push({ range });
-    if (!range) {
-      await route.abort("blockedbyclient");
-      return;
-    }
-    await route.continue();
+  await page.route(`${normalizedUrl}.fai`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
   });
-  await page.route(/\/examples\/Col-CEN_v1\.2\.fasta\.fai$/, async (route) => {
-    requestedAssets.push("fai");
-    await route.fulfill({ status: 200, contentType: "text/plain", body: exampleFai });
+  await page.route(`${normalizedUrl}.gzi`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
   });
-  await page.route(/\/examples\/Col-CEN_v1\.2\.Chr1\.mdp-overview-v1\.gz$/, async (route) => {
-    requestedAssets.push("overview");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await route.continue();
-  });
-  await page.route(/\/examples\/Col-CEN_v1\.2\.Chr1\.(?:2000|4000)\.mdp-overview-v1\.gz$/, async (route) => {
-    requestedAssets.push(route.request().url().includes(".2000.") ? "overview-2000" : "overview-4000");
-    await route.continue();
-  });
-  await page.route(/\/examples\/ColCEN_CEN180\.gff3$/, async (route) => {
-    requestedAssets.push("gff3");
-    await annotationGate;
-    await route.fulfill({ status: 200, contentType: "text/plain", body: exampleGff });
+  await page.route(normalizedUrl, async (route) => {
+    remoteRequestSeen = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/octet-stream",
+      headers: {
+        "access-control-allow-origin": "*",
+        "content-length": String(remoteFasta.byteLength),
+      },
+      body: remoteFasta,
+    });
   });
 
   await page.goto("/");
   await page.locator("#example-button").click();
+
+  await expect(page.locator("#remote-fasta-url")).toHaveValue(requestedUrl);
   await expect(page.locator("#workspace")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator("#landing")).toBeHidden();
-  await expect(page.locator("#self-sequence option")).toHaveCount(7);
-  await expect(page.locator("#self-sequence option").first())
-    .toHaveText("Chr1_Col-CEN_v1.2 · 32.5 Mb");
-  await expect(page.locator("#self-sequence")).toHaveValue("0");
-  await expect(page.locator("#fasta-selection")).toContainText("Col-CEN_v1.2.fasta");
-  await expect(page.locator("#fasta-selection")).toContainText("ready to explore");
-  await expect(page.locator("#annotation-selection")).toContainText("Loading included CEN180");
-  await expect(page.locator("#status")).toHaveText(
-    /^Ready · (?:precomputed|bundled overview cached)$/u,
-    {
-      timeout: 15_000,
-    },
-  );
-  await expect(page.locator("#plot-loading")).toBeHidden();
-  await expect(page.locator("#export-data")).toBeEnabled();
-  await expect(page.locator("#export-image")).toBeEnabled();
-  expect(requestedAssets).toContain("fai");
-  expect(requestedAssets).toContain("overview");
-  expect(requestedAssets).toContain("gff3");
-  expect(fastaRequests).toEqual([]);
-
-  const summary = await hoverPlotCenter(page);
-  expect(summary).toMatch(/identity 100\.00%/u);
-  expect(summary).toMatch(/x Chr1 ·/u);
-  expect(summary).toMatch(/y Chr1 ·/u);
-  await expect.poll(() => page.locator("#identity-histogram").evaluate((canvas: HTMLCanvasElement) => {
-    const pixels = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
-    return pixels?.filter((channel, index) => index % 4 === 3 && channel !== 0).length ?? 0;
-  })).toBeGreaterThan(0);
-
-  await expect.poll(() => requestedAssets.filter((asset) => asset.startsWith("overview-")).sort())
-    .toEqual(["overview-2000", "overview-4000"]);
-  await expect(page.locator("body")).toHaveAttribute("data-bundled-detail-cache", "ready", {
-    timeout: 15_000,
-  });
-  const plotCanvas = page.locator("#plot-canvas");
-  await plotCanvas.focus();
-  await page.keyboard.press("+");
-  await expect(page.locator("#status")).toHaveText("Ready · bundled overview cached", {
-    timeout: 15_000,
-  });
-  expect(fastaRequests).toEqual([]);
-  await page.keyboard.press("Home");
-  await expect(page.locator("#status")).toHaveText("Ready · bundled overview cached", {
-    timeout: 15_000,
-  });
-
-  const firstRangeResponse = page.waitForResponse((response) => (
-    response.url().endsWith("/examples/Col-CEN_v1.2.fasta")
-    && response.request().headers().range !== undefined
-    && response.status() === 206
-  ), { timeout: 20_000 });
-  await page.locator("#self-sequence").selectOption("1");
-  const rangeResponse = await firstRangeResponse;
-  expect(rangeResponse.request().headers().range).toMatch(/^bytes=\d+-\d+$/u);
-  expect(await rangeResponse.headerValue("content-range"))
-    .toMatch(/^bytes \d+-\d+\/134282475$/u);
-  expect(fastaRequests.length).toBeGreaterThan(0);
-  expect(fastaRequests.every(({ range }) => /^bytes=\d+-\d+$/u.test(range ?? ""))).toBe(true);
-
-  releaseAnnotation();
-  await expect(page.locator("#annotation-selection")).toHaveText("ColCEN_CEN180.gff3 loaded", {
-    timeout: 15_000,
-  });
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  await expect(page.locator("#self-sequence option").first()).toContainText("Chr1");
+  await expect(page.locator("#fasta-selection")).toHaveText("Col-CEN_v1.2.fasta.gz ready to explore");
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  expect(remoteRequestSeen).toBe(true);
+  expect(cachedAssetRequests).toEqual([]);
 });
 
 test("cursor guides follow the pointer and advanced controls change their appearance", async ({ page }) => {
@@ -528,27 +446,273 @@ test("cursor guides follow the pointer and advanced controls change their appear
     .toBe(prepareMessages);
 });
 
-test("landing annotations stay staged until Explore opens the workspace", async ({ page }) => {
+test("R toggles a fixed ruler and hover readouts switch to relative distances", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#annotation-file-input").setInputFiles({
-    name: "landing.bed",
-    mimeType: "text/plain",
-    buffer: Buffer.from([
-      "track name=landing-track",
-      "first\t1\t20\tfirst staged feature",
-      "second\t2\t18\tsecond staged feature",
-    ].join("\n")),
+  await loadFasta(page, "ruler.fa", `>ruler\n${deterministicDna(8_000, 13)}\n`);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
+  const bounds = await page.locator("#plot-canvas").boundingBox();
+  if (!bounds) throw new Error("plot canvas has no bounds");
+
+  await page.mouse.move(bounds.x + bounds.width * 0.3, bounds.y + bounds.height * 0.65);
+  await expect(page.locator("#hover-card")).toContainText("x ruler");
+  await page.keyboard.press("r");
+  await expect(page.locator("#ruler-marker")).toBeVisible();
+  const anchorPosition = await page.locator("#ruler-marker").evaluate((element) => ({
+    x: (element as HTMLElement).style.getPropertyValue("--ruler-x"),
+    y: (element as HTMLElement).style.getPropertyValue("--ruler-y"),
+  }));
+
+  await page.mouse.move(bounds.x + bounds.width * 0.7, bounds.y + bounds.height * 0.25);
+  await expect(page.locator("#hover-card")).toContainText("Δx ruler");
+  await expect(page.locator("#hover-card")).toContainText("Δy ruler");
+  await expect(page.locator("#hover-card")).toContainText("Ruler active");
+  await expect.poll(() => page.locator("#ruler-marker").evaluate((element) => ({
+    x: (element as HTMLElement).style.getPropertyValue("--ruler-x"),
+    y: (element as HTMLElement).style.getPropertyValue("--ruler-y"),
+  }))).toEqual(anchorPosition);
+
+  await page.keyboard.press("R");
+  await expect(page.locator("#ruler-marker")).toBeHidden();
+  await expect(page.locator("#hover-card")).toContainText("x ruler");
+  await expect(page.locator("#hover-card")).not.toContainText("Δx");
+});
+
+test("the supplied Col-CEN FASTA.gz URL streams into the landing workflow", async ({ page }) => {
+  const requestedUrl = "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const normalizedUrl = "https://raw.githubusercontent.com/schatzlab/Col-CEN/main/v1.2/Col-CEN_v1.2.fasta.gz";
+  const remoteFasta = bgzfBlock([
+    `>Chr1 remote Col-CEN test\n${deterministicDna(96, 11)}`,
+    `>Chr2\n${deterministicDna(80, 13)}`,
+  ].join("\n"));
+  let remoteRequestSeen = false;
+  await page.route(`${normalizedUrl}.fai`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
+  });
+  await page.route(`${normalizedUrl}.gzi`, async (route) => {
+    await route.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" } });
+  });
+  await page.route(normalizedUrl, async (route) => {
+    remoteRequestSeen = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/octet-stream",
+      headers: {
+        "access-control-allow-origin": "*",
+        "content-length": String(remoteFasta.byteLength),
+      },
+      body: remoteFasta,
+    });
   });
 
-  await expect(page.locator("#annotation-selection")).toHaveText("landing.bed selected");
-  await expect(page.locator("#annotation-drop-zone")).toHaveClass(/has-selection/);
-  await expect(page.locator("#explore-button")).toBeHidden();
-  await expect(page.locator("#workspace")).toBeHidden();
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(requestedUrl);
+  await page.locator("#remote-fasta-submit").click();
 
-  await stageFasta(page, "multi.fa", [
-    `>first\n${deterministicDna(64, 3)}`,
-    `>second\n${deterministicDna(64, 7)}`,
-  ].join("\n"));
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "Col-CEN_v1.2.fasta.gz ready to explore",
+    { timeout: 20_000 },
+  );
+  expect(remoteRequestSeen).toBe(true);
+  await expect(page.locator("#remote-fasta-submit")).toBeEnabled();
+  await expect(page.locator("#explore-button")).toBeVisible();
+  await exploreStagedFasta(page);
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  await expect(page.locator("#self-sequence option").first()).toContainText("Chr1");
+});
+
+test("additional URL fields load several remote genomes into one workspace", async ({ page }) => {
+  const sources = [
+    {
+      url: "https://data.example/genome-a.fa",
+      fasta: `>genomeA\n${deterministicDna(96, 17)}\n`,
+    },
+    {
+      url: "https://data.example/genome-b.fa",
+      fasta: `>genomeB\n${deterministicDna(80, 19)}\n`,
+    },
+  ];
+  for (const source of sources) {
+    await page.route(source.url, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: {
+          "access-control-allow-origin": "*",
+          "content-length": String(Buffer.byteLength(source.fasta)),
+        },
+        body: source.fasta,
+      });
+    });
+  }
+
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(sources[0]!.url);
+  await page.locator("#remote-fasta-add").click();
+  await expect(page.locator(".remote-fasta-url")).toHaveCount(2);
+  await expect(page.locator("#remote-fasta-submit")).toHaveText("Load URLs");
+  await page.locator(".remote-fasta-url").nth(1).fill(sources[1]!.url);
+  await page.locator("#remote-fasta-submit").click();
+
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "genome-a.fa, genome-b.fa ready to explore",
+    { timeout: 20_000 },
+  );
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  await expect(page.locator("#self-sequence option").first()).toContainText("genomeA");
+  await expect(page.locator("#self-sequence option").nth(1)).toContainText("genomeB");
+  await exploreStagedFasta(page);
+  await expect(page.locator("#x-sequence option")).toHaveCount(2);
+  await expect(page.locator("#y-sequence option")).toHaveCount(2);
+});
+
+test("remote FAI and GZI companions avoid an eager full FASTA download", async ({ page }) => {
+  const fastaUrl = "https://data.example/hg002-test.fasta.gz";
+  const first = deterministicDna(1_024, 71);
+  const second = deterministicDna(768, 89);
+  const firstHeader = ">remoteOne\n";
+  const secondHeader = ">remoteTwo\n";
+  const firstRecord = `${firstHeader}${first}\n`;
+  const secondRecord = `${secondHeader}${second}\n`;
+  const firstBlock = bgzfBlock(firstRecord);
+  const secondBlock = bgzfBlock(secondRecord);
+  const bgzf = Buffer.concat([firstBlock, secondBlock]);
+  const fai = [
+    `remoteOne\t${first.length}\t${Buffer.byteLength(firstHeader)}\t${first.length}\t${first.length + 1}`,
+    `remoteTwo\t${second.length}\t${Buffer.byteLength(firstRecord) + Buffer.byteLength(secondHeader)}\t${second.length}\t${second.length + 1}`,
+    "",
+  ].join("\n");
+  const gzi = gziBuffer([{
+    compressed: firstBlock.byteLength,
+    uncompressed: Buffer.byteLength(firstRecord),
+  }]);
+  const requestedRanges: string[] = [];
+  let fullRequestSeen = false;
+  await page.route(`${fastaUrl}.fai`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      body: fai,
+      headers: { "access-control-allow-origin": "*", "content-length": String(Buffer.byteLength(fai)) },
+    });
+  });
+  await page.route(`${fastaUrl}.gzi`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      body: gzi,
+      headers: { "access-control-allow-origin": "*", "content-length": String(gzi.byteLength) },
+    });
+  });
+  await page.route(fastaUrl, async (route) => {
+    const range = route.request().headers()["range"];
+    if (!range) {
+      fullRequestSeen = true;
+      await route.fulfill({ status: 200, body: bgzf, headers: { "access-control-allow-origin": "*" } });
+      return;
+    }
+    requestedRanges.push(range);
+    const match = /^bytes=(\d+)-(\d+)$/u.exec(range);
+    if (!match) throw new Error(`Unexpected range ${range}`);
+    const start = Number(match[1]);
+    const end = Math.min(Number(match[2]), bgzf.byteLength - 1);
+    const body = bgzf.subarray(start, end + 1);
+    await route.fulfill({
+      status: 206,
+      body,
+      headers: {
+        "accept-ranges": "bytes",
+        "access-control-allow-origin": "*",
+        "access-control-expose-headers": "Content-Range, Content-Length, Accept-Ranges",
+        "content-length": String(body.byteLength),
+        "content-range": `bytes ${start}-${end}/${bgzf.byteLength}`,
+        etag: '"indexed-fixture"',
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(fastaUrl);
+  await page.locator("#remote-fasta-submit").click();
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "hg002-test.fasta.gz ready to explore",
+    { timeout: 20_000 },
+  );
+  await expect(page.locator("#self-sequence option")).toHaveCount(2);
+  expect(fullRequestSeen).toBe(false);
+  expect(requestedRanges).toContain("bytes=0-1");
+  await exploreStagedFasta(page);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 20_000 });
+  expect(fullRequestSeen).toBe(false);
+});
+
+test("live Col-CEN GitHub URL normalizes and loads the real BGZF assembly", async ({ page, browserName }) => {
+  test.setTimeout(150_000);
+  test.skip(
+    process.env.MODDOTPLOT_REMOTE_FASTA_LIVE !== "1" || browserName !== "chromium",
+    "opt-in network regression for the upstream Col-CEN archive",
+  );
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(
+    "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz",
+  );
+  await page.locator("#remote-fasta-submit").click();
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "Col-CEN_v1.2.fasta.gz ready to explore",
+    { timeout: 120_000 },
+  );
+  await exploreStagedFasta(page);
+  await expect(page.locator("#self-sequence option", { hasText: "Chr1" })).toHaveCount(1);
+});
+
+test("live HG002 URL opens from remote indexes without a full assembly request", async ({ page, browserName }) => {
+  test.setTimeout(90_000);
+  test.skip(
+    process.env.MODDOTPLOT_HG002_LIVE !== "1" || browserName !== "chromium",
+    "opt-in network regression for the indexed upstream HG002 assembly",
+  );
+  const fastaUrl = "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/HG002/assemblies/hg002v1.2.fasta.gz";
+  const fastaRequests: Array<string | undefined> = [];
+  page.on("request", (request) => {
+    if (request.url() === fastaUrl) fastaRequests.push(request.headers()["range"]);
+  });
+
+  await page.goto("/");
+  await page.locator("#remote-fasta-url").fill(fastaUrl);
+  await page.locator("#remote-fasta-submit").click();
+  await expect(page.locator("#fasta-selection")).toHaveText(
+    "hg002v1.2.fasta.gz ready to explore",
+    { timeout: 60_000 },
+  );
+  expect(await page.locator("#self-sequence option").count()).toBeGreaterThan(20);
+  expect(fastaRequests).toContain("bytes=0-1");
+  expect(fastaRequests).not.toContain(undefined);
+});
+
+test("the merged landing drop stages FASTA and annotations until Explore opens the workspace", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#file-input").setInputFiles([
+    {
+      name: "landing.bed",
+      mimeType: "text/plain",
+      buffer: Buffer.from([
+        "track name=landing-track",
+        "first\t1\t20\tfirst staged feature",
+        "second\t2\t18\tsecond staged feature",
+      ].join("\n")),
+    },
+    {
+      name: "multi.fa",
+      mimeType: "text/plain",
+      buffer: Buffer.from([
+        `>first\n${deterministicDna(64, 3)}`,
+        `>second\n${deterministicDna(64, 7)}`,
+      ].join("\n")),
+    },
+  ]);
+
+  await expect(page.locator("#annotation-selection")).toHaveText("landing.bed selected");
+  await expect(page.locator("#drop-zone")).toHaveClass(/has-selection/);
+  await expect(page.locator("#fasta-selection")).toContainText("ready to explore", { timeout: 15_000 });
+  await expect(page.locator("#explore-button")).toBeVisible();
+  await expect(page.locator("#workspace")).toBeHidden();
   await expect(page.locator("#annotation-selection")).toHaveText("landing.bed selected");
   await expect(page.locator(".imported-track-control")).toHaveCount(0);
   await exploreStagedFasta(page);
@@ -559,7 +723,7 @@ test("landing annotations stay staged until Explore opens the workspace", async 
   await expect(stagedTrack.locator('input[id$="-both"]')).toBeChecked();
 });
 
-test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions", async ({ page, browserName }) => {
+test("Save As exports one ModDotPlot config and complete PNG/SVG/PDF compositions", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "download payload inspection runs on the Chromium channels");
   await page.addInitScript(() => {
     type SaveHarness = Window & {
@@ -613,13 +777,13 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#export-data-format")).toHaveCount(0);
   await expect(page.locator("#export-image-format")).toHaveCount(0);
-  await expect(page.locator("#export-data")).toHaveText("Export ModDotPlot command");
-  await expect(page.locator("#heatmap-palette")).toHaveValue("Spectral");
-  await expect(page.locator("#heatmap-color-count")).toHaveValue("11");
+  await expect(page.locator("#export-data")).toHaveText("Export ModDotPlot config");
+  await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
+  await expect(page.locator("#heatmap-color-count")).toHaveValue("12");
   await expect(page.locator("#heatmap-color-count")).toHaveAttribute("min", "3");
-  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "11");
-  await expect(page.locator('[data-background-mode="white"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "12");
+  await expect(page.locator('[data-background-mode="white"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "true");
 
   const exportImageFit = await page.locator("#export-image").evaluate((button) => ({
     clientWidth: button.clientWidth,
@@ -630,48 +794,35 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   expect(exportImageFit.scrollWidth).toBeLessThanOrEqual(exportImageFit.clientWidth);
   expect(exportImageFit.scrollHeight).toBeLessThanOrEqual(exportImageFit.clientHeight);
 
-  const commandDownload = page.waitForEvent("download");
+  const configDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
-  const commandArtifact = await commandDownload;
-  expect(commandArtifact.suggestedFilename()).toBe(
-    "moddotplot-chrShort_short-vs-chrShort_short.zip",
-  );
-  const commandPath = await commandArtifact.path();
-  if (!commandPath) throw new Error("ModDotPlot command ZIP has no temporary path");
-  const commandEntries = readStoredZip(await readFile(commandPath));
-  expect([...commandEntries.keys()]).toEqual([
-    "moddotplot-chrShort_short-vs-chrShort_short.bedpe",
-    "moddotplot-chrShort_short-vs-chrShort_short.config.json",
-  ]);
-  const bedpe = commandEntries.get("moddotplot-chrShort_short-vs-chrShort_short.bedpe")?.toString("utf8");
-  if (!bedpe) throw new Error("ModDotPlot command ZIP has no BEDPE entry");
-  expect(bedpe).toContain("# provenance=");
-  expect(bedpe).toContain("exact complete distinct canonical k-mer-set containment");
-  expect(bedpe).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
-  expect(bedpe).not.toContain("quality\tconfig_digest");
+  const configArtifact = await configDownload;
+  expect(configArtifact.suggestedFilename()).toBe("moddotplot_config.json");
+  const configPath = await configArtifact.path();
+  if (!configPath) throw new Error("ModDotPlot config has no temporary path");
   const saveOptions = await page.evaluate(() =>
     (window as unknown as { __saveOptions?: { startIn?: string; types?: unknown[] } }).__saveOptions);
   expect(saveOptions?.startIn).toBe("downloads");
   expect(saveOptions?.types).toHaveLength(1);
-  const configEntry = commandEntries.get("moddotplot-chrShort_short-vs-chrShort_short.config.json");
-  if (!configEntry) throw new Error("ModDotPlot command ZIP has no config entry");
-  const cliConfig = JSON.parse(configEntry.toString("utf8"));
+  const cliConfig = JSON.parse((await readFile(configPath)).toString("utf8"));
   expect(cliConfig).toMatchObject({
-    load: ["./moddotplot-chrShort_short-vs-chrShort_short.bedpe"],
     sequence: ["chrShort"],
     kmer: 21,
     compare_only: false,
     grid_only: false,
-    palette: "Spectral_11",
+    palette: "Viridis",
+    output_dir: "chrshort",
     colors: expect.any(Array),
     breakpoints: expect.any(Array),
     _moddotplot_browser: {
-      command: "moddotplot -c moddotplot-chrShort_short-vs-chrShort_short.config.json -l moddotplot-chrShort_short-vs-chrShort_short.bedpe",
+      command: "moddotplot -c moddotplot_config.json",
     },
   });
+  expect(cliConfig).not.toHaveProperty("load");
   expect(cliConfig).not.toHaveProperty("fasta");
-  expect(cliConfig.colors).toHaveLength(11);
-  expect(cliConfig.breakpoints).toHaveLength(12);
+  expect(cliConfig).not.toHaveProperty("modimizer");
+  expect(cliConfig.colors).toHaveLength(12);
+  expect(cliConfig.breakpoints).toHaveLength(13);
   expect(cliConfig.identity).toBe(cliConfig.breakpoints[0]);
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
 
@@ -814,12 +965,12 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
       expect(bytes.includes(Buffer.from("GC%"))).toBe(true);
       expect(bytes.includes(Buffer.from("CpG O/E"))).toBe(true);
       expect(bytes.includes(Buffer.from("ANI_c"))).toBe(true);
-      expect(bytes.includes(Buffer.from("Viridis"))).toBe(false);
+      expect(bytes.includes(Buffer.from("Viridis"))).toBe(true);
     }
   }
 });
 
-test("exports wait for detailed visible tiles behind a blocking progress dialog", async ({ page, browserName }) => {
+test("image exports wait for detailed visible tiles behind a blocking progress dialog", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "export payload inspection runs on the Chromium channel");
   await page.addInitScript(() => {
     const state = { bytes: [] as number[], closedCount: 0 };
@@ -842,7 +993,7 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   const sequence = deterministicDna(6_000);
   await loadFasta(page, "detailed.fa", `>detailed\n${sequence}\n`);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await page.locator("#export-data").click();
+  await page.locator("#export-image").click();
   await expect(page.locator("#export-progress-dialog")).toBeVisible();
   expect(await page.locator("#export-progress-dialog").evaluate((dialog) => dialog.matches(":modal"))).toBe(true);
   await page.waitForFunction(() =>
@@ -851,21 +1002,7 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
   const bytes = await page.evaluate(() =>
     (window as unknown as { __detailedSave: { bytes: number[] } }).__detailedSave.bytes);
-  const entries = readStoredZip(Buffer.from(bytes));
-  const contents = entries.get("moddotplot-detailed_detailed-vs-detailed_detailed.bedpe")?.toString("utf8");
-  if (!contents) throw new Error("Detailed export ZIP has no BEDPE entry");
-  expect(contents).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
-  const rows = contents.split("\n").filter((row) => /^detailed\t/.test(row));
-  expect(rows.length).toBeGreaterThan(0);
-  expect(rows.every((row) => row.split("\t").length === 13)).toBe(true);
-  expect(contents).not.toContain("identity_fixed");
-  expect(contents).not.toContain("config_digest");
-  const config = entries.get("moddotplot-detailed_detailed-vs-detailed_detailed.config.json");
-  if (!config) throw new Error("Detailed export ZIP has no config entry");
-  expect(JSON.parse(config.toString("utf8"))).toMatchObject({
-    load: ["./moddotplot-detailed_detailed-vs-detailed_detailed.bedpe"],
-    sequence: ["detailed"],
-  });
+  expect(Buffer.from(bytes).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
 });
 
 test("FASTA descriptions stay on axes while source-qualified IDs disambiguate selections and saves", async ({ page }) => {
@@ -918,22 +1055,13 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
     (window as unknown as { __nativeSave?: { closedCount: number } }).__nativeSave?.closedCount === 1);
   const saved = await page.evaluate(() =>
     (window as unknown as { __nativeSave: { suggestedName: string; bytes: number[] } }).__nativeSave);
-  expect(saved.suggestedName).toBe("moddotplot-chr1_human-vs-chr1_gorilla.zip");
-  const entries = readStoredZip(Buffer.from(saved.bytes));
-  const bedpe = entries.get("moddotplot-chr1_human-vs-chr1_gorilla.bedpe")?.toString("utf8");
-  if (!bedpe) throw new Error("Qualified-sequence export ZIP has no BEDPE entry");
-  const dataRows = bedpe.split("\n").filter((row) => row && !row.startsWith("#"));
-  expect(dataRows.length).toBeGreaterThan(0);
-  expect(dataRows.every((row) => row.startsWith("chr1\t"))).toBe(true);
-  expect(bedpe).not.toContain("human chromosome one\t");
-  expect(bedpe).not.toContain("gorilla chromosome one\t");
-  const config = entries.get("moddotplot-chr1_human-vs-chr1_gorilla.config.json");
-  if (!config) throw new Error("Qualified-sequence export ZIP has no config entry");
-  expect(JSON.parse(config.toString("utf8"))).toMatchObject({
-    load: ["./moddotplot-chr1_human-vs-chr1_gorilla.bedpe"],
+  expect(saved.suggestedName).toBe("moddotplot_config.json");
+  const config = JSON.parse(Buffer.from(saved.bytes).toString("utf8"));
+  expect(config).toMatchObject({
     sequence: ["chr1", "chr1"],
     compare_only: true,
   });
+  expect(config).not.toHaveProperty("load");
 });
 
 test("multi-record inputs expose self, pairwise, and bounded grid plot modes", async ({ page }) => {
@@ -1021,6 +1149,8 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
     .toHaveCSS("grid-row-start", "4");
   await expect(page.locator('.plot-grid-axis-label[data-grid-axis="y"][data-sequence-index="2"]'))
     .toHaveCSS("grid-row-start", "2");
+  await expect(page.locator('.plot-grid-axis-label[data-grid-axis="y"][data-sequence-index="2"]'))
+    .toHaveCSS("writing-mode", "vertical-rl");
   await expect(page.locator('.grid-plot-cell[data-grid-row="0"][data-grid-column="0"]'))
     .toHaveAttribute("aria-label", /Status: Ready$/);
   expect(await page.evaluate(() => {
@@ -1044,24 +1174,16 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
     (window as unknown as { __gridSave?: { closedCount: number } }).__gridSave?.closedCount === 1);
   const gridSave = await page.evaluate(() =>
     (window as unknown as { __gridSave: { suggestedName: string; bytes: number[] } }).__gridSave);
-  expect(gridSave.suggestedName).toBe(
-    "moddotplot-grid-alpha_three-beta_three-gamma_three.zip",
-  );
-  const gridCommandEntries = readStoredZip(Buffer.from(gridSave.bytes));
-  const gridBedpeNames = [...gridCommandEntries.keys()].filter((name) => name.endsWith(".bedpe"));
-  expect(gridBedpeNames).toHaveLength(6);
-  const gridConfigName = [...gridCommandEntries.keys()].find((name) => name.endsWith(".config.json"));
-  if (!gridConfigName) throw new Error("Grid ModDotPlot command ZIP has no config entry");
-  const gridConfig = JSON.parse(gridCommandEntries.get(gridConfigName)!.toString("utf8"));
+  expect(gridSave.suggestedName).toBe("moddotplot_config.json");
+  const gridConfig = JSON.parse(Buffer.from(gridSave.bytes).toString("utf8"));
   expect(gridConfig).toMatchObject({
     sequence: ["alpha", "beta", "gamma"],
     grid_only: true,
     compare_only: false,
   });
-  expect(gridConfig.load).toHaveLength(6);
-  expect(gridConfig.load).toEqual(gridBedpeNames.map((name) => `./${name}`));
+  expect(gridConfig).not.toHaveProperty("load");
   expect(gridConfig._moddotplot_browser.command).toBe(
-    `moddotplot --grid-only -c ${gridConfigName} -l ${gridBedpeNames.join(" ")}`,
+    "moddotplot --grid-only -c moddotplot_config.json",
   );
 
   const openedGridCell = page.locator('.grid-plot-cell[data-grid-row="0"][data-grid-column="0"]');
@@ -1340,7 +1462,7 @@ test("realistic grid sketches preserve focus and avoid no-op recomputation", asy
   const preparesAfterDetail = await page.evaluate(() =>
     (window as Window & { __gridPrepareRequests?: number }).__gridPrepareRequests ?? 0);
   expect(preparesAfterDetail).toBeGreaterThan(preparesAfterInitialGrid);
-  await page.locator('[data-background-mode="black"]').click();
+  await page.locator('[data-background-mode="white"]').click();
   expect(await page
     .locator('.grid-plot-cell[data-grid-row="0"][data-grid-column="1"] canvas')
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL())).toBe(retainedGridImage);
@@ -1636,10 +1758,10 @@ test("exact mode keeps fixed full footprints while the initial comparison is pre
 
   await page.goto("/");
   await loadFasta(page, "delayed-exact.fa", shortFasta);
-  await expect(page.locator("#exact-mode-controls")).toBeVisible();
+  await expect(page.locator("#exact-mode-controls")).toHaveCount(0);
   await expect(page.locator("[data-exact-geometry]")).toHaveCount(0);
   await expect(page.locator("#show-direction")).toHaveCount(0);
-  await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-exact-view]")).toHaveCount(0);
   await expect(page.locator("#exact-mode-banner")).toContainText("full footprints");
   await expect(page.locator("#scientific-provenance")).toContainText("Full footprints");
 
@@ -1745,7 +1867,7 @@ test("pairwise orientation, navigation, and reset remain coherent", async ({ pag
   await expect(canvas).toBeVisible();
 });
 
-test("gzip FASTA and ambiguous bases load without enabling feature imports", async ({ page }) => {
+test("the merged drop accepts annotations before gzip FASTA with ambiguous bases", async ({ page }) => {
   await page.goto("/");
   const annotationDrop = await page.evaluate(() => {
     const data = new DataTransfer();
@@ -1755,11 +1877,10 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
     return event.defaultPrevented;
   });
   expect(annotationDrop).toBe(true);
-  await expect(page.locator("#sequence-load-dialog")).toBeVisible();
-  await expect(page.locator("#sequence-load-summary")).toContainText("annotation file");
+  await expect(page.locator("#annotation-selection")).toHaveText("not-sequence.bed selected");
+  await expect(page.locator("#sequence-load-dialog")).toBeHidden();
   await expect(page.locator("#landing")).toBeVisible();
   await expect(page.locator("#workspace")).toBeHidden();
-  await page.locator("#sequence-load-close").click();
 
   await page.locator("#file-input").setInputFiles({
     name: "invalid.fa",
@@ -1767,7 +1888,7 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
     buffer: Buffer.from("chr1\t0\t10\n"),
   });
   await expect(page.locator("#sequence-load-dialog")).toBeVisible();
-  await expect(page.locator("#sequence-load-summary")).toContainText("could not be parsed as FASTA");
+  await expect(page.locator("#sequence-load-summary")).toContainText("could not be loaded as FASTA");
   await expect(page.locator("#sequence-load-details")).toContainText("before a FASTA header");
   await expect(page.locator("#landing")).toBeVisible();
   await expect(page.locator("#workspace")).toBeHidden();
@@ -1787,7 +1908,7 @@ test("gzip FASTA and ambiguous bases load without enabling feature imports", asy
   await expect(page.locator("#x-sequence option")).toHaveText("ambiguous_ambiguous · 33 bp");
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#scientific-provenance")).toContainText("Exact canonical 21-mer mode");
-  await expect(page.locator("#file-input")).not.toHaveAttribute("accept", /bed|gff|gtf/i);
+  await expect(page.locator("#file-input")).toHaveAttribute("accept", /bed.*gff.*gtf/i);
 });
 
 test("BGZF multi-FASTA members load as one ordered sequence stream", async ({ page }) => {
@@ -1989,6 +2110,31 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
         && pixels[index + 3] === 255,
     ) ?? false;
   })).toBe(true);
+  const computedTrackHighlightWidth = (): Promise<number> => page.locator("#gc-track-x-canvas")
+    .evaluate((track: HTMLCanvasElement) => {
+      const pixels = track.getContext("2d")?.getImageData(0, 0, track.width, track.height).data;
+      if (!pixels) return 0;
+      const highlightedColumns = new Set<number>();
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (
+          (pixels[index] ?? 0) > 240
+          && (pixels[index + 1] ?? 0) > 190
+          && (pixels[index + 2] ?? 255) < 160
+          && (pixels[index + 3] ?? 0) > 0
+        ) highlightedColumns.add((index / 4) % track.width);
+      }
+      return highlightedColumns.size;
+    });
+  await hoverPlotCenter(page);
+  await expect.poll(computedTrackHighlightWidth).toBeGreaterThanOrEqual(6);
+  await expect(page.locator("#feature-hover-highlight")).toHaveCount(0);
+  const plotBoundsForHighlight = await page.locator("#plot-canvas").boundingBox();
+  if (!plotBoundsForHighlight) throw new Error("Plot has no bounds");
+  await page.mouse.move(
+    plotBoundsForHighlight.x + plotBoundsForHighlight.width / 2,
+    plotBoundsForHighlight.y + plotBoundsForHighlight.height / 2,
+  );
+  await expect.poll(computedTrackHighlightWidth).toBeGreaterThanOrEqual(6);
   const gcBounds = await page.locator("#gc-track-x-canvas").boundingBox();
   if (!gcBounds) throw new Error("GC track has no bounds");
   await page.mouse.move(gcBounds.x + gcBounds.width / 2, gcBounds.y + gcBounds.height / 2);
@@ -2108,8 +2254,10 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
   expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
   expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
 
-  await page.locator("#x-track-position").selectOption("bottom");
-  await page.locator("#y-track-position").selectOption("right");
+  await page.locator('#x-track-position [data-track-position="bottom"]').click();
+  await page.locator('#y-track-position [data-track-position="right"]').click();
+  await expect(page.locator('#x-track-position [data-track-position="bottom"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('#y-track-position [data-track-position="right"]')).toHaveAttribute("aria-pressed", "true");
   const movedLayout = await page.evaluate(() => {
     const shell = document.querySelector<HTMLElement>("#plot-shell")!;
     const plot = document.querySelector("#plot-frame")!.getBoundingClientRect();
@@ -2146,6 +2294,8 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   await page.locator("#y-sequence").selectOption("1");
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await page.locator(".feature-track-controls summary").click();
+  await expect(page.locator("#track-file-input")).toHaveAttribute("accept", /(?:^|,)\.gz(?:,|$)/);
+  await expect(page.locator("#track-file-input")).toHaveAttribute("accept", /(?:^|,)\.bgz(?:,|$)/);
 
   const dropSafety = await page.evaluate(() => {
     const axis = document.querySelector("#x-axis-overlay")!;
@@ -2205,6 +2355,15 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
       && (pixels[index + 2] ?? 255) < 80
       && pixels[index + 3] === 255) ?? false;
   })).toBe(true);
+  await expect(page.locator("#feature-hover-highlight")).toHaveCount(0);
+  const plotHoverBounds = await page.locator("#plot-canvas").boundingBox();
+  if (!plotHoverBounds) throw new Error("Plot has no bounds");
+  await page.mouse.move(
+    plotHoverBounds.x + plotHoverBounds.width * (100 / 1_200),
+    plotHoverBounds.y + plotHoverBounds.height / 2,
+  );
+  await expect(bedPanel).toHaveClass(/has-hover-highlight/);
+  await expect(bedPanel).toHaveAttribute("data-hover-highlight-count", "1");
   const bedHoverBounds = await bedPanel.boundingBox();
   if (!bedHoverBounds) throw new Error("BED track has no bounds");
   await page.mouse.move(
@@ -2222,7 +2381,7 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   })).toBe(false);
 
   await page.locator("#track-file-input").setInputFiles({
-    name: "genes.gff3.gz",
+    name: "genes.gff.gz",
     mimeType: "application/gzip",
     buffer: gzipSync(Buffer.from([
       "##gff-version 3",
@@ -2363,21 +2522,21 @@ test("heatmap palette and plot background controls update without recomputation"
   expect(paletteGroups).toEqual([
     { label: "Spectral", options: 1 },
     { label: "Viridis", options: 1 },
-    { label: "Sequential", options: 18 },
-    { label: "Diverging", options: 8 },
-    { label: "Qualitative", options: 8 },
+    { label: "Sequential", options: 4 },
+    { label: "Diverging", options: 3 },
+    { label: "Qualitative", options: 3 },
   ]);
-  await expect(page.locator("#heatmap-palette option")).toHaveCount(36);
+  await expect(page.locator("#heatmap-palette option")).toHaveCount(12);
   await expect(page.locator("#heatmap-palette option").nth(0)).toHaveAttribute("value", "Spectral");
   await expect(page.locator("#heatmap-palette option").nth(1)).toHaveAttribute("value", "Viridis");
-  await expect(page.locator("#heatmap-palette")).toHaveValue("Spectral");
-  await expect(page.locator("#heatmap-color-count")).toHaveValue("11");
+  await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
+  await expect(page.locator("#heatmap-color-count")).toHaveValue("12");
   await expect(page.locator("#heatmap-color-count")).toHaveAttribute("min", "3");
-  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "11");
-  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".palette-swatch")).toHaveCount(11);
-  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(94, 79, 162)");
-  await expect(page.locator(".palette-swatch").last()).toHaveCSS("background-color", "rgb(158, 1, 66)");
+  await expect(page.locator("#heatmap-color-count")).toHaveAttribute("max", "12");
+  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".palette-swatch")).toHaveCount(12);
+  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(68, 1, 84)");
+  await expect(page.locator(".palette-swatch").last()).toHaveCSS("background-color", "rgb(253, 231, 37)");
   const paletteOptionLayout = await page.locator(".palette-options-row").evaluate((row) => {
     const count = row.querySelector("label")!.getBoundingClientRect();
     const flip = row.querySelector(".palette-direction-control")!.getBoundingClientRect();
@@ -2408,24 +2567,26 @@ test("heatmap palette and plot background controls update without recomputation"
 
   const gradient = page.locator("#heatmap-gradient");
   const initialGradient = await gradient.evaluate((element) => element.style.backgroundImage);
-  expect(initialGradient).toContain("rgb(255, 255, 255)");
-  expect(initialGradient.indexOf("rgb(94, 79, 162)")).toBeLessThan(
-    initialGradient.indexOf("rgb(158, 1, 66)"),
-  );
-  await page.locator("#palette-flip").click();
-  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
-  const canonicalGradient = await gradient.evaluate((element) => element.style.backgroundImage);
-  expect(canonicalGradient).not.toBe(initialGradient);
-  expect(canonicalGradient.indexOf("rgb(158, 1, 66)")).toBeLessThan(
-    canonicalGradient.indexOf("rgb(94, 79, 162)"),
+  expect(initialGradient).toContain("rgb(5, 5, 6)");
+  expect(initialGradient.indexOf("rgb(68, 1, 84)")).toBeLessThan(
+    initialGradient.indexOf("rgb(253, 231, 37)"),
   );
   await page.locator("#palette-flip").click();
   await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "true");
+  const reversedGradient = await gradient.evaluate((element) => element.style.backgroundImage);
+  expect(reversedGradient).not.toBe(initialGradient);
+  expect(reversedGradient.indexOf("rgb(253, 231, 37)")).toBeLessThan(
+    reversedGradient.indexOf("rgb(68, 1, 84)"),
+  );
+  await page.locator("#palette-flip").click();
+  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
 
   const firstPaletteSwatch = page.locator(".palette-swatch").first();
   await firstPaletteSwatch.click();
   await expect(page.locator("#palette-color-editor")).toBeVisible();
-  await expect(page.locator("#palette-color-wheel")).toHaveValue("#5e4fa2");
+  const editorBox = await page.locator("#palette-color-editor").boundingBox();
+  expect(editorBox?.height).toBeLessThanOrEqual(360);
+  await expect(page.locator("#palette-color-wheel")).toHaveValue("#440154");
   await expect(page.locator("#palette-color-hex")).toBeFocused();
   await page.locator("#palette-color-hex").fill("#123456");
   await expect(page.locator("#palette-color-hex")).toHaveAttribute("aria-invalid", "false");
@@ -2436,7 +2597,7 @@ test("heatmap palette and plot background controls update without recomputation"
     await page.screenshot({ path: process.env.MODDOTPLOT_PALETTE_QA, fullPage: true });
   }
   await page.locator("#palette-color-reset").click();
-  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(94, 79, 162)");
+  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(68, 1, 84)");
   await page.locator("#palette-color-done").click();
   await expect(page.locator("#palette-color-editor")).toBeHidden();
   await expect(firstPaletteSwatch).toBeFocused();
@@ -2446,6 +2607,7 @@ test("heatmap palette and plot background controls update without recomputation"
   await expect(page.locator("#palette-color-editor")).toBeHidden();
   await expect(firstPaletteSwatch).toBeFocused();
 
+  await page.locator("#heatmap-palette").selectOption("Spectral");
   await page.locator("#heatmap-palette").selectOption("Viridis");
   await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("#heatmap-color-count")).toHaveValue("11");
@@ -2474,9 +2636,7 @@ test("heatmap palette and plot background controls update without recomputation"
   });
   await expect(page.locator("#heatmap-min-value")).toHaveText("85.1%");
 
-  await expect(page.locator('[data-background-mode="white"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#plot-frame")).not.toHaveClass(/dark-background/);
-  await page.locator('[data-background-mode="black"]').click();
+  await expect(page.locator('[data-background-mode="black"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#plot-frame")).toHaveClass(/dark-background/);
   await expect.poll(() => gradient.evaluate((element) => element.style.backgroundImage))
     .toContain("rgb(5, 5, 6)");

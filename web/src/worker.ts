@@ -1,11 +1,12 @@
 /// <reference lib="webworker" />
 
 import init, { ComputeSession, ScientificConfig } from "./wasm/moddotplot_wasm.js";
-import { decompressBgzfStream, isBgzfBlob } from "./bgzf";
+import { decompressBgzfStream, isBgzfBlob, isBgzfHeader } from "./bgzf";
 import type {
   ComparisonParameters,
   FeatureTrackRequest,
   MainToWorkerMessage,
+  RemoteFastaDownloadDescriptor,
   RemoteFastaSourceDescriptor,
   ScientificConfigMetadata,
   SequenceMetadata,
@@ -159,7 +160,7 @@ context.onmessage = (event: MessageEvent<MainToWorkerMessage>): void => {
     });
     return;
   }
-  if (message.type === "load" || message.type === "load-precomputed-overview" || message.type === "clear") {
+  if (message.type === "load" || message.type === "load-remote" || message.type === "load-precomputed-overview" || message.type === "clear") {
     datasetJob.cancel("dataset replaced");
     comparisonJob?.cancel("dataset replaced");
     comparisonJob = null;
@@ -190,6 +191,9 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
   switch (message.type) {
     case "load":
       await loadFiles(message.files, message.generation);
+      break;
+    case "load-remote":
+      await loadRemoteFastas(message.sources, message.generation);
       break;
     case "load-precomputed-overview":
       await loadPrecomputedOverview(message.source, message.artifact, message.generation);
@@ -494,6 +498,334 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
   } finally {
     if (session !== staging) staging.free();
   }
+}
+
+async function loadRemoteFastas(
+  sources: RemoteFastaDownloadDescriptor[],
+  generation: number,
+): Promise<void> {
+  if (sources.length === 0) throw new Error("At least one remote FASTA URL is required.");
+  const requestedUrls = sources.map((source) => {
+    const url = new URL(source.url);
+    if (url.protocol !== "https:") throw new Error("Remote FASTA URLs must use HTTPS.");
+    return url;
+  });
+  const job = datasetJob;
+  const staging = new ComputeSession();
+  const loadedMetadata: Array<Omit<SequenceMetadata, "selectionId">> = [];
+  const stagedIndexedSources = new Map<number, IndexedSequenceRecord>();
+  const stagedSessionIndexes = new Map<number, number>();
+  const stagedGlobalIndexes = new Map<number, number>();
+  const ingestBuffer = new ReusableSequenceIngestBuffer(SEQUENCE_INGEST_SHARD_BYTES);
+
+  try {
+    for (const [sourceIndex, source] of sources.entries()) {
+      if (!job.canPublish(generation) || !operationIsCurrent()) return;
+      const requestedUrl = requestedUrls[sourceIndex]!;
+      const baseProgress = sourceIndex / sources.length;
+      post({
+        type: "status",
+        generation,
+        text: `Checking ${source.fileName} for remote indexes`,
+        progress: baseProgress,
+        busy: true,
+      });
+      const indexed = await openRemoteIndexedFasta(source, job);
+      if (!job.canPublish(generation) || !operationIsCurrent()) return;
+      if (indexed) {
+        for (const record of indexed.records) {
+          if (record.length > MAX_SEQUENCE_BASES) {
+            throw new Error(
+              `Sequence '${record.name}' contains ${record.length.toLocaleString()} bases; the limit is ${MAX_SEQUENCE_BASES.toLocaleString()}.`,
+            );
+          }
+          const globalIndex = loadedMetadata.length;
+          loadedMetadata.push({
+            index: globalIndex,
+            name: record.name,
+            description: "",
+            length: record.length,
+            sourceFile: source.fileName,
+          });
+          stagedIndexedSources.set(globalIndex, { source: indexed, record });
+        }
+        post({
+          type: "status",
+          generation,
+          text: `Opened indexed ${source.fileName}; sequence data will stream on demand`,
+          progress: (sourceIndex + 1) / sources.length,
+          busy: true,
+        });
+        continue;
+      }
+
+      post({
+        type: "status",
+        generation,
+        text: `Connecting to ${requestedUrl.hostname}`,
+        progress: baseProgress,
+        busy: true,
+      });
+      const response = await fetch(requestedUrl, {
+        method: "GET",
+        mode: "cors",
+        credentials: "omit",
+        redirect: "follow",
+        referrerPolicy: "no-referrer",
+        signal: job.signal,
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error(`The remote server returned HTTP ${response.status} ${response.statusText || "while loading the FASTA"}.`);
+      }
+      if (!response.body) throw new Error("The remote server returned no readable FASTA data.");
+      if (response.url && new URL(response.url).protocol !== "https:") {
+        await response.body.cancel().catch(() => undefined);
+        throw new Error("The remote FASTA redirected to a non-HTTPS URL.");
+      }
+
+      const contentEncoding = response.headers.get("content-encoding")?.trim().toLocaleLowerCase("en-US") ?? "";
+      const browserDecodedContent = contentEncoding.length > 0 && contentEncoding !== "identity";
+      const declaredLength = Number(response.headers.get("content-length"));
+      const totalBytes = !browserDecodedContent && Number.isSafeInteger(declaredLength) && declaredLength > 0
+        ? declaredLength
+        : 0;
+      let receivedBytes = 0;
+      let lastPercentage = -1;
+      let stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          receivedBytes += chunk.byteLength;
+          const sourceProgress = totalBytes > 0 ? Math.min(1, receivedBytes / totalBytes) : 0;
+          const percentage = totalBytes > 0 ? Math.floor(sourceProgress * 100) : receivedBytes;
+          if (percentage !== lastPercentage && job.canPublish(generation)) {
+            lastPercentage = percentage;
+            post({
+              type: "status",
+              generation,
+              text: `Streaming and validating ${source.fileName}`,
+              progress: (sourceIndex + sourceProgress) / sources.length,
+              busy: true,
+            });
+          }
+          controller.enqueue(chunk);
+        },
+      }));
+      if (/\.gz$/i.test(source.fileName)) {
+        const inspected = await inspectRemoteGzipStream(stream);
+        stream = inspected.bgzf
+          ? decompressBgzfStream(inspected.stream)
+          : inspected.gzip
+            ? (inspected.stream as unknown as ReadableStream<BufferSource>)
+              .pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>
+            : inspected.stream;
+      }
+
+      const reader = stream.getReader();
+      staging.begin_fasta();
+      const appendMetadata = (value: unknown): void => {
+        for (const record of parsedSequenceRecords(value)) {
+          const globalIndex = loadedMetadata.length;
+          loadedMetadata.push({
+            index: globalIndex,
+            name: record.name,
+            description: record.description,
+            length: Number(record.length),
+            sourceFile: source.fileName,
+          });
+          stagedSessionIndexes.set(globalIndex, record.index);
+          stagedGlobalIndexes.set(record.index, globalIndex);
+        }
+      };
+      const consumeShard = (shard: Uint8Array): void => {
+        appendMetadata(staging.push_fasta_chunk(shard));
+      };
+      try {
+        while (true) {
+          const result = await reader.read();
+          if (!job.canPublish(generation) || !operationIsCurrent()) {
+            await reader.cancel().catch(() => undefined);
+            return;
+          }
+          if (result.done) break;
+          ingestBuffer.append(result.value, consumeShard);
+        }
+        ingestBuffer.flush(consumeShard);
+        appendMetadata(staging.finish_fasta());
+      } finally {
+        reader.releaseLock();
+      }
+    }
+
+    if (!job.canPublish(generation) || !operationIsCurrent()) return;
+    const committed = assignSequenceSelectionIds(loadedMetadata);
+    session.free();
+    session = staging;
+    indexedSequenceSources = stagedIndexedSources;
+    sessionSequenceIndexes = stagedSessionIndexes;
+    globalSequenceIndexes = stagedGlobalIndexes;
+    activeSessionParameters = null;
+    precomputedOverview = null;
+    precomputedOverviews.clear();
+    job.sequences = committed;
+    post({ type: "sequences", generation, sequences: job.sequences });
+    post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
+  } finally {
+    if (session !== staging) staging.free();
+  }
+}
+
+async function openRemoteIndexedFasta(
+  descriptor: RemoteFastaDownloadDescriptor,
+  job: DatasetSession,
+): Promise<IndexedFastaSource | null> {
+  let remote: Awaited<ReturnType<typeof createHttpRangeBlob>>;
+  try {
+    remote = await createHttpRangeBlob(descriptor.url, {
+      baseUrl: context.location.href,
+      allowCrossOrigin: true,
+      signal: job.signal,
+      mediaType: "application/octet-stream",
+    });
+  } catch (error) {
+    if (job.signal.aborted) throw error;
+    return null;
+  }
+  if (job.signal.aborted || !operationIsCurrent()) return null;
+
+  const compressedName = /\.gz$/i.test(descriptor.fileName);
+  let faiBytes: Uint8Array | null;
+  let gziBytes: Uint8Array | null;
+  let bgzf: boolean;
+  try {
+    [faiBytes, gziBytes, bgzf] = await Promise.all([
+      fetchRemoteCompanion(
+        companionUrl(descriptor.url, ".fai"),
+        16 * 1024 * 1024,
+        job.signal,
+      ),
+      compressedName
+        ? fetchRemoteCompanion(
+          companionUrl(descriptor.url, ".gzi"),
+          32 * 1024 * 1024,
+          job.signal,
+        )
+        : Promise.resolve(null),
+      compressedName ? isBgzfBlob(remote) : Promise.resolve(false),
+    ]);
+  } catch (error) {
+    if (job.signal.aborted) throw error;
+    return null;
+  }
+  if (!faiBytes || job.signal.aborted || !operationIsCurrent()) return null;
+  if (compressedName && (!bgzf || !gziBytes)) return null;
+
+  const faiText = new TextDecoder("utf-8", { fatal: true }).decode(faiBytes);
+  const indexed = await createIndexedFastaSource(
+    remote,
+    faiText,
+    compressedName ? { gzi: gziBytes as Uint8Array } : {},
+  );
+  return job.signal.aborted || !operationIsCurrent() ? null : indexed;
+}
+
+function companionUrl(input: string, suffix: ".fai" | ".gzi"): URL {
+  const url = new URL(input);
+  url.pathname += suffix;
+  return url;
+}
+
+async function fetchRemoteCompanion(
+  url: URL,
+  maximumBytes: number,
+  signal: AbortSignal,
+): Promise<Uint8Array | null> {
+  const response = await fetch(url, {
+    method: "GET",
+    mode: "cors",
+    credentials: "omit",
+    redirect: "error",
+    referrerPolicy: "no-referrer",
+    signal,
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  if (!response.body) throw new Error(`Remote index ${url.pathname} has no readable body.`);
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    await response.body.cancel().catch(() => undefined);
+    throw new Error(`Remote index ${url.pathname} exceeds the ${maximumBytes.toLocaleString()}-byte safety limit.`);
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      total += result.value.byteLength;
+      if (total > maximumBytes) {
+        throw new Error(`Remote index ${url.pathname} exceeds the ${maximumBytes.toLocaleString()}-byte safety limit.`);
+      }
+      chunks.push(result.value);
+    }
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+async function inspectRemoteGzipStream(
+  source: ReadableStream<Uint8Array>,
+): Promise<{ bgzf: boolean; gzip: boolean; stream: ReadableStream<Uint8Array> }> {
+  const reader = source.getReader();
+  const buffered: Uint8Array[] = [];
+  let bufferedBytes = 0;
+  while (bufferedBytes < 512) {
+    const result = await reader.read();
+    if (result.done) break;
+    buffered.push(result.value);
+    bufferedBytes += result.value.byteLength;
+  }
+  const prefix = new Uint8Array(Math.min(bufferedBytes, 512));
+  let copied = 0;
+  for (const chunk of buffered) {
+    const take = Math.min(chunk.byteLength, prefix.byteLength - copied);
+    if (take <= 0) break;
+    prefix.set(chunk.subarray(0, take), copied);
+    copied += take;
+  }
+  let bufferedIndex = 0;
+  const replayed = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (bufferedIndex < buffered.length) {
+        controller.enqueue(buffered[bufferedIndex] as Uint8Array);
+        bufferedIndex += 1;
+        return;
+      }
+      const result = await reader.read();
+      if (result.done) controller.close();
+      else controller.enqueue(result.value);
+    },
+    async cancel(reason) {
+      await reader.cancel(reason);
+    },
+  });
+  return {
+    bgzf: isBgzfHeader(prefix),
+    gzip: prefix[0] === 0x1f && prefix[1] === 0x8b,
+    stream: replayed,
+  };
 }
 
 async function loadPrecomputedOverview(

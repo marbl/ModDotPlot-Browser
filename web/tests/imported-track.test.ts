@@ -17,7 +17,7 @@ describe("imported feature tracks", () => {
   it("enforces the documented annotation admission envelope", () => {
     expect(annotationAdmissionError(512 * 1024 * 1024, 1_000_000)).toBeNull();
     expect(annotationAdmissionError(512 * 1024 * 1024 + 1, 1)).toContain("bytes");
-    expect(annotationAdmissionError(1, 1_000_001)).toContain("matching records");
+    expect(annotationAdmissionError(1, 1_000_001)).toContain("retained features");
   });
 
   it("recognizes supported text formats and UCSC itemRgb colors", () => {

@@ -1,7 +1,7 @@
 {
   "name": "moddotplot-interactive",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.2",
   "type": "module",
   "engines": {
     "node": "25.9.0",
@@ -9,11 +9,8 @@
   },
   "packageManager": "npm@11.12.1",
   "scripts": {
-    "prepare:example": "node ../scripts/prepare-example-assets.mjs",
-    "predev": "npm run prepare:example",
     "dev": "vite",
     "build:wasm": "wasm-pack build ../crates/wasm --target web --out-dir ../../web/src/wasm --release",
-    "prebuild:ui": "npm run prepare:example",
     "build:ui": "tsc --noEmit && vite build",
     "build": "npm run build:release",
     "build:release": "npm test && npm run build:wasm && npm run build:ui && npm run docs:check && npm run sbom",

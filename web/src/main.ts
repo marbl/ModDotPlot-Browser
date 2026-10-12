@@ -11,24 +11,15 @@ import {
 } from "./palettes";
 import { selectDetailResolution, selectTiles } from "./detail";
 import { DnaLoader } from "./dna-loader";
-import {
-  loadBundledArabidopsisAnnotation,
-  loadBundledArabidopsisDetailOverviews,
-  loadBundledArabidopsisExample,
-  type ArabidopsisExampleStartup,
-} from "./example-loader";
 import { ExportController } from "./export-controller";
-import { createNumericExport, exportBaseName, type ExportProvenance, type NumericExportContext } from "./export";
+import { exportBaseName, type ExportProvenance } from "./export";
 import { createModDotPlotCliConfigBlob } from "./moddotplot-config";
 import {
   DEFAULT_EXACT_KMER_GEOMETRY,
-  DEFAULT_EXACT_VISUALIZATION,
   exactConfigDigest,
   exactGeometryLabel,
-  exactIdentityLabel,
   exactModeBannerText,
   type ExactKmerGeometry,
-  type ExactVisualizationMode,
 } from "./exact-mode";
 import { formatBases, formatBytes, formatInterval, formatPlotWindowSize, plotWindowSizeBases } from "./format";
 import { GridPairRenderer } from "./grid-renderer";
@@ -66,8 +57,14 @@ import {
   type ViewChange,
 } from "./renderer";
 import { REFINEMENT_POLICY_VERSION } from "./refinement";
+import {
+  createRulerAnchor,
+  rulerDelta,
+  rulerScreenPosition,
+  type RulerAnchor,
+} from "./ruler";
 import { sequenceAxisLabel } from "./sequence-metadata";
-import type { PrecomputedOverviewArtifact } from "./precomputed-overview";
+import { parseRemoteFastaUrl } from "./remote-fasta";
 import {
   decideResourceAdmission,
   totalResourceBytes,
@@ -77,6 +74,7 @@ import {
 import type {
   ComparisonParameters,
   MainToWorkerMessage,
+  RemoteFastaDownloadDescriptor,
   ScientificConfigMetadata,
   SequenceMetadata,
   WorkerToMainMessage,
@@ -85,7 +83,11 @@ import type {
 const landing = element<HTMLElement>("landing");
 const workspace = element<HTMLElement>("workspace");
 const dropZone = element<HTMLButtonElement>("drop-zone");
-const annotationDropZone = element<HTMLButtonElement>("annotation-drop-zone");
+const remoteFastaForm = element<HTMLFormElement>("remote-fasta-form");
+const remoteFastaInputs = element<HTMLElement>("remote-fasta-inputs");
+const remoteFastaUrl = element<HTMLInputElement>("remote-fasta-url");
+const remoteFastaAdd = element<HTMLButtonElement>("remote-fasta-add");
+const remoteFastaSubmit = element<HTMLButtonElement>("remote-fasta-submit");
 const exploreButton = element<HTMLButtonElement>("explore-button");
 const exampleButton = element<HTMLButtonElement>("example-button");
 const exampleProgress = element<HTMLElement>("example-progress");
@@ -97,7 +99,6 @@ const annotationSelection = element<HTMLElement>("annotation-selection");
 const landingVersion = element<HTMLElement>("landing-version");
 const controlVersion = element<HTMLElement>("control-version");
 const fileInput = element<HTMLInputElement>("file-input");
-const annotationFileInput = element<HTMLInputElement>("annotation-file-input");
 const clearButton = element<HTMLButtonElement>("clear-button");
 const selfSelect = element<HTMLSelectElement>("self-sequence");
 const xSelect = element<HTMLSelectElement>("x-sequence");
@@ -135,18 +136,18 @@ const plotGridView = element<HTMLElement>("plot-grid-view");
 const plotGrid = element<HTMLElement>("plot-grid");
 const plotLoading = element<HTMLElement>("plot-loading");
 const backToGridButton = element<HTMLButtonElement>("back-to-grid");
-const exactModeControls = element<HTMLElement>("exact-mode-controls");
-const exactViewButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-exact-view]")];
 const exactModeBanner = element<HTMLElement>("exact-mode-banner");
 const exactBaseLegend = element<HTMLElement>("exact-base-legend");
 const dnaLoader = new DnaLoader();
 plotLoading.append(dnaLoader.canvas);
+const EXAMPLE_FASTA_URL = "https://github.com/schatzlab/Col-CEN/raw/main/v1.2/Col-CEN_v1.2.fasta.gz";
 const versionLabel = `v${__APP_VERSION__}`;
 landingVersion.textContent = versionLabel;
 controlVersion.textContent = versionLabel;
 const plotColumn = element<HTMLElement>("plot-column");
 const canvas = element<HTMLCanvasElement>("plot-canvas");
 const cursorGuideOverlay = element<HTMLElement>("cursor-guides");
+const rulerMarker = element<HTMLElement>("ruler-marker");
 const cursorGuidesEnabled = element<HTMLInputElement>("cursor-guides-enabled");
 const cursorGuideGeometry = element<HTMLSelectElement>("cursor-guide-geometry");
 const cursorGuideStyle = element<HTMLSelectElement>("cursor-guide-style");
@@ -180,8 +181,10 @@ const featureTrackPanels = {
 };
 const xFeatureTrackStack = element<HTMLElement>("x-feature-track-stack");
 const yFeatureTrackStack = element<HTMLElement>("y-feature-track-stack");
-const xTrackPosition = element<HTMLSelectElement>("x-track-position");
-const yTrackPosition = element<HTMLSelectElement>("y-track-position");
+const xTrackPosition = element<HTMLElement>("x-track-position");
+const yTrackPosition = element<HTMLElement>("y-track-position");
+const xTrackPositionButtons = [...xTrackPosition.querySelectorAll<HTMLButtonElement>("[data-track-position]")];
+const yTrackPositionButtons = [...yTrackPosition.querySelectorAll<HTMLButtonElement>("[data-track-position]")];
 const xAxisPanel = element<HTMLElement>("x-axis-panel");
 const yAxisPanel = element<HTMLElement>("y-axis-panel");
 const featureTrackControls = element<HTMLElement>("feature-track-controls");
@@ -291,8 +294,8 @@ for (const kind of ["gc", "cpg"] as const) {
     });
   }
 }
-xTrackPosition.addEventListener("change", updateFeatureTrackPlacement);
-yTrackPosition.addEventListener("change", updateFeatureTrackPlacement);
+wireTrackPositionButtons(xTrackPositionButtons);
+wireTrackPositionButtons(yTrackPositionButtons);
 featureTracks.onHover((hover, event) => importedTracks.showQuantitativeHover(hover, event));
 let worker: Worker;
 let sequences: SequenceMetadata[] = [];
@@ -304,21 +307,17 @@ let gridDraggedAxis: GridAxis | null = null;
 let gridPrepareTimer = 0;
 let gridAppearanceTimer = 0;
 let lastFiles: File[] = [];
+let lastRemoteFastas: RemoteFastaDownloadDescriptor[] = [];
 let stagedFastaFiles: File[] = [];
 let stagedAnnotationFiles: File[] = [];
 let pendingLandingAnnotations: File[] = [];
 let launchValidationPending = false;
 let launchReady = false;
 let launchExampleWhenReady = false;
-let exampleLoadController: AbortController | null = null;
-let exampleAnnotationController: AbortController | null = null;
-let exampleDetailController: AbortController | null = null;
-const bundledDetailCacheResolutions = new Set<number>();
-let activeBundledExample: ArabidopsisExampleStartup | null = null;
-let recoveryBundledExample: ArabidopsisExampleStartup | null = null;
 let gridReturnAvailable = false;
 let gridReturnCell: HTMLButtonElement | null = null;
 let recoveryFiles: File[] | null = null;
+let recoveryRemoteFastas: RemoteFastaDownloadDescriptor[] | null = null;
 let workerFailed = false;
 let generation = 0;
 let prepareTimer = 0;
@@ -332,8 +331,10 @@ let activeConfigurations: ScientificConfigMetadata[] = [];
 let activeFeatureTrackMetadata: FeatureTrackMetadata | null = null;
 let activeDomainLength = 1;
 let pendingView: ViewChange | null = null;
+let lastHoverDatum: HoverDatum | null = null;
+let lastHoverEvent: PointerEvent | null = null;
+let activeRuler: RulerAnchor | null = null;
 let currentMeasurement: "sketch" | "kmer" = "sketch";
-let exactVisualization: ExactVisualizationMode = DEFAULT_EXACT_VISUALIZATION;
 const exactGeometry: ExactKmerGeometry = DEFAULT_EXACT_KMER_GEOMETRY;
 let overviewReadyText = "Ready";
 let plotStatusText = "Ready";
@@ -374,19 +375,14 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
   const message = event.data;
   switch (message.type) {
     case "ready":
-      if (recoveryBundledExample) {
-        const example = recoveryBundledExample;
-        recoveryBundledExample = null;
-        post({
-          type: "load-precomputed-overview",
-          generation,
-          source: example.source,
-          artifact: example.artifact,
-        });
-      } else if (recoveryFiles) {
+      if (recoveryFiles) {
         const files = recoveryFiles;
         recoveryFiles = null;
         loadFiles(files, false);
+      } else if (recoveryRemoteFastas) {
+        const sources = recoveryRemoteFastas;
+        recoveryRemoteFastas = null;
+        loadRemoteFastas(sources, false);
       } else if (!status.classList.contains("error")) {
         plotStatusText = "Ready";
         status.textContent = "Ready";
@@ -402,10 +398,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
           : ` · ${Math.min(99, Math.floor(message.progress * 100))}%`;
         fastaSelection.textContent = `${message.text}${progress}`;
         if (launchExampleWhenReady) {
-          const indexedProgress = message.progress === undefined
-            ? 0.95
-            : 0.95 + Math.min(1, message.progress) * 0.05;
-          showExampleProgress(message.text, indexedProgress);
+          showExampleProgress(message.text, message.progress ?? 0);
         }
       }
       if (plotMode === "grid" && gridRun && gridRun.activeGeneration !== null) {
@@ -425,16 +418,6 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       if (message.busy) showProgress(message.text, message.progress);
       else hideProgress();
       break;
-    case "precomputed-overview-cached":
-      if (message.generation !== generation || !activeBundledExample) break;
-      bundledDetailCacheResolutions.add(message.resolution);
-      if (
-        bundledDetailCacheResolutions.has(2_000)
-        && bundledDetailCacheResolutions.has(4_000)
-      ) {
-        document.body.dataset.bundledDetailCache = "ready";
-      }
-      break;
     case "sequences":
       if (message.generation !== generation) return;
       sequences = message.sequences;
@@ -444,13 +427,11 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
       }
       sequenceLoadPending = false;
       populateSelectors();
-      if (activeBundledExample) void cacheBundledDetailOverviews(activeBundledExample);
       if (launchValidationPending) {
         launchValidationPending = false;
         launchReady = true;
-        fastaSelection.textContent = activeBundledExample
-          ? `${activeBundledExample.source.fileName} ready to explore`
-          : `${fileList(stagedFastaFiles)} ready to explore`;
+        fastaSelection.textContent = `${currentFastaLabel()} ready to explore`;
+        resetRemoteFastaButton();
         dropZone.classList.add("has-selection");
         exploreButton.hidden = false;
         plotStatusText = "Ready to explore";
@@ -458,10 +439,9 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
         hideProgress();
         if (launchExampleWhenReady) {
           launchExampleWhenReady = false;
-          showExampleProgress("Included genome ready", 1);
+          showExampleProgress("Online genome ready", 1);
           resetExampleButton();
           enterWorkspace();
-          if (activeBundledExample) void loadBundledAnnotation(activeBundledExample);
         }
         break;
       }
@@ -614,7 +594,7 @@ fileInput.addEventListener("change", () => {
   fileInput.value = "";
   if (files.length) {
     if (landing.hidden) loadFiles(files);
-    else stageFastaFiles(files);
+    else stageLandingFiles(files);
   }
 });
 for (const eventName of ["dragenter", "dragover"]) {
@@ -631,35 +611,33 @@ for (const eventName of ["dragleave", "drop"]) {
 }
 dropZone.addEventListener("drop", (event) => {
   const files = [...(event.dataTransfer?.files ?? [])];
-  if (files.length) stageFastaFiles(files);
+  if (files.length) stageLandingFiles(files);
 });
-
-annotationDropZone.addEventListener("click", () => annotationFileInput.click());
-annotationFileInput.addEventListener("change", () => {
-  const files = [...(annotationFileInput.files ?? [])];
-  annotationFileInput.value = "";
-  if (files.length) stageAnnotationFiles(files);
+remoteFastaForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  try {
+    const values = remoteFastaUrlInputs()
+      .map((input) => input.value.trim())
+      .filter((value) => value.length > 0);
+    if (values.length === 0) throw new Error("Enter an HTTPS URL for a FASTA file.");
+    stageRemoteFastas(values.map(parseRemoteFastaUrl));
+  } catch (error) {
+    showSequenceLoadDialog(
+      "The remote FASTA URL is not valid.",
+      [error instanceof Error ? error.message : String(error)],
+    );
+  }
 });
-for (const eventName of ["dragenter", "dragover"]) {
-  annotationDropZone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    annotationDropZone.classList.add("is-dragging");
-  });
-}
-for (const eventName of ["dragleave", "drop"]) {
-  annotationDropZone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    annotationDropZone.classList.remove("is-dragging");
-  });
-}
-annotationDropZone.addEventListener("drop", (event) => {
-  const files = [...(event.dataTransfer?.files ?? [])];
-  if (files.length) stageAnnotationFiles(files);
+remoteFastaAdd.addEventListener("click", () => addRemoteFastaUrlInput());
+remoteFastaInputs.addEventListener("click", (event) => {
+  const button = (event.target as Element).closest<HTMLButtonElement>("[data-action='remove']");
+  if (!button) return;
+  button.closest(".remote-fasta-row")?.remove();
+  remoteFastaSubmit.textContent = remoteFastaUrlInputs().length === 1 ? "Load URL" : "Load URLs";
+  remoteFastaUrlInputs().at(-1)?.focus();
 });
 exploreButton.addEventListener("click", enterWorkspace);
-exampleButton.addEventListener("click", () => void launchBundledExample());
+exampleButton.addEventListener("click", launchOnlineExample);
 
 function enterWorkspace(): void {
   if (!launchReady || sequences.length === 0) return;
@@ -777,12 +755,6 @@ paletteColorEditor.addEventListener("cancel", (event) => {
   event.preventDefault();
   closePaletteColorEditor(true);
 });
-for (const button of exactViewButtons) {
-  button.addEventListener("click", () => {
-    const mode = button.dataset.exactView;
-    if (mode === "identity" || mode === "bases") setExactVisualization(mode);
-  });
-}
 for (const button of backgroundButtons) {
   button.addEventListener("click", () => {
     for (const peer of backgroundButtons) peer.setAttribute("aria-pressed", String(peer === button));
@@ -818,9 +790,7 @@ new ExportController({
   axes,
   baseName: currentExportBaseName,
   provenance: currentExportProvenance,
-  numericContext: currentNumericExportContext,
   cliConfig: currentModDotPlotCliConfig,
-  gridCommandEntries: currentGridCommandEntries,
   prepareDetailedExport,
   progressDialog: exportProgressDialog,
   progressMessage: exportProgressMessage,
@@ -836,6 +806,7 @@ renderer.onHover(showHover);
 renderer.onViewChange((change) => {
   cancelPendingDetailedExport(new Error("Export cancelled because the plot view changed."));
   pendingView = change;
+  updateRulerMarker(change);
   if (activeParameters && plotMode !== "grid") {
     currentMeasurement = requestedResolution(change) === Math.floor(activeDomainLength)
       ? "kmer"
@@ -852,6 +823,26 @@ renderer.onViewChange((change) => {
     cancelAndQueueVisibleDetail(240);
   }
 });
+document.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() !== "r" || event.repeat || workspace.hidden) return;
+  const target = event.target;
+  if (
+    target instanceof HTMLInputElement
+    || target instanceof HTMLSelectElement
+    || target instanceof HTMLTextAreaElement
+    || (target instanceof HTMLElement && target.isContentEditable)
+  ) return;
+  if (activeRuler) {
+    event.preventDefault();
+    clearRuler();
+    return;
+  }
+  if (!lastHoverDatum || !lastHoverEvent || plotMode === "grid") return;
+  event.preventDefault();
+  activeRuler = createRulerAnchor(lastHoverDatum);
+  updateRulerMarker(pendingView);
+  showHover(lastHoverDatum, lastHoverEvent);
+});
 renderer.onTileEvict((tile) => {
   post({ type: "evict-tiles", generation, tiles: [tile] });
 });
@@ -861,6 +852,50 @@ drawHistogram();
 updateParameterNotes();
 updateExactModeUi();
 
+function stageLandingFiles(files: File[], launchAutomatically = false): void {
+  const annotations = files.filter((file) => isAnnotationFileName(file.name));
+  const fasta = files.filter((file) => !isAnnotationFileName(file.name));
+  if (annotations.length > 0) stageAnnotationFiles(annotations);
+  if (fasta.length > 0) stageFastaFiles(fasta, launchAutomatically);
+}
+
+function remoteFastaUrlInputs(): HTMLInputElement[] {
+  return [...remoteFastaInputs.querySelectorAll<HTMLInputElement>(".remote-fasta-url")];
+}
+
+function addRemoteFastaUrlInput(value = ""): HTMLInputElement {
+  const row = document.createElement("div");
+  row.className = "remote-fasta-row";
+  const input = document.createElement("input");
+  input.className = "remote-fasta-url";
+  input.type = "url";
+  input.inputMode = "url";
+  input.setAttribute("autocomplete", "url");
+  input.placeholder = "https://example.org/another-genome.fasta.gz";
+  input.setAttribute("aria-label", "Additional genome URL");
+  input.setAttribute("aria-describedby", "remote-fasta-help");
+  input.value = value;
+  const remove = document.createElement("button");
+  remove.className = "remote-fasta-icon-button";
+  remove.type = "button";
+  remove.dataset.action = "remove";
+  remove.setAttribute("aria-label", "Remove genome URL");
+  remove.title = "Remove genome URL";
+  remove.textContent = "−";
+  row.append(input, remove);
+  remoteFastaInputs.append(row);
+  remoteFastaSubmit.textContent = "Load URLs";
+  input.focus();
+  return input;
+}
+
+function setRemoteFastaUrlValues(values: string[]): void {
+  for (const row of [...remoteFastaInputs.querySelectorAll(".remote-fasta-row")].slice(1)) row.remove();
+  remoteFastaUrl.value = values[0] ?? "";
+  for (const value of values.slice(1)) addRemoteFastaUrlInput(value);
+  remoteFastaUrl.focus();
+}
+
 function stageFastaFiles(files: File[], launchAutomatically = false): void {
   cancelExampleLoad();
   launchExampleWhenReady = launchAutomatically;
@@ -868,12 +903,10 @@ function stageFastaFiles(files: File[], launchAutomatically = false): void {
   if (annotations.length > 0) {
     showSequenceLoadDialog(
       `${fileList(annotations)} ${annotations.length === 1 ? "is an annotation file" : "are annotation files"}, not FASTA sequence input.`,
-      ["Use the smaller annotation drop area underneath the FASTA drop area."],
+      ["Choose FASTA and annotation files together; the combined drop area will route each supported file automatically."],
     );
     return;
   }
-  activeBundledExample = null;
-  recoveryBundledExample = null;
   stagedFastaFiles = [...files];
   launchReady = false;
   fastaSelection.textContent = `Reading and validating ${fileList(files)}…`;
@@ -882,155 +915,51 @@ function stageFastaFiles(files: File[], launchAutomatically = false): void {
   exploreButton.hidden = true;
   if (launchAutomatically) {
     exampleButton.disabled = true;
-    exampleButton.textContent = "Preparing included genome…";
+    exampleButton.textContent = "Preparing example genome…";
   }
   if (workerFailed) startWorker();
   loadFiles(files, true, true);
 }
 
-async function launchBundledExample(): Promise<void> {
-  clearSession();
-  const controller = new AbortController();
-  exampleLoadController = controller;
-  exampleButton.disabled = true;
-  exampleButton.textContent = "Loading included genome…";
-  fastaSelection.textContent = "Loading precomputed Col-CEN_v1.2 overview…";
-  annotationSelection.textContent = "Annotations load after the plot opens";
-  showExampleProgress("Loading precomputed Arabidopsis overview", 0);
+function stageRemoteFastas(sources: RemoteFastaDownloadDescriptor[], launchAutomatically = false): void {
+  cancelExampleLoad();
+  launchExampleWhenReady = launchAutomatically;
+  stagedFastaFiles = [];
+  launchReady = false;
+  fastaSelection.textContent = sources.length === 1
+    ? `Connecting to ${new URL(sources[0]!.url).hostname}…`
+    : `Connecting to ${sources.length} genome URLs…`;
+  fastaSelection.title = sources.map((source) => source.url).join("\n");
+  dropZone.classList.add("has-selection");
+  exploreButton.hidden = true;
+  setRemoteFastaControlsDisabled(true);
+  remoteFastaSubmit.textContent = "Streaming…";
+  if (launchAutomatically) {
+    exampleButton.disabled = true;
+    exampleButton.textContent = "Streaming example genome…";
+    showExampleProgress("Connecting to online Arabidopsis genome", 0);
+  }
+  if (workerFailed) startWorker();
+  loadRemoteFastas(sources, true, true);
+}
 
+function launchOnlineExample(): void {
+  clearSession();
   try {
-    const example = await loadBundledArabidopsisExample({
-      signal: controller.signal,
-      onProgress: (message, progress) => {
-        if (controller.signal.aborted || exampleLoadController !== controller) return;
-        showExampleProgress(message, progress);
-        fastaSelection.textContent = `${message} · ${Math.floor(progress * 100)}%`;
-      },
-    });
-    if (controller.signal.aborted || exampleLoadController !== controller) return;
-    exampleLoadController = null;
-    stagePrecomputedExample(example);
+    setRemoteFastaUrlValues([EXAMPLE_FASTA_URL]);
+    stageRemoteFastas([parseRemoteFastaUrl(EXAMPLE_FASTA_URL)], true);
   } catch (error) {
-    if (isAbortError(error) || exampleLoadController !== controller) return;
-    exampleLoadController = null;
     resetExampleButton();
     hideExampleProgress();
-    fastaSelection.textContent = "No FASTA selected";
-    annotationSelection.textContent = "No annotations selected";
     showSequenceLoadDialog(
-      "The included Arabidopsis example could not be loaded.",
-      [error instanceof Error ? error.message : String(error), "Reload the page or choose local FASTA files instead."],
+      "The online Arabidopsis example could not be started.",
+      [error instanceof Error ? error.message : String(error)],
     );
   }
 }
 
-function stagePrecomputedExample(example: ArabidopsisExampleStartup): void {
-  activeBundledExample = example;
-  recoveryBundledExample = null;
-  lastFiles = [];
-  stagedFastaFiles = [];
-  stagedAnnotationFiles = [];
-  pendingLandingAnnotations = [];
-  generation += 1;
-  tileRequestId += 1;
-  featureTrackRequestId += 1;
-  sequenceLoadPending = true;
-  launchValidationPending = true;
-  launchExampleWhenReady = true;
-  launchReady = false;
-  fastaSelection.textContent = `Validating ${example.source.fileName} overview…`;
-  fastaSelection.title = `${example.source.fileName} · remote ranges load only when needed`;
-  annotationSelection.textContent = "Annotations load after the plot opens";
-  dropZone.classList.add("has-selection");
-  exploreButton.hidden = true;
-  if (workerFailed) startWorker();
-  post({
-    type: "load-precomputed-overview",
-    generation,
-    source: example.source,
-    artifact: example.artifact,
-  });
-}
-
-async function loadBundledAnnotation(
-  example: ArabidopsisExampleStartup,
-): Promise<void> {
-  exampleAnnotationController?.abort(new DOMException("Annotation load was replaced.", "AbortError"));
-  const controller = new AbortController();
-  exampleAnnotationController = controller;
-  annotationSelection.textContent = "Loading included CEN180 annotations · 0%";
-  try {
-    const annotation = await loadBundledArabidopsisAnnotation({
-      signal: controller.signal,
-      onProgress: (_message, progress) => {
-        if (
-          controller.signal.aborted
-          || exampleAnnotationController !== controller
-          || activeBundledExample !== example
-        ) return;
-        annotationSelection.textContent = `Loading included CEN180 annotations · ${Math.floor(progress * 100)}%`;
-      },
-    });
-    if (
-      controller.signal.aborted
-      || exampleAnnotationController !== controller
-      || activeBundledExample !== example
-    ) return;
-    exampleAnnotationController = null;
-    stagedAnnotationFiles = [annotation];
-    annotationSelection.textContent = `${annotation.name} loaded`;
-    annotationSelection.title = annotation.name;
-    annotationDropZone.classList.add("has-selection");
-    if (comparisonReady && renderer.exportTileViews().length > 0) {
-      importedTracks.importFilesForSequences([annotation], sequences);
-    } else {
-      pendingLandingAnnotations = [annotation];
-    }
-  } catch (error: unknown) {
-    if (isAbortError(error) || exampleAnnotationController !== controller) return;
-    exampleAnnotationController = null;
-    annotationSelection.textContent = "Included CEN180 annotations unavailable";
-    annotationSelection.title = error instanceof Error ? error.message : String(error);
-    annotationDropZone.classList.remove("has-selection");
-  }
-}
-
-async function cacheBundledDetailOverviews(
-  example: ArabidopsisExampleStartup,
-): Promise<void> {
-  exampleDetailController?.abort(new DOMException("Detail cache load was replaced.", "AbortError"));
-  const controller = new AbortController();
-  exampleDetailController = controller;
-  try {
-    const artifacts = await loadBundledArabidopsisDetailOverviews({ signal: controller.signal });
-    if (
-      controller.signal.aborted
-      || exampleDetailController !== controller
-      || activeBundledExample !== example
-    ) return;
-    exampleDetailController = null;
-    bundledDetailCacheResolutions.clear();
-    document.body.dataset.bundledDetailCache = "loading";
-    for (const artifact of artifacts) postCachedOverview(artifact);
-  } catch (error) {
-    if (isAbortError(error) || exampleDetailController !== controller) return;
-    exampleDetailController = null;
-    document.body.dataset.bundledDetailCache = "unavailable";
-    console.warn("Static Arabidopsis zoom cache is unavailable; falling back to local computation.", error);
-  }
-}
-
 function cancelExampleLoad(): void {
-  const wasLoading = exampleLoadController !== null
-    || exampleAnnotationController !== null
-    || exampleDetailController !== null;
-  const reason = new DOMException("The example load was cancelled.", "AbortError");
-  exampleLoadController?.abort(reason);
-  exampleAnnotationController?.abort(reason);
-  exampleDetailController?.abort(reason);
-  exampleLoadController = null;
-  exampleAnnotationController = null;
-  exampleDetailController = null;
+  const wasLoading = launchExampleWhenReady;
   launchExampleWhenReady = false;
   resetExampleButton();
   if (wasLoading && !landing.hidden) {
@@ -1061,25 +990,21 @@ function hideExampleProgress(): void {
 }
 
 function restoreLandingSelections(): void {
-  fastaSelection.textContent = activeBundledExample
-    ? `${activeBundledExample.source.fileName} ready to explore`
-    : stagedFastaFiles.length > 0
-      ? `${fileList(stagedFastaFiles)} ready to explore`
-      : "No FASTA selected";
+  fastaSelection.textContent = lastRemoteFastas.length > 0 || stagedFastaFiles.length > 0
+    ? `${currentFastaLabel()} ready to explore`
+    : "No FASTA selected";
   annotationSelection.textContent = stagedAnnotationFiles.length > 0
     ? `${fileList(stagedAnnotationFiles)} selected`
     : "No annotations selected";
-  dropZone.classList.toggle("has-selection", activeBundledExample !== null || stagedFastaFiles.length > 0);
-  annotationDropZone.classList.toggle("has-selection", stagedAnnotationFiles.length > 0);
+  dropZone.classList.toggle(
+    "has-selection",
+    lastRemoteFastas.length > 0 || stagedFastaFiles.length > 0 || stagedAnnotationFiles.length > 0,
+  );
   exploreButton.hidden = !launchReady;
 }
 
-function isAbortError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
-}
-
 function stageAnnotationFiles(files: File[]): void {
-  if (exampleLoadController || exampleAnnotationController) cancelExampleLoad();
+  if (launchExampleWhenReady) cancelExampleLoad();
   const unsupported = files.filter((file) => !isAnnotationFileName(file.name));
   if (unsupported.length > 0) {
     showSequenceLoadDialog(
@@ -1091,7 +1016,7 @@ function stageAnnotationFiles(files: File[]): void {
   stagedAnnotationFiles = [...files];
   annotationSelection.textContent = `${fileList(files)} selected`;
   annotationSelection.title = files.map((file) => file.name).join("\n");
-  annotationDropZone.classList.add("has-selection");
+  dropZone.classList.add("has-selection");
 }
 
 function loadFiles(files: File[], remember = true, validateForLaunch = false): void {
@@ -1107,7 +1032,28 @@ function loadFiles(files: File[], remember = true, validateForLaunch = false): v
     );
     return;
   }
-  if (remember) lastFiles = [...files];
+  if (remember) {
+    lastFiles = [...files];
+    lastRemoteFastas = [];
+  }
+  beginSequenceLoad(validateForLaunch);
+  post({ type: "load", generation, files });
+}
+
+function loadRemoteFastas(
+  sources: RemoteFastaDownloadDescriptor[],
+  remember = true,
+  validateForLaunch = false,
+): void {
+  if (remember) {
+    lastFiles = [];
+    lastRemoteFastas = [...sources];
+  }
+  beginSequenceLoad(validateForLaunch);
+  post({ type: "load-remote", generation, sources });
+}
+
+function beginSequenceLoad(validateForLaunch: boolean): void {
   window.clearTimeout(prepareTimer);
   window.clearTimeout(detailTimer);
   window.clearTimeout(featureTrackTimer);
@@ -1153,7 +1099,6 @@ function loadFiles(files: File[], remember = true, validateForLaunch = false): v
   status.textContent = plotStatusText;
   if (validateForLaunch) hideProgress();
   else showProgress(plotStatusText);
-  post({ type: "load", generation, files });
 }
 
 function populateSelectors(): void {
@@ -1766,6 +1711,13 @@ function queueComparison(delay: number): void {
 
 function prepareComparison(): void {
   cancelPendingDetailedExport(new Error("Export cancelled because the comparison changed."));
+  activeRuler = null;
+  rulerMarker.hidden = true;
+  lastHoverDatum = null;
+  lastHoverEvent = null;
+  hoverCard.hidden = true;
+  featureTracks.setPlotHover(null);
+  importedTracks.setPlotHover(null);
   const selection = selectedSingleComparison();
   if (!selection) return;
   const { xIndex, yIndex } = selection;
@@ -1932,8 +1884,25 @@ function updateFeatureTrackLayout(): void {
 }
 
 function updateFeatureTrackPlacement(): void {
-  plotShell.dataset.xTrackPosition = xTrackPosition.value === "bottom" ? "bottom" : "top";
-  plotShell.dataset.yTrackPosition = yTrackPosition.value === "right" ? "right" : "left";
+  plotShell.dataset.xTrackPosition = selectedTrackPosition(xTrackPositionButtons, "top") === "bottom"
+    ? "bottom"
+    : "top";
+  plotShell.dataset.yTrackPosition = selectedTrackPosition(yTrackPositionButtons, "left") === "right"
+    ? "right"
+    : "left";
+}
+
+function wireTrackPositionButtons(buttons: HTMLButtonElement[]): void {
+  for (const button of buttons) {
+    button.addEventListener("click", () => {
+      for (const candidate of buttons) candidate.setAttribute("aria-pressed", String(candidate === button));
+      updateFeatureTrackPlacement();
+    });
+  }
+}
+
+function selectedTrackPosition(buttons: HTMLButtonElement[], fallback: string): string {
+  return buttons.find((button) => button.getAttribute("aria-pressed") === "true")?.dataset.trackPosition ?? fallback;
 }
 
 function currentFeatureTrackSelection(): FeatureTrackSelection {
@@ -1984,39 +1953,57 @@ function requestFeatureTracks(): void {
 
 function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   if (!datum) {
+    featureTracks.setPlotHover(null);
+    importedTracks.setPlotHover(null);
+    lastHoverDatum = null;
+    lastHoverEvent = null;
     hoverCard.hidden = true;
     plotSummary.textContent = "No plot position selected.";
     return;
   }
-  const identity = datum.quality === "exact"
-    ? exactIdentityLabel(datum.identity)
-    : datum.identity === null
+  lastHoverDatum = datum;
+  lastHoverEvent = event;
+  const hoverCoordinates = {
+    x: (datum.genomicXStart + datum.genomicXEnd) / 2,
+    y: (datum.genomicYStart + datum.genomicYEnd) / 2,
+  };
+  featureTracks.setPlotHover(hoverCoordinates);
+  importedTracks.setPlotHover(hoverCoordinates);
+  const identity = datum.identity === null
       ? "identity unavailable"
       : `identity ${datum.identity.toFixed(2)}%`;
   const xName = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "sequence";
   const yName = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "sequence";
-  const lines = [
-    Object.assign(document.createElement("strong"), { textContent: identity }),
-    Object.assign(document.createElement("span"), {
-      textContent: `x ${xName} · ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}`,
-    }),
-    Object.assign(document.createElement("span"), {
-      textContent: `y ${yName} · ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}`,
-    }),
-  ];
+  const delta = activeRuler ? rulerDelta(activeRuler, datum) : null;
+  const xPosition = delta
+    ? `Δx ${xName} · ${formatSignedDistance(delta.x)}`
+    : `x ${xName} · ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}`;
+  const yPosition = delta
+    ? `Δy ${yName} · ${formatSignedDistance(delta.y)}`
+    : `y ${yName} · ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}`;
   const showBase = datum.quality === "exact"
-    && exactVisualization === "bases"
     && selectedColorMode() === "similarity"
     && datum.xBase !== undefined
     && datum.xBase !== null;
-  if (showBase) {
-    lines.push(Object.assign(document.createElement("span"), {
-      textContent: `Base ${datum.xBase}`,
+  const measurement = datum.quality === "exact" && datum.identity === null
+    ? "no k-mer evidence"
+    : showBase && (datum.identity ?? 0) > 0
+      ? `Base ${datum.xBase}`
+      : datum.quality === "exact" && (datum.identity ?? 0) > 0
+        ? "exact k-mer match"
+        : identity;
+  const lines = [
+    Object.assign(document.createElement("strong"), { textContent: measurement }),
+    Object.assign(document.createElement("span"), { textContent: xPosition }),
+    Object.assign(document.createElement("span"), { textContent: yPosition }),
+  ];
+  if (delta) {
+    lines.push(Object.assign(document.createElement("small"), {
+      textContent: "Ruler active · press R to return to absolute coordinates",
     }));
   }
   hoverCard.replaceChildren(...lines);
-  const baseSummary = showBase ? `; Base ${datum.xBase}` : "";
-  plotSummary.textContent = `${identity}; x ${xName} · ${formatInterval(datum.genomicXStart, datum.genomicXEnd)}; y ${yName} · ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}${baseSummary}.`;
+  plotSummary.textContent = `${measurement}; ${xPosition}; ${yPosition}.`;
   hoverCard.hidden = false;
   const frame = hoverCard.parentElement?.getBoundingClientRect();
   if (frame) {
@@ -2025,6 +2012,39 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
     hoverCard.style.left = `${Math.min(maximumLeft, Math.max(8, event.clientX - frame.left + 14))}px`;
     hoverCard.style.top = `${Math.min(maximumTop, Math.max(8, event.clientY - frame.top + 14))}px`;
   }
+}
+
+function formatSignedDistance(value: number): string {
+  const rounded = Math.round(value);
+  if (rounded === 0) return "0 bp";
+  return `${rounded > 0 ? "+" : "−"}${formatBases(Math.abs(rounded))}`;
+}
+
+function updateRulerMarker(change: ViewChange | null): void {
+  if (!activeRuler || !change) {
+    rulerMarker.hidden = true;
+    return;
+  }
+  const canvasRect = canvas.getBoundingClientRect();
+  const frameRect = plotFrame.getBoundingClientRect();
+  const position = rulerScreenPosition(activeRuler, change, canvasRect.width, canvasRect.height);
+  if (!position) {
+    rulerMarker.hidden = true;
+    return;
+  }
+  rulerMarker.style.left = `${canvasRect.left - frameRect.left}px`;
+  rulerMarker.style.top = `${canvasRect.top - frameRect.top}px`;
+  rulerMarker.style.width = `${canvasRect.width}px`;
+  rulerMarker.style.height = `${canvasRect.height}px`;
+  rulerMarker.style.setProperty("--ruler-x", `${position.x}px`);
+  rulerMarker.style.setProperty("--ruler-y", `${position.y}px`);
+  rulerMarker.hidden = false;
+}
+
+function clearRuler(): void {
+  activeRuler = null;
+  rulerMarker.hidden = true;
+  if (lastHoverDatum && lastHoverEvent) showHover(lastHoverDatum, lastHoverEvent);
 }
 
 function updateHeatmap(changed: keyof HeatmapRange): void {
@@ -2277,29 +2297,14 @@ function setColorMode(mode: "similarity" | "direction"): void {
   updateExactModeUi();
 }
 
-function setExactVisualization(mode: ExactVisualizationMode): void {
-  exactVisualization = mode;
-  renderer.setExactVisualizationMode(mode);
-  if (activeParameters && currentMeasurement === "kmer") {
-    updateScientificProvenance(activeConfigurations, activeParameters.k);
-  }
-  updateExactModeUi();
-}
-
 function updateExactModeUi(): void {
   const active = plotMode !== "grid" && currentMeasurement === "kmer";
   const colorMode = selectedColorMode();
-  renderer.setExactVisualizationMode(exactVisualization);
-  exactModeControls.hidden = !active;
   exactModeBanner.hidden = !active;
-  exactBaseLegend.hidden = !active || exactVisualization !== "bases" || colorMode === "direction";
-  for (const button of exactViewButtons) {
-    button.setAttribute("aria-pressed", String(button.dataset.exactView === exactVisualization));
-  }
+  exactBaseLegend.hidden = !active || colorMode === "direction";
   exactModeBanner.textContent = exactModeBannerText(
     Number(activeParameters?.k ?? kmerInput.value),
     exactGeometry,
-    exactVisualization,
     colorMode,
   );
 }
@@ -2455,16 +2460,9 @@ function updateCursorGuideControlState(): void {
 function updateMemory(): void {
   const rendererBytes = renderer.estimatedByteBreakdown();
   const gridBytes = estimatedGridBytes();
-  const retainedBundledOverviewBytes = activeBundledExample?.artifact.tiles.reduce(
-    (total, tile) => total
-      + tile.identity.byteLength
-      + tile.direction.byteLength
-      + tile.directionSupport.byteLength,
-    0,
-  ) ?? 0;
   const usage: ResourceUsage = {
     wasm: wasmBytes,
-    jsTiles: rendererBytes.jsTiles + gridBytes + retainedBundledOverviewBytes,
+    jsTiles: rendererBytes.jsTiles + gridBytes,
     gpuTextures: rendererBytes.gpuTextures,
     annotations: importedTracks.estimatedBytes(),
     featureTracks: featureTracks.estimatedBytes(),
@@ -2503,20 +2501,17 @@ function clearSession(): void {
   plotMode = "self";
   gridSelectedIndices = [];
   lastFiles = [];
+  lastRemoteFastas = [];
   stagedFastaFiles = [];
   stagedAnnotationFiles = [];
   pendingLandingAnnotations = [];
   launchValidationPending = false;
   launchReady = false;
   launchExampleWhenReady = false;
-  activeBundledExample = null;
-  bundledDetailCacheResolutions.clear();
-  recoveryBundledExample = null;
   recoveryFiles = null;
-  delete document.body.dataset.bundledDetailCache;
+  recoveryRemoteFastas = null;
   comparisonReady = false;
   currentMeasurement = "sketch";
-  exactVisualization = DEFAULT_EXACT_VISUALIZATION;
   activeParameters = null;
   activeConfigurations = [];
   exportDataButton.disabled = true;
@@ -2529,6 +2524,10 @@ function clearSession(): void {
   histogramBins = new Uint32Array(101);
   histogramTiles.clear();
   clearGrid();
+  activeRuler = null;
+  lastHoverDatum = null;
+  lastHoverEvent = null;
+  rulerMarker.hidden = true;
   cursorGuideController.hide();
   renderer.clearTiles();
   featureTracks.clear();
@@ -2542,20 +2541,19 @@ function clearSession(): void {
   updatePaletteDirectionControl();
   renderPaletteSwatches();
   for (const button of backgroundButtons) {
-    button.setAttribute("aria-pressed", String(button.dataset.backgroundMode === "white"));
+    button.setAttribute("aria-pressed", String(button.dataset.backgroundMode === "black"));
   }
   updateHeatmapAppearance();
   if (workerFailed) startWorker();
   post({ type: "clear", generation });
   fileInput.value = "";
-  annotationFileInput.value = "";
   fastaSelection.textContent = "No FASTA selected";
   fastaSelection.removeAttribute("title");
   annotationSelection.textContent = "No annotations selected";
   annotationSelection.removeAttribute("title");
   dropZone.classList.remove("has-selection", "is-dragging");
-  annotationDropZone.classList.remove("has-selection", "is-dragging");
   exploreButton.hidden = true;
+  resetRemoteFastaButton();
   hideExampleProgress();
   selfSelect.replaceChildren();
   xSelect.replaceChildren();
@@ -2571,7 +2569,6 @@ function clearSession(): void {
   featureTrackControls.hidden = false;
   plotActions.hidden = false;
   histogramCanvas.hidden = false;
-  renderer.setExactVisualizationMode(exactVisualization);
   setColorMode("similarity");
   workspace.hidden = true;
   landing.hidden = false;
@@ -2590,15 +2587,37 @@ function showError(message: string): void {
 }
 
 function rejectSequenceLoad(message: string): void {
-  const attemptedFiles = [...lastFiles];
+  const attemptedInput = currentFastaLabel();
+  const wasRemote = lastRemoteFastas.length > 0;
   clearSession();
   const guidance = /(?:memory|budget)/i.test(message)
     ? "The selected multi-FASTA contains more packed sequence than one browser session can retain. Load a chromosome, haplotype, or smaller record subset."
     : "Check that every sequence record begins with a > header line, then try again.";
   showSequenceLoadDialog(
-    `${fileList(attemptedFiles)} could not be parsed as FASTA. No sequence data was loaded.`,
-    [message, guidance],
+    `${attemptedInput} could not be loaded as FASTA. No sequence data was loaded.`,
+    [
+      message,
+      wasRemote
+        ? "Confirm the host permits cross-origin browser downloads (CORS), then try again."
+        : guidance,
+    ],
   );
+}
+
+function currentFastaLabel(): string {
+  if (lastRemoteFastas.length > 0) return descriptorList(lastRemoteFastas);
+  return fileList(stagedFastaFiles);
+}
+
+function resetRemoteFastaButton(): void {
+  setRemoteFastaControlsDisabled(false);
+  remoteFastaSubmit.textContent = remoteFastaUrlInputs().length === 1 ? "Load URL" : "Load URLs";
+}
+
+function setRemoteFastaControlsDisabled(disabled: boolean): void {
+  for (const control of remoteFastaForm.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")) {
+    control.disabled = disabled;
+  }
 }
 
 function showSequenceLoadDialog(summary: string, details: string[]): void {
@@ -2619,6 +2638,11 @@ function fileList(files: File[]): string {
   if (files.length === 0) return "The selected input";
   const shown = files.slice(0, 3).map((file) => file.name).join(", ");
   return files.length > 3 ? `${shown}, and ${files.length - 3} more files` : shown;
+}
+
+function descriptorList(sources: RemoteFastaDownloadDescriptor[]): string {
+  const shown = sources.slice(0, 3).map((source) => source.fileName).join(", ");
+  return sources.length > 3 ? `${shown}, and ${sources.length - 3} more` : shown;
 }
 
 function showTrackImportStatus(text: string, progress?: number): void {
@@ -2659,32 +2683,33 @@ function handleWorkerFailure(message: string): void {
   worker.terminate();
   setPlotLoading(false);
   if (launchFailure) {
+    if (launchExampleWhenReady) {
+      launchExampleWhenReady = false;
+      resetExampleButton();
+      hideExampleProgress();
+    }
     launchValidationPending = false;
     launchReady = false;
     exploreButton.hidden = true;
-    fastaSelection.textContent = activeBundledExample
-      ? "Unable to open the precomputed overview · retry the compute engine"
+    resetRemoteFastaButton();
+    fastaSelection.textContent = lastRemoteFastas.length > 0
+      ? "Unable to load this remote FASTA · check the URL and try again"
       : "Unable to validate this FASTA · choose it again to retry";
-    dropZone.classList.toggle("has-selection", activeBundledExample !== null);
+    dropZone.classList.toggle("has-selection", lastRemoteFastas.length > 0);
   }
   showError(launchFailure
-    ? activeBundledExample
-      ? `${message} Restart the compute engine to retry the included overview.`
-      : `${message} Choose the FASTA files again to retry.`
+    ? lastRemoteFastas.length > 0
+      ? `${message} Check the URL and remote host, then try again.`
+        : `${message} Choose the FASTA files again to retry.`
     : `${message} Restart the compute engine to reload the selected FASTA files.`);
-  retryEngineButton.hidden = launchFailure && activeBundledExample === null;
+  retryEngineButton.hidden = launchFailure;
 }
 
 function restartEngine(): void {
   cancelPendingDetailedExport(new Error("Export cancelled while the compute engine restarts."));
   if (!workerFailed) worker.terminate();
-  recoveryBundledExample = activeBundledExample;
-  recoveryFiles = activeBundledExample === null && lastFiles.length > 0 ? [...lastFiles] : null;
-  if (activeBundledExample && !landing.hidden) {
-    sequenceLoadPending = true;
-    launchValidationPending = true;
-    launchExampleWhenReady = true;
-  }
+  recoveryFiles = lastFiles.length > 0 ? [...lastFiles] : null;
+  recoveryRemoteFastas = lastRemoteFastas.length > 0 ? [...lastRemoteFastas] : null;
   comparisonReady = false;
   activeParameters = null;
   activeConfigurations = [];
@@ -2708,19 +2733,6 @@ function restartEngine(): void {
 
 function post(message: MainToWorkerMessage): void {
   worker.postMessage(message);
-}
-
-function postCachedOverview(artifact: PrecomputedOverviewArtifact): void {
-  const transfers = artifact.tiles.flatMap((tile) => [
-    tile.identity.buffer as ArrayBuffer,
-    tile.direction.buffer as ArrayBuffer,
-    tile.directionSupport.buffer as ArrayBuffer,
-  ]);
-  worker.postMessage({
-    type: "cache-precomputed-overview",
-    generation,
-    artifact,
-  } satisfies MainToWorkerMessage, transfers);
 }
 
 function prepareDetailedExport(
@@ -2803,65 +2815,21 @@ function gridCommandReady(run = gridRun): boolean {
     && run!.entries.every((entry) => entry.renderer.exportTileViews().length > 0);
 }
 
-async function currentGridCommandEntries(
-  onProgress: (message: string, progress?: number) => void,
-): Promise<Array<{ name: string; data: Blob }> | null> {
-  const run = gridRun;
-  if (plotMode !== "grid") return null;
-  if (!gridCommandReady(run) || !run) throw new Error("Wait for every grid comparison to finish before exporting.");
-
-  const archiveEntries: Array<{ name: string; data: Blob }> = [];
-  const loadFiles: string[] = [];
-  const exportedAt = new Date().toISOString();
-  for (let index = 0; index < run.entries.length; index += 1) {
-    const entry = run.entries[index]!;
-    const x = sequences.find((sequence) => sequence.index === entry.comparison.xIndex);
-    const y = sequences.find((sequence) => sequence.index === entry.comparison.yIndex);
-    if (!x || !y) throw new Error("A selected grid sequence is no longer available.");
-    onProgress(
-      `Building grid BEDPE ${index + 1}/${run.entries.length} · ${x.selectionId} vs ${y.selectionId}`,
-      index / (run.entries.length + 1),
-    );
-    const fileName = `${exportBaseName(x.selectionId, y.selectionId)}.bedpe`;
-    const domainLength = Math.max(1, x.length, y.length);
-    const resolution = entry.parameters.resolution;
-    const viewport = { x: 0, y: 0, width: resolution, height: resolution };
-    const provenance = gridExportProvenance(entry, x, y, viewport, exportedAt);
-    archiveEntries.push({
-      name: fileName,
-      data: createNumericExport(entry.renderer.exportTileViews(), {
-        domainLength,
-        baseResolution: resolution,
-        viewport,
-        xName: x.name,
-        yName: y.name,
-      }, provenance, "bedpe"),
-    });
-    loadFiles.push(fileName);
-  }
-
-  const selected = gridSelectedIndices.map((index) => sequences.find((sequence) => sequence.index === index))
-    .filter((sequence): sequence is SequenceMetadata => Boolean(sequence));
-  const domainLength = Math.max(1, ...selected.map((sequence) => sequence.length));
-  const resolution = Math.min(GRID_OVERVIEW_RESOLUTION, domainLength);
-  const firstIndex = selected[0]?.index ?? 0;
-  const template = run.entries[0]!.parameters;
-  const baseName = currentExportBaseName();
-  onProgress("Building grid-only ModDotPlot config", run.entries.length / (run.entries.length + 1));
-  archiveEntries.push({
-    name: `${baseName}.config.json`,
-    data: createModDotPlotCliConfigBlob({
+function currentModDotPlotCliConfig(): Blob | null {
+  if (plotMode === "grid") {
+    const run = gridRun;
+    if (!gridCommandReady(run) || !run) return null;
+    const selected = gridSelectedIndices.map((index) => sequences.find((sequence) => sequence.index === index))
+      .filter((sequence): sequence is SequenceMetadata => Boolean(sequence));
+    const domainLength = Math.max(1, ...selected.map((sequence) => sequence.length));
+    const resolution = Math.min(GRID_OVERVIEW_RESOLUTION, domainLength);
+    const firstIndex = selected[0]?.index ?? 0;
+    return createModDotPlotCliConfigBlob({
       appVersion: __APP_VERSION__,
-      baseName,
       plotMode: "grid",
       sequences,
       gridSequenceIndices: gridSelectedIndices,
-      parameters: {
-        ...template,
-        xIndex: firstIndex,
-        yIndex: firstIndex,
-        resolution,
-      },
+      parameters: { ...run.entries[0]!.parameters, xIndex: firstIndex, yIndex: firstIndex, resolution },
       domainLength,
       currentResolution: resolution,
       viewport: { x: 0, y: 0, width: resolution, height: resolution, domain: resolution, minSize: 1 },
@@ -2870,64 +2838,11 @@ async function currentGridCommandEntries(
       paletteColors: activeHeatmapColors(),
       heatmapRange,
       colorMode: selectedColorMode(),
-      loadFiles,
-    }),
-  });
-  return archiveEntries;
-}
-
-function gridExportProvenance(
-  entry: GridRunEntry,
-  x: SequenceMetadata,
-  y: SequenceMetadata,
-  viewport: { x: number; y: number; width: number; height: number },
-  exportedAt: string,
-): ExportProvenance {
-  const darkBackground = backgroundButtons.some(
-    (button) => button.dataset.backgroundMode === "black" && button.getAttribute("aria-pressed") === "true",
-  );
-  return {
-    software: __APP_VERSION__,
-    exportedAt,
-    method: "ANI_c=C^(1/k), the historical containment-derived ModDotPlot display score; exact complete distinct canonical k-mer-set containment is the validation oracle, not alignment-derived ANI_m.",
-    schedulerPolicyVersion: REFINEMENT_POLICY_VERSION,
-    comparison: entry.parameters,
-    configurations: entry.configurations,
-    display: {
-      measurement: "sketch",
-      colorMode: selectedColorMode(),
-      exactVisualization: null,
-      exactGeometry: null,
-      palette: selectedHeatmapPalette(),
-      paletteColorCount: selectedHeatmapColorCount(),
-      paletteReversed,
-      paletteColors: activeHeatmapColors(),
-      heatmapRange,
-      background: darkBackground ? "black" : "white",
-    },
-    viewport,
-    sequences: { x, y },
-  };
-}
-
-function currentNumericExportContext(): NumericExportContext | null {
-  if (!activeParameters || !pendingView) return null;
-  const xName = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "x";
-  const yName = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "y";
-  return {
-    domainLength: activeDomainLength,
-    baseResolution: activeParameters.resolution,
-    viewport: pendingView.view,
-    xName,
-    yName,
-  };
-}
-
-function currentModDotPlotCliConfig(): Blob | null {
+    });
+  }
   if (!activeParameters || !pendingView) return null;
   return createModDotPlotCliConfigBlob({
     appVersion: __APP_VERSION__,
-    baseName: currentExportBaseName(),
     plotMode,
     sequences,
     gridSequenceIndices: gridSelectedIndices,
@@ -2969,7 +2884,7 @@ function currentExportProvenance(): ExportProvenance {
     display: {
       measurement: currentMeasurement,
       colorMode: selectedColorMode(),
-      exactVisualization: currentMeasurement === "kmer" ? exactVisualization : null,
+      exactVisualization: currentMeasurement === "kmer" ? "bases" : null,
       exactGeometry: currentMeasurement === "kmer" ? exactGeometry : null,
       palette: selectedHeatmapPalette(),
       paletteColorCount: selectedHeatmapColorCount(),
@@ -3010,11 +2925,7 @@ function updateScientificProvenance(
   k: number,
 ): void {
   if (currentMeasurement === "kmer") {
-    const visualization = selectedColorMode() === "direction"
-      ? "direction"
-      : exactVisualization === "bases"
-        ? "Bases"
-        : "identity";
+    const visualization = selectedColorMode() === "direction" ? "direction" : "Bases";
     scientificProvenance.textContent = `Exact canonical ${k}-mer mode · ${exactGeometryLabel(exactGeometry)} · ${visualization} · software ${__APP_VERSION__}`;
     scientificProvenance.title = [
       `software=${__APP_VERSION__}`,
@@ -3023,7 +2934,7 @@ function updateScientificProvenance(
       `k=${k}`,
       "resolution=1 bp/cell",
       `geometry=${exactGeometry}`,
-      `visualization=${exactVisualization}`,
+      "visualization=bases",
       `color-mode=${selectedColorMode()}`,
       "estimator=none",
     ].join("\n");

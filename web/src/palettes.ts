@@ -2,28 +2,32 @@
  * Application palette catalog.
  *
  * ColorBrewer remains the source of the categorized ColorBrewer schemes. This
- * facade promotes Spectral to its own first group and adds Viridis as the
- * second group while preserving the original ColorBrewer subcategories.
+ * facade promotes Spectral to its own first group, adds Viridis as the second
+ * group, and exposes a compact curated subset of the ColorBrewer categories.
  *
  * Viridis' 256-color table and sampling behavior follow d3-scale-chromatic:
  * https://github.com/d3/d3-scale-chromatic/blob/main/src/sequential-multi/viridis.js
  */
 
 import {
-  COLORBREWER_DIVERGING_PALETTES,
-  COLORBREWER_PALETTE_IDS,
   COLORBREWER_PALETTES,
-  COLORBREWER_QUALITATIVE_PALETTES,
-  COLORBREWER_SEQUENTIAL_PALETTES,
-  DEFAULT_COLORBREWER_COLOR_COUNT,
-  DEFAULT_COLORBREWER_PALETTE,
   type ColorBrewerPaletteId,
   type PaletteColorCountRange,
 } from "./colorbrewer";
 
 export const VIRIDIS_PALETTE_ID = "Viridis" as const;
+const SEQUENTIAL_PALETTES = ["Blues", "Greens", "Reds", "Greys"] as const satisfies readonly ColorBrewerPaletteId[];
+const DIVERGING_PALETTES = ["BrBG", "PuOr", "RdGy"] as const satisfies readonly ColorBrewerPaletteId[];
+const QUALITATIVE_PALETTES = ["Paired", "Pastel1", "Pastel2"] as const satisfies readonly ColorBrewerPaletteId[];
+const CURATED_COLORBREWER_PALETTES = [
+  "Spectral",
+  ...SEQUENTIAL_PALETTES,
+  ...DIVERGING_PALETTES,
+  ...QUALITATIVE_PALETTES,
+] as const;
+type CuratedColorBrewerPaletteId = typeof CURATED_COLORBREWER_PALETTES[number];
 
-export type PaletteId = ColorBrewerPaletteId | typeof VIRIDIS_PALETTE_ID;
+export type PaletteId = typeof CURATED_COLORBREWER_PALETTES[number] | typeof VIRIDIS_PALETTE_ID;
 export type PaletteGroupId =
   | "spectral"
   | "viridis"
@@ -48,19 +52,6 @@ export interface HeatmapPalette {
   readonly colorsByCount: Readonly<Record<number, readonly string[]>>;
 }
 
-type ColorBrewerDivergingPaletteId =
-  typeof COLORBREWER_DIVERGING_PALETTES[number];
-type NonSpectralDivergingPaletteId = Exclude<
-  ColorBrewerDivergingPaletteId,
-  "Spectral"
->;
-
-const NON_SPECTRAL_DIVERGING_PALETTES = Object.freeze(
-  COLORBREWER_DIVERGING_PALETTES.filter(
-    (id): id is NonSpectralDivergingPaletteId => id !== "Spectral",
-  ),
-);
-
 export const PALETTE_GROUPS: readonly PaletteGroup[] = Object.freeze([
   Object.freeze({
     id: "spectral" as const,
@@ -75,17 +66,17 @@ export const PALETTE_GROUPS: readonly PaletteGroup[] = Object.freeze([
   Object.freeze({
     id: "sequential" as const,
     label: "Sequential",
-    paletteIds: Object.freeze([...COLORBREWER_SEQUENTIAL_PALETTES]),
+    paletteIds: Object.freeze([...SEQUENTIAL_PALETTES]),
   }),
   Object.freeze({
     id: "diverging" as const,
     label: "Diverging",
-    paletteIds: NON_SPECTRAL_DIVERGING_PALETTES,
+    paletteIds: Object.freeze([...DIVERGING_PALETTES]),
   }),
   Object.freeze({
     id: "qualitative" as const,
     label: "Qualitative",
-    paletteIds: Object.freeze([...COLORBREWER_QUALITATIVE_PALETTES]),
+    paletteIds: Object.freeze([...QUALITATIVE_PALETTES]),
   }),
 ]);
 
@@ -93,9 +84,9 @@ export const PALETTE_IDS: readonly PaletteId[] = Object.freeze(
   PALETTE_GROUPS.flatMap((group) => group.paletteIds),
 );
 
-export const DEFAULT_PALETTE: PaletteId = DEFAULT_COLORBREWER_PALETTE;
-export const DEFAULT_PALETTE_COLOR_COUNT = DEFAULT_COLORBREWER_COLOR_COUNT;
-export const DEFAULT_PALETTE_REVERSED = true;
+export const DEFAULT_PALETTE: PaletteId = VIRIDIS_PALETTE_ID;
+export const DEFAULT_PALETTE_COLOR_COUNT = 12;
+export const DEFAULT_PALETTE_REVERSED = false;
 
 // Published as a compact RGB table by d3-scale-chromatic. Its ramp selects
 // floor(t * 256), clamped to the final color; buildViridisPalette preserves
@@ -115,7 +106,7 @@ const categoryByPalette = new Map<PaletteId, PaletteGroupId>(
   ),
 );
 
-const colorBrewerPaletteEntries = COLORBREWER_PALETTE_IDS.map((id) => {
+const colorBrewerPaletteEntries = CURATED_COLORBREWER_PALETTES.map((id) => {
   const category = categoryByPalette.get(id);
   if (!category) {
     throw new Error(`Palette ${id} is missing from the application palette groups.`);
@@ -167,7 +158,7 @@ export function paletteColors(
 }
 
 function cloneColorBrewerPalette(
-  id: ColorBrewerPaletteId,
+  id: CuratedColorBrewerPaletteId,
   category: PaletteGroupId,
 ): HeatmapPalette {
   const source = COLORBREWER_PALETTES[id];

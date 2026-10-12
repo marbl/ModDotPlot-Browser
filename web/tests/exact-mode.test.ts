@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_EXACT_KMER_GEOMETRY,
-  DEFAULT_EXACT_VISUALIZATION,
   exactConfigDigest,
-  exactIdentityLabel,
   exactModeBannerText,
   exactTilePublicationKey,
 } from "../src/exact-mode";
 
 describe("exact k-mer display state", () => {
-  it("defaults to base coloring over full matching footprints", () => {
-    expect(DEFAULT_EXACT_VISUALIZATION).toBe("bases");
+  it("uses full matching footprints", () => {
     expect(DEFAULT_EXACT_KMER_GEOMETRY).toBe("footprints");
   });
 
@@ -22,16 +19,11 @@ describe("exact k-mer display state", () => {
   });
 
   it("describes one-base exact rendering without hiding its semantics", () => {
-    expect(exactModeBannerText(21, "footprints", "identity", "similarity"))
-      .toBe("Exact · 1 bp/cell · canonical 21-mers · full footprints · color = identity");
-    expect(exactModeBannerText(17, "anchors", "bases", "similarity"))
+    expect(exactModeBannerText(21, "footprints", "similarity"))
+      .toBe("Exact · 1 bp/cell · canonical 21-mers · full footprints · color = Base");
+    expect(exactModeBannerText(17, "anchors", "similarity"))
       .toBe("Exact · 1 bp/cell · canonical 17-mers · k-mer anchors · color = Base");
-    expect(exactModeBannerText(17, "anchors", "bases", "direction"))
+    expect(exactModeBannerText(17, "anchors", "direction"))
       .toContain("color = direction");
-  });
-
-  it("distinguishes missing evidence from an explicit zero-identity mismatch", () => {
-    expect(exactIdentityLabel(null)).toBe("no k-mer evidence");
-    expect(exactIdentityLabel(0)).toBe("identity 0.00%");
   });
 });

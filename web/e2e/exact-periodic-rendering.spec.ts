@@ -10,13 +10,8 @@ const EXACT_FOOTPRINT_DIGEST = "e2577c370efa7023a0e62bfe69c8ea9f5dc7d2cc91855bf7
 
 type Rgb = readonly [number, number, number];
 
-const IDENTITY_COLORS = new Map<string, number>([
-  ["255,255,255", 0], // Explicit mismatch / below threshold.
-  ["158,1,66", 2], // Reversed Spectral maximum, 100% identity.
-]);
-
 const BASE_COLORS = new Set([
-  "255,255,255", // Explicit mismatch / below threshold.
+  "5,5,6", // Explicit mismatch / below threshold.
   "51,173,61", // A
   "31,115,224", // C
   "245,163,31", // G
@@ -40,7 +35,7 @@ interface DecodedPng {
   rgba: Uint8Array;
 }
 
-test("periodic exact mode remains categorical across DPR, resize, and exact view", async ({
+test("periodic exact base mode remains categorical across DPR and resize", async ({
   browser,
   baseURL,
 }) => {
@@ -58,12 +53,9 @@ test("periodic exact mode remains categorical across DPR, resize, and exact view
     expect(await page.evaluate(() => window.devicePixelRatio)).toBe(deviceScaleFactor);
     await loadPeriodicFasta(page);
 
-    await expect(page.locator("#heatmap-palette")).toHaveValue("Spectral");
-    await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
+    await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator("[data-exact-view]")).toHaveCount(0);
     await expect(page.locator("[data-exact-geometry]")).toHaveCount(0);
     await expect(page.locator("#show-direction")).toHaveCount(0);
 
@@ -72,41 +64,21 @@ test("periodic exact mode remains categorical across DPR, resize, and exact view
     const footprintDigest = categoricalDigest(footprint.categories);
     footprintDigests.add(footprintDigest);
     expect(footprintDigest).toBe(EXACT_FOOTPRINT_DIGEST);
-    const renderedFootprintDigest = categoricalDigest(
-      footprint.categories.map((category) => category === 1 ? 0 : category),
-    );
-
     const bases = decodePng(await unobscuredCanvasScreenshot(page));
     expectOnlyColors(bases, BASE_COLORS);
 
-    await page.locator('[data-exact-view="identity"]').click();
-    await expect(page.locator('[data-exact-view="identity"]')).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await waitForTwoFrames(page);
-
     await setPlotCssSize(page, 720);
-    const identityAtIntegerScale = await captureCategoricalCanvas(page, IDENTITY_COLORS);
-    expect(identityAtIntegerScale.width).toBe(720 * deviceScaleFactor);
-    expect(identityAtIntegerScale.height).toBe(720 * deviceScaleFactor);
-    expect(identityAtIntegerScale.digest).toBe(renderedFootprintDigest);
+    const basesAtIntegerScale = decodePng(await unobscuredCanvasScreenshot(page));
+    expect(basesAtIntegerScale.width).toBe(720 * deviceScaleFactor);
+    expect(basesAtIntegerScale.height).toBe(720 * deviceScaleFactor);
+    expectOnlyColors(basesAtIntegerScale, BASE_COLORS);
 
     // 701 is deliberately not divisible by 72. It exercises fractional CSS-to-cell
     // allocation at both one and two device pixels per CSS pixel.
     await setPlotCssSize(page, 701);
-    const identityAfterResize = await captureCategoricalCanvas(page, IDENTITY_COLORS);
-    expect(identityAfterResize.width).toBe(701 * deviceScaleFactor);
-    expect(identityAfterResize.height).toBe(701 * deviceScaleFactor);
-    expect(identityAfterResize.digest).toBe(renderedFootprintDigest);
-
-    await page.locator('[data-exact-view="bases"]').click();
-    await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await waitForTwoFrames(page);
     const basesAfterResize = decodePng(await unobscuredCanvasScreenshot(page));
+    expect(basesAfterResize.width).toBe(701 * deviceScaleFactor);
+    expect(basesAfterResize.height).toBe(701 * deviceScaleFactor);
     expectOnlyColors(basesAfterResize, BASE_COLORS);
 
     await context.close();
@@ -317,44 +289,6 @@ async function unobscuredCanvasScreenshot(page: Page): Promise<Buffer> {
   });
   await waitForTwoFrames(page);
   return page.locator("#plot-canvas").screenshot({ animations: "disabled" });
-}
-
-async function captureCategoricalCanvas(
-  page: Page,
-  colors: ReadonlyMap<string, number>,
-): Promise<{ width: number; height: number; digest: string }> {
-  const png = decodePng(await unobscuredCanvasScreenshot(page));
-  expectOnlyColors(png, new Set(colors.keys()));
-  const categories = sampleCellCenters(png, colors);
-  return {
-    width: png.width,
-    height: png.height,
-    digest: categoricalDigest(categories),
-  };
-}
-
-function sampleCellCenters(png: DecodedPng, colors: ReadonlyMap<string, number>): number[] {
-  const categories: number[] = [];
-  // PNG rows run top-to-bottom while exact tile rows run bottom-to-top. Reverse the
-  // sampled rows so screenshot and worker digests describe the same matrix order.
-  for (let tileY = 0; tileY < MATRIX_SIZE; tileY += 1) {
-    const screenshotY = MATRIX_SIZE - 1 - tileY;
-    const pixelY = Math.min(
-      png.height - 1,
-      Math.floor((screenshotY + 0.5) * png.height / MATRIX_SIZE),
-    );
-    for (let tileX = 0; tileX < MATRIX_SIZE; tileX += 1) {
-      const pixelX = Math.min(
-        png.width - 1,
-        Math.floor((tileX + 0.5) * png.width / MATRIX_SIZE),
-      );
-      const key = pixelKey(png.rgba, (pixelY * png.width + pixelX) * 4);
-      const category = colors.get(key);
-      if (category === undefined) throw new Error(`Unexpected cell-center color ${key}`);
-      categories.push(category);
-    }
-  }
-  return categories;
 }
 
 function expectOnlyColors(png: DecodedPng, expected: ReadonlySet<string>): void {

@@ -15,7 +15,7 @@ import {
 import { paletteColors as colorBrewerColors } from "../src/colorbrewer";
 
 describe("application palette catalog", () => {
-  it("orders featured palettes before the remaining ColorBrewer categories", () => {
+  it("contains only the curated palette groups", () => {
     expect(PALETTE_GROUPS.map((group) => ({
       id: group.id,
       label: group.label,
@@ -26,40 +26,30 @@ describe("application palette catalog", () => {
       {
         id: "sequential",
         label: "Sequential",
-        paletteIds: [
-          "Blues", "BuGn", "BuPu", "GnBu", "Greens", "Greys", "Oranges",
-          "OrRd", "PuBu", "PuBuGn", "PuRd", "Purples", "RdPu", "Reds",
-          "YlGn", "YlGnBu", "YlOrBr", "YlOrRd",
-        ],
+        paletteIds: ["Blues", "Greens", "Reds", "Greys"],
       },
       {
         id: "diverging",
         label: "Diverging",
-        paletteIds: [
-          "BrBG", "PiYG", "PRGn", "PuOr", "RdBu", "RdGy", "RdYlBu",
-          "RdYlGn",
-        ],
+        paletteIds: ["BrBG", "PuOr", "RdGy"],
       },
       {
         id: "qualitative",
         label: "Qualitative",
-        paletteIds: [
-          "Accent", "Dark2", "Paired", "Pastel1", "Pastel2", "Set1",
-          "Set2", "Set3",
-        ],
+        paletteIds: ["Paired", "Pastel1", "Pastel2"],
       },
     ]);
 
     const groupedIds = PALETTE_GROUPS.flatMap((group) => group.paletteIds);
     expect(groupedIds).toEqual(PALETTE_IDS);
-    expect(new Set(groupedIds)).toHaveLength(36);
+    expect(new Set(groupedIds)).toHaveLength(12);
     expect(PALETTE_IDS.slice(0, 2)).toEqual(["Spectral", "Viridis"]);
   });
 
-  it("defaults to reversed eleven-class Spectral", () => {
-    expect(DEFAULT_PALETTE).toBe("Spectral");
-    expect(DEFAULT_PALETTE_COLOR_COUNT).toBe(11);
-    expect(DEFAULT_PALETTE_REVERSED).toBe(true);
+  it("defaults to canonical twelve-class Viridis", () => {
+    expect(DEFAULT_PALETTE).toBe("Viridis");
+    expect(DEFAULT_PALETTE_COLOR_COUNT).toBe(12);
+    expect(DEFAULT_PALETTE_REVERSED).toBe(false);
   });
 
   it("provides Viridis variants from three through twelve colors", () => {
@@ -82,7 +72,7 @@ describe("application palette catalog", () => {
     expect(appSpectral).toEqual(colorBrewerColors("Spectral", 11));
     expect(appSpectral).not.toBe(colorBrewerColors("Spectral", 11));
     expect(HEATMAP_PALETTES.Spectral.category).toBe("spectral");
-    expect(HEATMAP_PALETTES.RdBu.category).toBe("diverging");
+    expect(HEATMAP_PALETTES.RdGy.category).toBe("diverging");
 
     expect(Object.isFrozen(PALETTE_GROUPS)).toBe(true);
     expect(Object.isFrozen(PALETTE_IDS)).toBe(true);
@@ -106,7 +96,8 @@ describe("application palette catalog", () => {
     expect(isPaletteId("Viridis")).toBe(true);
     expect(isPaletteId("viridis")).toBe(false);
     expect(isPaletteId("Turbo")).toBe(false);
-    expect(paletteColorCountRange("Accent")).toEqual({ min: 3, max: 8 });
+    expect(isPaletteId("Accent")).toBe(false);
+    expect(paletteColorCountRange("Paired")).toEqual({ min: 3, max: 12 });
     expect(() => paletteColors("Viridis", 13)).toThrowError(
       "Viridis supports 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 colors; received 13.",
     );

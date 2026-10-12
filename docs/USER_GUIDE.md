@@ -4,32 +4,36 @@
 
 ## Table of contents
 
-- [Getting started](#getting-started)
-- [Plot Navigation](#plot-navigation)
-  - [Self Plot](#self-plot)
-  - [Pairwise Plot](#pairwise-plot)
-  - [Grid Plot](#grid-plot)
-- [Plot Resolution](#plot-resolution)
-- [Plot Customization](#plot-customization)
-- [Exporting Data to ModDotPlot CLI](#exporting-data-to-moddotplot-cli)
+- [ModDotPlot Browser User Guide \& Tutorial](#moddotplot-browser-user-guide--tutorial)
+  - [Table of contents](#table-of-contents)
+  - [Getting started](#getting-started)
+  - [Plot Navigation](#plot-navigation)
+    - [Self Plot](#self-plot)
+    - [Pairwise Plot](#pairwise-plot)
+    - [Grid plot](#grid-plot)
+  - [Plot Resolution](#plot-resolution)
+  - [Plot Customization](#plot-customization)
+  - [Exporting a config for ModDotPlot CLI](#exporting-a-config-for-moddotplot-cli)
 
 ## Getting started
 
 `ModDotPlot Browser` has been tested and works on current versions of Google Chrome, Microsoft Edge, Mozilla Firefox, and Safari. Web browsers must have WebAssembly, Web Workers, and WebGL2 enabled. Mobile browsers appear to be compatible, although navigating plots with touchscreen controls may be more challenging.
 
-There is no fixed input-size limit because files are processed locally rather than uploaded. The practical limit depends on available system memory and browser WebAssembly constraints. As a reference, the approximately 6 GB HG002 diploid human genome uses about 830 MB of browser memory at the default settings.
-
 ![](../web/public/tutorial_images/landing_page.png)
 
-To get started, simply drop one or more plain, gzip-compressed, or BGZF FASTA assembly files on the large FASTA target, or use its file chooser. BGZF is detected from its header even when the suffix is `.gz`. For indexed loading, include `sample.fa.fai` with `sample.fa`, or include both `sample.fa.gz.fai` and `sample.fa.gz.gzi` with a BGZF `sample.fa.gz`:
+To get started, simply drop one or more plain, gzip-compressed, or BGZF FASTA assembly files on the landing-page target, or use its file chooser. The same target also accepts optional BED, GFF3, or GTF annotations and automatically routes each file by type. BGZF is detected from its header even when the suffix is `.gz`. For indexed loading, include `sample.fa.fai` with `sample.fa`, or include both `sample.fa.gz.fai` and `sample.fa.gz.gzi` with a BGZF `sample.fa.gz`:
 
 ![](../web/public/tutorial_images/accepted_files.png)
 
-ModDotPlot will index and validate the provided assembly and, upon completion, create an `Explore` button that launches the interactive browser. You can optionally add BED, GFF, or GTF annotation files on the smaller annotation target. Make sure their sequence identifiers match the corresponding FASTA headers.
+Alternatively, paste a direct HTTPS link ending in `.fa`, `.fasta`, `.fna`, or `.fas` (optionally followed by `.gz`) into **Insert URL** below the drop target and select **Load URL**. The browser streams the response directly through the same local parser and gzip decompressor used for selected files; it does not send the FASTA through the ModDotPlot Browser host. The remote server must permit cross-origin browser requests (CORS), and it can observe normal request metadata such as your IP address. Redirects are supported when every destination uses HTTPS.
+
+ModDotPlot will index and validate the provided assembly or streamed URL and, upon completion, create an `Explore` button that launches the interactive browser. An annotation file selected with the assembly is matched against every loaded sequence after the first plot opens. Make sure annotation sequence identifiers match the corresponding FASTA headers.
 
 ![](../web/public/tutorial_images/explore.png)
 
-The following tutorial will use the provided *Arabidopsis thaliana* genome assembly from [Naish *et al.* 2021](https://doi.org/10.1126/science.abi7489).
+The following tutorial uses the *Arabidopsis thaliana* Col-CEN v1.2 genome assembly
+from [Naish *et al.* 2021](https://doi.org/10.1126/science.abi7489). Select the
+*Arabidopsis thaliana* example button.
 
 ![](../web/public/tutorial_images/self-similarity_level1.png)
 
@@ -41,11 +45,15 @@ To navigate an interactive plot:
 - Click and drag to pan across the plot.
 - Select `Reset view` to return to the complete plot, and `Clear` to return back to the landing page.
 
-Zooming is limited to a minimum visible interval of approximately 100 bp on each eligible axis. At the closest zoom levels, the browser switches to exact *k*-mer rendering. The default exact view colors matching cells by nucleotide base, while the `Identity` option applies the selected identity palette.
+Zooming is limited to a minimum visible interval of approximately 100 bp on each eligible axis. At the closest zoom levels, the browser switches to exact *k*-mer rendering and colors matching cells by nucleotide base.
 
 ![](../web/public/tutorial_images/kmer_coloring.png)
 
 Hovering over a plot displays the X and Y sequence names, genomic intervals, and estimated identity for the cell beneath the pointer. Cursor guide lines can be configured or disabled in `Advanced options`.
+
+Press `R` while hovering over an interactive plot to anchor a cross ruler at the current position. Subsequent hover readouts show signed X and Y genomic distances from that anchor, which is useful for measuring arrays, duplications, and other structures. Press `R` again to remove the ruler and restore absolute coordinates.
+
+![](../web/public/tutorial_images/ruler.png)
 
 `ModDotPlot Browser` supports three plot modes when multiple sequences are available:
 
@@ -97,7 +105,7 @@ The `Color` control provides two display modes:
 
 ![](../web/public/tutorial_images/direction.png)
 
-The plot background can be switched between white and black. Under `Identity colors`, the palette selector contains supported ColorBrewer palettes grouped by palette class, together with Spectral and Viridis options. Spectral is the default.
+The plot background can be switched between white and black. Under `Identity colors`, the palette selector contains Blues, Greens, Reds, and Greys; Paired, Pastel1, and Pastel2; BrBG, PuOr, and RdGy; plus Spectral and Viridis. Viridis on black is the default.
 
 The identity color controls can be used to:
 
@@ -118,42 +126,27 @@ The `Feature tracks` panel can display the following computed tracks on the X ax
 BED, GFF3, and GTF annotation files can also be added from the landing page or with the `Add track` button. Plain-text, gzip-compressed, and BGZF-compressed annotations are supported. A multi-sequence annotation file is represented by one logical track, and features are automatically matched to the sequence currently displayed on each axis.
 
 Use the `Track placement` controls to display X-axis tracks above or below the plot and Y-axis tracks to its left or right. The selected placement applies to computed and imported feature tracks.
+Computed bins and imported features beneath the current plot cursor are highlighted on
+their respective X or Y track.
 
 Select `Export image` to save a high-quality rendering of the current interactive view. *Please do not use plots generated this way for official publications; use the validated [ModDotPlot CLI](https://github.com/marbl/ModDotPlot) instead.* Depending on browser support and the selected filename extension, plots can be exported as PNG, SVG, or PDF. Image exports include the visible axes, sequence labels, feature tracks, and legend. SVG and PDF exports retain vector axes, labels, tracks, and legends around the rasterized heatmap.
 
-## Exporting Data to ModDotPlot CLI
+## Exporting a config for ModDotPlot CLI
 
-As a reminder, ***this browser is meant for exploratory analysis only!*** Once you have styled a plot to your liking, select `Export ModDotPlot command` to download files for use in the [ModDotPlot CLI](https://github.com/marbl/ModDotPlot). The browser will finish preparing detailed data for the visible view and download a ZIP archive.
+As a reminder, ***this browser is meant for exploratory analysis only!*** Once you have styled a plot to your liking, select `Export ModDotPlot config` to download `moddotplot_config.json` for use in the [ModDotPlot CLI](https://github.com/marbl/ModDotPlot). The config records browser display settings only; add the original FASTA inputs when running it with the CLI.
 
-![](../web/public/tutorial_images/export_mdp.png)
-
-For a Self or Pairwise plot, the archive contains:
-
-```text
-<plot-name>.bedpe
-<plot-name>.config.json
-```
-
-The BEDPE file contains the non-empty similarity cells from the exported view. The JSON configuration records the corresponding ModDotPlot display settings and refers to the BEDPE file through its `load` field.
-
-Extract both files into the same directory:
+The exported config can then be run with the official ModDotPlot CLI after adding
+the original input paths required for the analysis:
 ```bash
-unzip <plot-name>.zip
-cd <plot-name>
-```
-
-The exported command can then be run with the official ModDotPlot CLI:
-```bash
-moddotplot -c <plot-name>.config.json -l <plot-name>.bedpe
+moddotplot -c moddotplot_config.json -f input_fasta(s).fa
 ```
 
 ![](../web/public/tutorial_images/Chr1_TRI.png)
 ![](../web/public/tutorial_images/Chr1_HIST.png)
 
-The actual exported filenames are written into the JSON metadata, so replace `<plot-name>` with the name of the downloaded package.
-
-For a Grid plot, the ZIP archive contains one BEDPE file for every selected self-comparison and every unique pairwise comparison, together with a single configuration file. Run the exported grid with:
+For a Grid plot, use the same config with the CLI's grid-only mode and appropriate
+input paths:
 
 ```bash
-moddotplot --grid-only -c <grid-name>.config.json -l <self-and-pairwise-bedpe-files>
+moddotplot --grid-only -c moddotplot_config.json -f input_fasta(s).fa
 ```

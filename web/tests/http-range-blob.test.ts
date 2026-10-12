@@ -145,6 +145,26 @@ describe("same-origin HTTP range Blob", () => {
     expect(fetched).toBe(false);
   });
 
+  it("permits explicit CORS HTTPS ranges without credentials or referrer data", async () => {
+    const bytes = new TextEncoder().encode(">r\nACGT\n");
+    const server = rangeServer(bytes);
+    const requests: RequestInit[] = [];
+    const remote = await createHttpRangeBlob("https://data.example/genome.fa", {
+      baseUrl: "https://app.example/",
+      allowCrossOrigin: true,
+      fetcher: async (input, init = {}) => {
+        requests.push(init);
+        return server.fetcher(input, init);
+      },
+    });
+
+    expect(await remote.slice(3, 7).text()).toBe("ACGT");
+    expect(requests).toHaveLength(2);
+    expect(requests.every((request) => request.credentials === "omit")).toBe(true);
+    expect(requests.every((request) => request.referrerPolicy === "no-referrer")).toBe(true);
+    expect(requests.every((request) => request.redirect === "error")).toBe(true);
+  });
+
   it("cancels an in-flight range body without leaking a rejected cancellation", async () => {
     const probe = new Uint8Array([62, 114]);
     let cancelled = false;

@@ -103,6 +103,37 @@ export function featureBarRectangle(
   return { x: width - barWidth, y, width: barWidth, height: Math.max(1, endY - y) };
 }
 
+/** Returns the device-pixel band beneath a hovered genomic bin. */
+export function featureHighlightRectangle(
+  axis: FeatureTrackAxis,
+  startFraction: number,
+  endFraction: number,
+  width: number,
+  height: number,
+  minimumBandSize = 1,
+): BarRectangle | null {
+  if (!Number.isFinite(startFraction) || !Number.isFinite(endFraction) || endFraction <= 0 || startFraction >= 1) {
+    return null;
+  }
+  const expandBand = (start: number, end: number, limit: number): [number, number] => {
+    const size = Math.min(limit, Math.max(1, minimumBandSize));
+    if (end - start >= size) return [start, end];
+    const center = (start + end) / 2;
+    const expandedStart = Math.max(0, Math.min(limit - size, Math.round(center - size / 2)));
+    return [expandedStart, expandedStart + size];
+  };
+  if (axis === "x") {
+    const rawX = Math.max(0, Math.floor(startFraction * width));
+    const rawEndX = Math.min(width, Math.ceil(endFraction * width));
+    const [x, endX] = expandBand(rawX, rawEndX, width);
+    return { x, y: 0, width: Math.max(1, endX - x), height };
+  }
+  const rawY = Math.max(0, Math.floor((1 - endFraction) * height));
+  const rawEndY = Math.min(height, Math.ceil((1 - startFraction) * height));
+  const [y, endY] = expandBand(rawY, rawEndY, height);
+  return { x: 0, y, width, height: Math.max(1, endY - y) };
+}
+
 /** Owns stackable sequence-feature canvases and a view-aware overscan cache. */
 export class FeatureTrackOverlay {
   readonly #definitions: TrackDefinition[];
@@ -110,6 +141,7 @@ export class FeatureTrackOverlay {
   readonly #cache = new Map<string, CachedTrack>();
   #metadata: FeatureTrackMetadata | null = null;
   #view: ViewChange | null = null;
+  #hoverCoordinates: Record<FeatureTrackAxis, number | null> = { x: null, y: null };
   #hoverListener: ((hover: QuantitativeTrackHover | null, event: PointerEvent) => void) | null = null;
 
   constructor(definitions: TrackDefinition[]) {
@@ -138,6 +170,11 @@ export class FeatureTrackOverlay {
     this.#hoverListener = listener;
   }
 
+  setPlotHover(coordinates: { x: number; y: number } | null): void {
+    this.#hoverCoordinates = coordinates ?? { x: null, y: null };
+    this.#draw();
+  }
+
   clear(kind?: FeatureTrackKind, axis?: FeatureTrackAxis): void {
     for (const definition of this.#definitions) {
       if (kind && definition.kind !== kind) continue;
@@ -148,6 +185,7 @@ export class FeatureTrackOverlay {
     if (!kind && !axis) {
       this.#metadata = null;
       this.#view = null;
+      this.#hoverCoordinates = { x: null, y: null };
     }
   }
 
@@ -229,6 +267,31 @@ export class FeatureTrackOverlay {
       if (!rectangle || rectangle.width === 0 || rectangle.height === 0) continue;
       context.fillRect(rectangle.x, rectangle.y, rectangle.width, rectangle.height);
     }
+
+    const hoverCoordinate = this.#hoverCoordinates[axis];
+    if (hoverCoordinate === null || hoverCoordinate < cached.start || hoverCoordinate >= cached.end) return;
+    const hoveredIndex = Math.floor((hoverCoordinate - cached.start) / Math.max(Number.EPSILON, cachedSpan) * cached.values.length);
+    const hoveredValue = cached.values[hoveredIndex];
+    if (hoveredValue === undefined || !Number.isFinite(hoveredValue)) return;
+    const hoveredStart = cached.start + hoveredIndex / cached.values.length * cachedSpan;
+    const hoveredEnd = cached.start + (hoveredIndex + 1) / cached.values.length * cachedSpan;
+    const dpr = canvas.width / Math.max(1, canvas.clientWidth);
+    const highlight = featureHighlightRectangle(
+      axis,
+      (hoveredStart - visibleStart) / visibleSpan,
+      (hoveredEnd - visibleStart) / visibleSpan,
+      canvas.width,
+      canvas.height,
+      6 * dpr,
+    );
+    if (!highlight) return;
+    context.save();
+    context.fillStyle = "rgba(255, 216, 77, 0.72)";
+    context.strokeStyle = "#ffd84d";
+    context.lineWidth = Math.max(2, 2 * dpr);
+    context.fillRect(highlight.x, highlight.y, highlight.width, highlight.height);
+    context.strokeRect(highlight.x, highlight.y, highlight.width, highlight.height);
+    context.restore();
   }
 
   #hover(definition: TrackDefinition, event: PointerEvent): void {

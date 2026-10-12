@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_EXACT_VISUALIZATION_MODE,
   RENDERER_FRAGMENT_SHADER_SOURCE,
   resolveCanvasPixelSize,
 } from "../src/renderer";
 
 describe("renderer exact-view defaults", () => {
-  it("starts exact plots in base mode", () => {
-    expect(DEFAULT_EXACT_VISUALIZATION_MODE).toBe("bases");
+  it("always renders exact plots with the base palette", () => {
+    expect(RENDERER_FRAGMENT_SHADER_SOURCE).toMatch(/if \(u_exact == 1\) \{\s*int base_x/);
+    expect(RENDERER_FRAGMENT_SHADER_SOURCE).not.toContain("u_exact_visualization");
   });
 
   it("renders missing exact evidence as the selected plot background", () => {
