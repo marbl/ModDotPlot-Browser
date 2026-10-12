@@ -1,6 +1,6 @@
 # ModDotPlot Browser User Guide & Tutorial
 
-> **Note:** This project was generated using ChatGPT 5.6 Sol (ie. vibe-coded) under the direction of Adam Phillippy and Alex Sweeten. For analyses intended for publication, please use the official [ModDotPlot CLI](https://github.com/marbl/ModDotPlot) and cite the [ModDotPlot paper](https://doi.org/10.1093/bioinformatics/btae493).
+Citation metadata is available in [`CITATION.cff`](../CITATION.cff).
 
 ## Table of contents
 

@@ -21,6 +21,12 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
   the active plot and retained for on-demand parsing when other chromosomes are
   selected, reducing startup work for whole-genome GFF/GTF files.
 * Reorganized plot hover details into distinct X and Y sections for faster reading.
+* Simplified citation metadata and consolidated the palette license notices.
+
+### Fixed
+
+* Removed crosshair lag over dense imported annotations by caching the base feature
+  canvas and painting coalesced hover highlights on a separate overlay.
 
 ## [1.0.2] - 2026-10-11
 

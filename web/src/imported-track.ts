@@ -38,7 +38,9 @@ interface ImportedTrackState {
   bothInput: HTMLInputElement;
   panels: Record<FeatureTrackAxis, HTMLElement>;
   canvases: Record<FeatureTrackAxis, HTMLCanvasElement>;
+  hoverCanvases: Record<FeatureTrackAxis, HTMLCanvasElement>;
   hitTargets: Record<FeatureTrackAxis, FeatureHit[]>;
+  hitTargetsByFeature: Record<FeatureTrackAxis, Map<ImportedFeature, FeatureHit>>;
   highlighted: Record<FeatureTrackAxis, Set<ImportedFeature>>;
   row: HTMLElement;
   detail: HTMLElement;
@@ -112,6 +114,8 @@ export class ImportedTrackManager {
   #metadata: FeatureTrackMetadata | null = null;
   #view: ViewChange | null = null;
   #hoverCoordinates: Record<FeatureTrackAxis, number | null> = { x: null, y: null };
+  readonly #pendingHoverDraws = new Map<ImportedTrackState, Set<FeatureTrackAxis>>();
+  #hoverDrawFrame = 0;
   readonly #batchAliasConfirmations: BatchAliasConfirmation[] = [];
   #batchAliasConfirmationActive = false;
 
@@ -221,6 +225,9 @@ export class ImportedTrackManager {
   }
 
   clear(): void {
+    if (this.#hoverDrawFrame !== 0) window.cancelAnimationFrame(this.#hoverDrawFrame);
+    this.#hoverDrawFrame = 0;
+    this.#pendingHoverDraws.clear();
     for (const track of this.#tracks) {
       this.#resizeObserver.unobserve(track.panels.x);
       this.#resizeObserver.unobserve(track.panels.y);
@@ -622,7 +629,9 @@ export class ImportedTrackManager {
       bothInput: bothInput.input,
       panels: { x: xView.panel, y: yView.panel },
       canvases: { x: xView.canvas, y: yView.canvas },
+      hoverCanvases: { x: xView.hoverCanvas, y: yView.hoverCanvas },
       hitTargets: { x: [], y: [] },
+      hitTargetsByFeature: { x: new Map(), y: new Map() },
       highlighted: { x: new Set(), y: new Set() },
       row,
       detail,
@@ -681,6 +690,7 @@ export class ImportedTrackManager {
   }
 
   #deleteTrack(track: ImportedTrackState): void {
+    this.#pendingHoverDraws.delete(track);
     this.#resizeObserver.unobserve(track.panels.x);
     this.#resizeObserver.unobserve(track.panels.y);
     track.panels.x.remove();
@@ -716,7 +726,10 @@ export class ImportedTrackManager {
     track.panels[axis].dataset.trackSize = String(importedTrackSize(track.lanes));
     track.panels[axis].style.flexBasis = `${importedTrackSize(track.lanes)}px`;
     if (visible) this.#draw(track, axis);
-    else clearCanvas(track.canvases[axis]);
+    else {
+      clearCanvas(track.canvases[axis]);
+      clearCanvas(track.hoverCanvases[axis]);
+    }
   }
 
   #draw(track: ImportedTrackState, axis: FeatureTrackAxis): void {
@@ -732,13 +745,17 @@ export class ImportedTrackManager {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
     track.hitTargets[axis] = [];
+    track.hitTargetsByFeature[axis].clear();
     const coordinate = axis === "x" ? view.view.x : view.view.y;
     const matrixSpan = axis === "x" ? view.view.width : view.view.height;
     const length = axis === "x" ? metadata.xLength : metadata.yLength;
     const visibleStart = coordinate / metadata.baseResolution * metadata.domainLength;
     const visibleSpan = matrixSpan / metadata.baseResolution * metadata.domainLength;
     const visibleEnd = Math.min(length, visibleStart + visibleSpan);
-    if (visibleSpan <= 0 || visibleEnd <= visibleStart) return;
+    if (visibleSpan <= 0 || visibleEnd <= visibleStart) {
+      this.#drawHoverHighlight(track, axis);
+      return;
+    }
     const hits: FeatureHit[] = [];
     const first = firstOverlappingIndex(sequenceData.prefixMaximumEnds, visibleStart);
     const dpr = canvas.width / Math.max(1, canvas.clientWidth);
@@ -758,9 +775,23 @@ export class ImportedTrackManager {
       if (hit) hits.push(hit);
     }
     track.hitTargets[axis] = hits;
+    track.hitTargetsByFeature[axis] = new Map(hits.map((hit) => [hit.feature, hit]));
+    this.#drawHoverHighlight(track, axis);
+  }
+
+  #drawHoverHighlight(track: ImportedTrackState, axis: FeatureTrackAxis): void {
+    const canvas = track.hoverCanvases[axis];
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    resizeCanvas(canvas);
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (track.panels[axis].hidden) return;
+    const dpr = canvas.width / Math.max(1, canvas.clientWidth);
     const highlighted = track.highlighted[axis];
-    for (const hit of hits) {
-      if (!highlighted.has(hit.feature)) continue;
+    for (const feature of highlighted) {
+      const hit = track.hitTargetsByFeature[axis].get(feature);
+      if (!hit) continue;
       context.save();
       context.fillStyle = "rgba(255, 216, 77, 0.24)";
       context.strokeStyle = "#ffd84d";
@@ -789,9 +820,25 @@ export class ImportedTrackManager {
         track.highlighted[axis] = next;
         track.panels[axis].dataset.hoverHighlightCount = String(next.size);
         track.panels[axis].classList.toggle("has-hover-highlight", next.size > 0);
-        if (!track.panels[axis].hidden) this.#draw(track, axis);
+        if (!track.panels[axis].hidden) this.#queueHoverDraw(track, axis);
       }
     }
+  }
+
+  #queueHoverDraw(track: ImportedTrackState, axis: FeatureTrackAxis): void {
+    const axes = this.#pendingHoverDraws.get(track) ?? new Set<FeatureTrackAxis>();
+    axes.add(axis);
+    this.#pendingHoverDraws.set(track, axes);
+    if (this.#hoverDrawFrame !== 0) return;
+    this.#hoverDrawFrame = window.requestAnimationFrame(() => {
+      this.#hoverDrawFrame = 0;
+      const pending = [...this.#pendingHoverDraws];
+      this.#pendingHoverDraws.clear();
+      for (const [pendingTrack, pendingAxes] of pending) {
+        if (!this.#tracks.includes(pendingTrack)) continue;
+        for (const pendingAxis of pendingAxes) this.#drawHoverHighlight(pendingTrack, pendingAxis);
+      }
+    });
   }
 
   #syncBothInput(track: ImportedTrackState): void {
@@ -970,7 +1017,11 @@ function smallButton(text: string, ariaLabel: string): HTMLButtonElement {
   return button;
 }
 
-function createTrackPanel(name: string, axis: FeatureTrackAxis, id: number): { panel: HTMLElement; canvas: HTMLCanvasElement } {
+function createTrackPanel(
+  name: string,
+  axis: FeatureTrackAxis,
+  id: number,
+): { panel: HTMLElement; canvas: HTMLCanvasElement; hoverCanvas: HTMLCanvasElement } {
   const panel = document.createElement("div");
   panel.id = `imported-track-${id}-${axis}-panel`;
   panel.className = `feature-track-panel feature-track-panel-${axis} imported-feature-track-panel`;
@@ -979,9 +1030,13 @@ function createTrackPanel(name: string, axis: FeatureTrackAxis, id: number): { p
   label.className = "feature-track-name";
   label.textContent = name;
   const canvas = document.createElement("canvas");
+  canvas.className = "imported-feature-track-base";
   canvas.setAttribute("aria-label", `${axis.toUpperCase()}-axis ${name} feature track`);
-  panel.append(label, canvas);
-  return { panel, canvas };
+  const hoverCanvas = document.createElement("canvas");
+  hoverCanvas.className = "imported-feature-track-hover";
+  hoverCanvas.setAttribute("aria-hidden", "true");
+  panel.append(label, canvas, hoverCanvas);
+  return { panel, canvas, hoverCanvas };
 }
 
 function prefixMaximumEnds(features: ImportedFeature[]): number[] {

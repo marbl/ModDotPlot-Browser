@@ -13,7 +13,7 @@
 * [Local/HPC Cluster Deployment](docs/DEPLOYMENT.md)
 * [Methods](docs/METHODS.md)
 * [Privacy & Data Handling](docs/PRIVACY.md)
-* [Citation and method credits](docs/CITATIONS.md)
+* [Citation metadata](CITATION.cff)
 * [Release checklist](docs/RELEASE_CHECKLIST.md)
 
 ## Citation, authorship, and license

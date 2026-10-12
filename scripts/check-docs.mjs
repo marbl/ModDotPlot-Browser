@@ -4,9 +4,7 @@ import { dirname, join, normalize, relative, resolve } from "node:path";
 const repository = resolve(import.meta.dirname, "..");
 const allowedMarkdown = new Set([
   "CHANGELOG.md",
-  "CONTRIBUTING.md",
   "README.md",
-  "docs/CITATIONS.md",
   "docs/DEPLOYMENT.md",
   "docs/METHODS.md",
   "docs/PRIVACY.md",

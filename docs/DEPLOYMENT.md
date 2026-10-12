@@ -1,6 +1,6 @@
 # Local installation and HPC deployment
 
-> **Note:** This project was generated using ChatGPT 5.6 Sol (ie. vibe-coded) under the direction of Adam Phillippy and Alex Sweeten. For analyses intended for publication, please use the official [ModDotPlot CLI](https://github.com/marbl/ModDotPlot) and cite the [ModDotPlot paper](https://doi.org/10.1093/bioinformatics/btae493).
+> **Note:** This document was generated using GPT-5.6 Sol and has not been thoroughly checked by a human for correctness.
 
 `ModDotPlot Browser` is a static Rust/WebAssembly web application. After it has been
 built, it does not require an application server or database. A web server only

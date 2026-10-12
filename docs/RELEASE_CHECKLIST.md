@@ -1,6 +1,6 @@
 # Release checklist
 
-> **Note:** This project was generated using ChatGPT 5.6 Sol (ie. vibe-coded) under the direction of Adam Phillippy and Alex Sweeten. For analyses intended for publication, please use the official [ModDotPlot CLI](https://github.com/marbl/ModDotPlot) and cite the [ModDotPlot paper](https://doi.org/10.1093/bioinformatics/btae493).
+> **Note:** This document was generated using GPT-5.6 Sol and has not been thoroughly checked by a human for correctness.
 
 This checklist applies to the v1.0.3 release. The browser remains intended for
 exploratory use; analyses intended for publication should use the official ModDotPlot CLI.
@@ -12,8 +12,7 @@ exploratory use; analyses intended for publication should use the official ModDo
   `moddotplot-interactive`; license is MIT-0 in the root and packaged crates.
 - [x] Canonical authorship is recorded in `CITATION.cff`; generated prose uses the
   standard file note.
-- [x] `CITATION.cff` requests the original ModDotPlot citation and credits method and
-  historical reference implementations.
+- [x] `CITATION.cff` requests the original ModDotPlot citation with concise metadata.
 - [x] The static application processes user-selected data locally without uploading it.
 
 ## Scientific gate

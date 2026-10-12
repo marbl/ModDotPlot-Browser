@@ -2294,6 +2294,16 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
 });
 
 test("BED and GFF logical tracks span matching sequences and disable by dragging away", async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalClearRect = CanvasRenderingContext2D.prototype.clearRect;
+    const counts = { base: 0, hover: 0 };
+    Object.defineProperty(window, "__importedTrackClearCounts", { value: counts });
+    CanvasRenderingContext2D.prototype.clearRect = function(x, y, width, height): void {
+      if (this.canvas.classList.contains("imported-feature-track-base")) counts.base += 1;
+      if (this.canvas.classList.contains("imported-feature-track-hover")) counts.hover += 1;
+      originalClearRect.call(this, x, y, width, height);
+    };
+  });
   await page.goto("/");
   await page.locator("#resolution").selectOption("500", { force: true });
   await loadFasta(page, "annotations.fa", `>chr1\n${"ACGT".repeat(300)}\n>chr2\n${"TGCA".repeat(300)}\n`);
@@ -2351,10 +2361,13 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   expect(controlLayout.listBottom).toBeLessThanOrEqual(controlLayout.addTop + 1);
   const bedPanel = page.locator('#x-feature-track-stack .imported-feature-track-panel:not([hidden])', { hasText: "colored" });
   const bedYPanel = page.locator('#y-feature-track-stack .imported-feature-track-panel:not([hidden])', { hasText: "colored" });
+  const bedCanvas = bedPanel.locator(".imported-feature-track-base");
+  const bedHoverCanvas = bedPanel.locator(".imported-feature-track-hover");
+  const bedYCanvas = bedYPanel.locator(".imported-feature-track-base");
   await expect(bedPanel).toBeVisible();
   await expect(bedYPanel).toBeVisible();
-  await expect.poll(() => bedPanel.locator("canvas").evaluate(hasOpaqueTrackBar)).toBe(true);
-  await expect.poll(() => bedPanel.locator("canvas").evaluate((track: HTMLCanvasElement) => {
+  await expect.poll(() => bedCanvas.evaluate(hasOpaqueTrackBar)).toBe(true);
+  await expect.poll(() => bedCanvas.evaluate((track: HTMLCanvasElement) => {
     const pixels = track.getContext("2d")?.getImageData(0, 0, track.width, track.height).data;
     return pixels?.some((red, index) => index % 4 === 0
       && red > 180
@@ -2363,6 +2376,13 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
       && pixels[index + 3] === 255) ?? false;
   })).toBe(true);
   await expect(page.locator("#feature-hover-highlight")).toHaveCount(0);
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const counts = (window as unknown as { __importedTrackClearCounts: { base: number; hover: number } })
+      .__importedTrackClearCounts;
+    counts.base = 0;
+    counts.hover = 0;
+  });
   const plotHoverBounds = await page.locator("#plot-canvas").boundingBox();
   if (!plotHoverBounds) throw new Error("Plot has no bounds");
   await page.mouse.move(
@@ -2371,6 +2391,20 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   );
   await expect(bedPanel).toHaveClass(/has-hover-highlight/);
   await expect(bedPanel).toHaveAttribute("data-hover-highlight-count", "1");
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __importedTrackClearCounts: { hover: number } })
+      .__importedTrackClearCounts.hover)).toBeGreaterThan(0);
+  expect(await page.evaluate(() =>
+    (window as unknown as { __importedTrackClearCounts: { base: number } })
+      .__importedTrackClearCounts.base)).toBe(0);
+  await expect.poll(() => bedHoverCanvas.evaluate((track: HTMLCanvasElement) => {
+    const pixels = track.getContext("2d")?.getImageData(0, 0, track.width, track.height).data;
+    return pixels?.some((red, index) => index % 4 === 0
+      && red > 240
+      && (pixels[index + 1] ?? 0) > 180
+      && (pixels[index + 2] ?? 255) < 160
+      && (pixels[index + 3] ?? 0) > 0) ?? false;
+  })).toBe(true);
   await expect(page.locator("#hover-card")).toContainText("x feature · red feature");
   const hoverOrder = await page.locator("#hover-card > *").evaluateAll((elements) =>
     elements.map((element) => ({
@@ -2390,7 +2424,7 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
     bedHoverBounds.y + bedHoverBounds.height * 0.75,
   );
   await expect(page.locator("#track-hover-card")).toContainText("red feature");
-  await expect.poll(() => bedYPanel.locator("canvas").evaluate((track: HTMLCanvasElement) => {
+  await expect.poll(() => bedYCanvas.evaluate((track: HTMLCanvasElement) => {
     const pixels = track.getContext("2d")?.getImageData(0, 0, track.width, track.height).data;
     return pixels?.some((red, index) => index % 4 === 0
       && red > 180
@@ -2414,7 +2448,8 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   const geneRow = page.locator(".imported-track-control", { hasText: "genes" });
   await expect(geneRow).toContainText("1 displayed feature");
   const genePanel = page.locator('#x-feature-track-stack .imported-feature-track-panel:not([hidden])', { hasText: "genes" });
-  await expect.poll(() => genePanel.locator("canvas").evaluate((track: HTMLCanvasElement) => {
+  const geneCanvas = genePanel.locator(".imported-feature-track-base");
+  await expect.poll(() => geneCanvas.evaluate((track: HTMLCanvasElement) => {
     const pixels = track.getContext("2d")?.getImageData(0, 0, track.width, track.height).data;
     return pixels?.some((red, index) => index % 4 === 0
       && red === 23
@@ -2422,7 +2457,7 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
       && pixels[index + 2] === 115
       && pixels[index + 3] === 255) ?? false;
   })).toBe(true);
-  const exonThickness = await genePanel.locator("canvas").evaluate((track: HTMLCanvasElement) => {
+  const exonThickness = await geneCanvas.evaluate((track: HTMLCanvasElement) => {
     const pixels = track.getContext("2d")!.getImageData(0, 0, track.width, track.height).data;
     const count = (fraction: number): number => {
       const x = Math.min(track.width - 1, Math.round(track.width * fraction));
@@ -2482,7 +2517,7 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(bedY).toBeEnabled();
   await expect(page.locator('#y-feature-track-stack .imported-feature-track-panel:not([hidden])', { hasText: "colored" })).toBeVisible();
-  await expect.poll(() => bedYPanel.locator("canvas").evaluate((track: HTMLCanvasElement) => {
+  await expect.poll(() => bedYCanvas.evaluate((track: HTMLCanvasElement) => {
     const pixels = track.getContext("2d")?.getImageData(0, 0, track.width, track.height).data;
     return pixels?.some((red, index) => index % 4 === 0
       && red > 180

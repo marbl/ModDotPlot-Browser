@@ -44,10 +44,6 @@ addComponent({
     { type: "vcs", url: "https://github.com/axismaps/colorbrewer" },
   ],
 });
-licenseSections.push(
-  `===== ColorBrewer 2 :: Apache-2.0 =====\n${readFileSync(join(root, "COLORBREWER_LICENSE.txt"), "utf8").trim()}`,
-);
-
 addComponent({
   type: "library",
   name: "d3-scale-chromatic",
@@ -59,9 +55,7 @@ addComponent({
     { type: "vcs", url: "https://github.com/d3/d3-scale-chromatic" },
   ],
 });
-licenseSections.push(
-  `===== d3-scale-chromatic 3.1.0 :: LICENSE =====\n${readFileSync(join(root, "D3_SCALE_CHROMATIC_LICENSE.txt"), "utf8").trim()}`,
-);
+licenseSections.push(readFileSync(join(root, "PALETTE_LICENSES.txt"), "utf8").trim());
 
 const cargo = JSON.parse(execFileSync("cargo", ["metadata", "--format-version", "1", "--locked"], {
   cwd: root,
