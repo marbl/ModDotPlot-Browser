@@ -148,5 +148,5 @@ For a Grid plot, use the same config with the CLI's grid-only mode and appropria
 input paths:
 
 ```bash
-moddotplot --grid-only -c moddotplot_config.json input_fasta(s).fa
+moddotplot --grid-only -c moddotplot_config.json -f input_fasta(s).fa
 ```
