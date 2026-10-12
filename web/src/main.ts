@@ -2512,7 +2512,10 @@ function clearSession(): void {
   histogramBins = new Uint32Array(101);
   histogramTiles.clear();
   clearGrid();
-  clearRuler();
+  activeRuler = null;
+  lastHoverDatum = null;
+  lastHoverEvent = null;
+  rulerMarker.hidden = true;
   cursorGuideController.hide();
   renderer.clearTiles();
   featureTracks.clear();
