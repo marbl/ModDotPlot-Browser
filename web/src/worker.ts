@@ -193,7 +193,7 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
       await loadFiles(message.files, message.generation);
       break;
     case "load-remote":
-      await loadRemoteFasta(message.source, message.generation);
+      await loadRemoteFastas(message.sources, message.generation);
       break;
     case "load-precomputed-overview":
       await loadPrecomputedOverview(message.source, message.artifact, message.generation);
@@ -500,118 +500,167 @@ async function loadFiles(files: File[], generation: number): Promise<void> {
   }
 }
 
-async function loadRemoteFasta(
-  source: RemoteFastaDownloadDescriptor,
+async function loadRemoteFastas(
+  sources: RemoteFastaDownloadDescriptor[],
   generation: number,
 ): Promise<void> {
-  const requestedUrl = new URL(source.url);
-  if (requestedUrl.protocol !== "https:") {
-    throw new Error("Remote FASTA URLs must use HTTPS.");
-  }
+  if (sources.length === 0) throw new Error("At least one remote FASTA URL is required.");
+  const requestedUrls = sources.map((source) => {
+    const url = new URL(source.url);
+    if (url.protocol !== "https:") throw new Error("Remote FASTA URLs must use HTTPS.");
+    return url;
+  });
   const job = datasetJob;
-  post({
-    type: "status",
-    generation,
-    text: `Connecting to ${requestedUrl.hostname}`,
-    progress: 0,
-    busy: true,
-  });
-  if (await tryLoadRemoteIndexedFasta(source, generation, job)) return;
-  const response = await fetch(requestedUrl, {
-    method: "GET",
-    mode: "cors",
-    credentials: "omit",
-    redirect: "follow",
-    referrerPolicy: "no-referrer",
-    signal: job.signal,
-  });
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new Error(`The remote server returned HTTP ${response.status} ${response.statusText || "while loading the FASTA"}.`);
-  }
-  if (!response.body) throw new Error("The remote server returned no readable FASTA data.");
-  if (response.url && new URL(response.url).protocol !== "https:") {
-    await response.body.cancel().catch(() => undefined);
-    throw new Error("The remote FASTA redirected to a non-HTTPS URL.");
-  }
-
-  const contentEncoding = response.headers.get("content-encoding")?.trim().toLocaleLowerCase("en-US") ?? "";
-  const browserDecodedContent = contentEncoding.length > 0 && contentEncoding !== "identity";
-  const declaredLength = Number(response.headers.get("content-length"));
-  const totalBytes = !browserDecodedContent && Number.isSafeInteger(declaredLength) && declaredLength > 0
-    ? declaredLength
-    : 0;
-  let receivedBytes = 0;
-  let lastPercentage = -1;
-  let stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      receivedBytes += chunk.byteLength;
-      const progress = totalBytes > 0 ? Math.min(1, receivedBytes / totalBytes) : undefined;
-      const percentage = progress === undefined ? receivedBytes : Math.floor(progress * 100);
-      if (percentage !== lastPercentage && job.canPublish(generation)) {
-        lastPercentage = percentage;
-        post({
-          type: "status",
-          generation,
-          text: `Streaming and validating ${source.fileName}`,
-          progress,
-          busy: true,
-        });
-      }
-      controller.enqueue(chunk);
-    },
-  }));
-  if (/\.gz$/i.test(source.fileName)) {
-    const inspected = await inspectRemoteGzipStream(stream);
-    stream = inspected.bgzf
-      ? decompressBgzfStream(inspected.stream)
-      : inspected.gzip
-        ? (inspected.stream as unknown as ReadableStream<BufferSource>)
-          .pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>
-        : inspected.stream;
-  }
-
   const staging = new ComputeSession();
   const loadedMetadata: Array<Omit<SequenceMetadata, "selectionId">> = [];
+  const stagedIndexedSources = new Map<number, IndexedSequenceRecord>();
   const stagedSessionIndexes = new Map<number, number>();
   const stagedGlobalIndexes = new Map<number, number>();
   const ingestBuffer = new ReusableSequenceIngestBuffer(SEQUENCE_INGEST_SHARD_BYTES);
-  const reader = stream.getReader();
-  staging.begin_fasta();
-  const appendMetadata = (value: unknown): void => {
-    for (const record of parsedSequenceRecords(value)) {
-      const globalIndex = loadedMetadata.length;
-      loadedMetadata.push({
-        index: globalIndex,
-        name: record.name,
-        description: record.description,
-        length: Number(record.length),
-        sourceFile: source.fileName,
-      });
-      stagedSessionIndexes.set(globalIndex, record.index);
-      stagedGlobalIndexes.set(record.index, globalIndex);
-    }
-  };
-  const consumeShard = (shard: Uint8Array): void => {
-    appendMetadata(staging.push_fasta_chunk(shard));
-  };
+
   try {
-    while (true) {
-      const result = await reader.read();
-      if (!job.canPublish(generation) || !operationIsCurrent()) {
-        await reader.cancel().catch(() => undefined);
-        return;
+    for (const [sourceIndex, source] of sources.entries()) {
+      if (!job.canPublish(generation) || !operationIsCurrent()) return;
+      const requestedUrl = requestedUrls[sourceIndex]!;
+      const baseProgress = sourceIndex / sources.length;
+      post({
+        type: "status",
+        generation,
+        text: `Checking ${source.fileName} for remote indexes`,
+        progress: baseProgress,
+        busy: true,
+      });
+      const indexed = await openRemoteIndexedFasta(source, job);
+      if (!job.canPublish(generation) || !operationIsCurrent()) return;
+      if (indexed) {
+        for (const record of indexed.records) {
+          if (record.length > MAX_SEQUENCE_BASES) {
+            throw new Error(
+              `Sequence '${record.name}' contains ${record.length.toLocaleString()} bases; the limit is ${MAX_SEQUENCE_BASES.toLocaleString()}.`,
+            );
+          }
+          const globalIndex = loadedMetadata.length;
+          loadedMetadata.push({
+            index: globalIndex,
+            name: record.name,
+            description: "",
+            length: record.length,
+            sourceFile: source.fileName,
+          });
+          stagedIndexedSources.set(globalIndex, { source: indexed, record });
+        }
+        post({
+          type: "status",
+          generation,
+          text: `Opened indexed ${source.fileName}; sequence data will stream on demand`,
+          progress: (sourceIndex + 1) / sources.length,
+          busy: true,
+        });
+        continue;
       }
-      if (result.done) break;
-      ingestBuffer.append(result.value, consumeShard);
+
+      post({
+        type: "status",
+        generation,
+        text: `Connecting to ${requestedUrl.hostname}`,
+        progress: baseProgress,
+        busy: true,
+      });
+      const response = await fetch(requestedUrl, {
+        method: "GET",
+        mode: "cors",
+        credentials: "omit",
+        redirect: "follow",
+        referrerPolicy: "no-referrer",
+        signal: job.signal,
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error(`The remote server returned HTTP ${response.status} ${response.statusText || "while loading the FASTA"}.`);
+      }
+      if (!response.body) throw new Error("The remote server returned no readable FASTA data.");
+      if (response.url && new URL(response.url).protocol !== "https:") {
+        await response.body.cancel().catch(() => undefined);
+        throw new Error("The remote FASTA redirected to a non-HTTPS URL.");
+      }
+
+      const contentEncoding = response.headers.get("content-encoding")?.trim().toLocaleLowerCase("en-US") ?? "";
+      const browserDecodedContent = contentEncoding.length > 0 && contentEncoding !== "identity";
+      const declaredLength = Number(response.headers.get("content-length"));
+      const totalBytes = !browserDecodedContent && Number.isSafeInteger(declaredLength) && declaredLength > 0
+        ? declaredLength
+        : 0;
+      let receivedBytes = 0;
+      let lastPercentage = -1;
+      let stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          receivedBytes += chunk.byteLength;
+          const sourceProgress = totalBytes > 0 ? Math.min(1, receivedBytes / totalBytes) : 0;
+          const percentage = totalBytes > 0 ? Math.floor(sourceProgress * 100) : receivedBytes;
+          if (percentage !== lastPercentage && job.canPublish(generation)) {
+            lastPercentage = percentage;
+            post({
+              type: "status",
+              generation,
+              text: `Streaming and validating ${source.fileName}`,
+              progress: (sourceIndex + sourceProgress) / sources.length,
+              busy: true,
+            });
+          }
+          controller.enqueue(chunk);
+        },
+      }));
+      if (/\.gz$/i.test(source.fileName)) {
+        const inspected = await inspectRemoteGzipStream(stream);
+        stream = inspected.bgzf
+          ? decompressBgzfStream(inspected.stream)
+          : inspected.gzip
+            ? (inspected.stream as unknown as ReadableStream<BufferSource>)
+              .pipeThrough(new DecompressionStream("gzip")) as ReadableStream<Uint8Array>
+            : inspected.stream;
+      }
+
+      const reader = stream.getReader();
+      staging.begin_fasta();
+      const appendMetadata = (value: unknown): void => {
+        for (const record of parsedSequenceRecords(value)) {
+          const globalIndex = loadedMetadata.length;
+          loadedMetadata.push({
+            index: globalIndex,
+            name: record.name,
+            description: record.description,
+            length: Number(record.length),
+            sourceFile: source.fileName,
+          });
+          stagedSessionIndexes.set(globalIndex, record.index);
+          stagedGlobalIndexes.set(record.index, globalIndex);
+        }
+      };
+      const consumeShard = (shard: Uint8Array): void => {
+        appendMetadata(staging.push_fasta_chunk(shard));
+      };
+      try {
+        while (true) {
+          const result = await reader.read();
+          if (!job.canPublish(generation) || !operationIsCurrent()) {
+            await reader.cancel().catch(() => undefined);
+            return;
+          }
+          if (result.done) break;
+          ingestBuffer.append(result.value, consumeShard);
+        }
+        ingestBuffer.flush(consumeShard);
+        appendMetadata(staging.finish_fasta());
+      } finally {
+        reader.releaseLock();
+      }
     }
-    ingestBuffer.flush(consumeShard);
-    appendMetadata(staging.finish_fasta());
+
     if (!job.canPublish(generation) || !operationIsCurrent()) return;
     const committed = assignSequenceSelectionIds(loadedMetadata);
     session.free();
     session = staging;
-    indexedSequenceSources = new Map();
+    indexedSequenceSources = stagedIndexedSources;
     sessionSequenceIndexes = stagedSessionIndexes;
     globalSequenceIndexes = stagedGlobalIndexes;
     activeSessionParameters = null;
@@ -622,22 +671,13 @@ async function loadRemoteFasta(
     post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
   } finally {
     if (session !== staging) staging.free();
-    reader.releaseLock();
   }
 }
 
-async function tryLoadRemoteIndexedFasta(
+async function openRemoteIndexedFasta(
   descriptor: RemoteFastaDownloadDescriptor,
-  generation: number,
   job: DatasetSession,
-): Promise<boolean> {
-  post({
-    type: "status",
-    generation,
-    text: `Checking ${descriptor.fileName} for remote indexes`,
-    progress: 0,
-    busy: true,
-  });
+): Promise<IndexedFastaSource | null> {
   let remote: Awaited<ReturnType<typeof createHttpRangeBlob>>;
   try {
     remote = await createHttpRangeBlob(descriptor.url, {
@@ -648,9 +688,9 @@ async function tryLoadRemoteIndexedFasta(
     });
   } catch (error) {
     if (job.signal.aborted) throw error;
-    return false;
+    return null;
   }
-  if (!job.canPublish(generation) || !operationIsCurrent()) return false;
+  if (job.signal.aborted || !operationIsCurrent()) return null;
 
   const compressedName = /\.gz$/i.test(descriptor.fileName);
   let faiBytes: Uint8Array | null;
@@ -674,11 +714,10 @@ async function tryLoadRemoteIndexedFasta(
     ]);
   } catch (error) {
     if (job.signal.aborted) throw error;
-    return false;
+    return null;
   }
-  if (!faiBytes || !job.canPublish(generation) || !operationIsCurrent()) return false;
-  if (compressedName && (!bgzf || !gziBytes)) return false;
-  if (!job.canPublish(generation) || !operationIsCurrent()) return false;
+  if (!faiBytes || job.signal.aborted || !operationIsCurrent()) return null;
+  if (compressedName && (!bgzf || !gziBytes)) return null;
 
   const faiText = new TextDecoder("utf-8", { fatal: true }).decode(faiBytes);
   const indexed = await createIndexedFastaSource(
@@ -686,46 +725,7 @@ async function tryLoadRemoteIndexedFasta(
     faiText,
     compressedName ? { gzi: gziBytes as Uint8Array } : {},
   );
-  const metadata: Array<Omit<SequenceMetadata, "selectionId">> = [];
-  const stagedIndexedSources = new Map<number, IndexedSequenceRecord>();
-  for (const record of indexed.records) {
-    if (record.length > MAX_SEQUENCE_BASES) {
-      throw new Error(
-        `Sequence '${record.name}' contains ${record.length.toLocaleString()} bases; the limit is ${MAX_SEQUENCE_BASES.toLocaleString()}.`,
-      );
-    }
-    const index = metadata.length;
-    metadata.push({
-      index,
-      name: record.name,
-      description: "",
-      length: record.length,
-      sourceFile: descriptor.fileName,
-    });
-    stagedIndexedSources.set(index, { source: indexed, record });
-  }
-  if (!job.canPublish(generation) || !operationIsCurrent()) return false;
-
-  const staging = new ComputeSession();
-  session.free();
-  session = staging;
-  indexedSequenceSources = stagedIndexedSources;
-  sessionSequenceIndexes = new Map();
-  globalSequenceIndexes = new Map();
-  activeSessionParameters = null;
-  precomputedOverview = null;
-  precomputedOverviews.clear();
-  job.sequences = assignSequenceSelectionIds(metadata);
-  post({
-    type: "status",
-    generation,
-    text: `Opened indexed ${descriptor.fileName}; sequence data will stream on demand`,
-    progress: 1,
-    busy: true,
-  });
-  post({ type: "sequences", generation, sequences: job.sequences });
-  post({ type: "memory", estimatedBytes: allocatedWorkerBytes() });
-  return true;
+  return job.signal.aborted || !operationIsCurrent() ? null : indexed;
 }
 
 function companionUrl(input: string, suffix: ".fai" | ".gzi"): URL {
