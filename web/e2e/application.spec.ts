@@ -810,7 +810,8 @@ test("Save As exports one ModDotPlot config and complete PNG/SVG/PDF composition
     kmer: 21,
     compare_only: false,
     grid_only: false,
-    palette: "Spectral_11",
+    palette: "Viridis",
+    output_dir: "chrshort",
     colors: expect.any(Array),
     breakpoints: expect.any(Array),
     _moddotplot_browser: {
@@ -819,6 +820,7 @@ test("Save As exports one ModDotPlot config and complete PNG/SVG/PDF composition
   });
   expect(cliConfig).not.toHaveProperty("load");
   expect(cliConfig).not.toHaveProperty("fasta");
+  expect(cliConfig).not.toHaveProperty("modimizer");
   expect(cliConfig.colors).toHaveLength(12);
   expect(cliConfig.breakpoints).toHaveLength(13);
   expect(cliConfig.identity).toBe(cliConfig.breakpoints[0]);

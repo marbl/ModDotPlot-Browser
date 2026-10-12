@@ -2811,7 +2811,6 @@ function currentModDotPlotCliConfig(): Blob | null {
     const firstIndex = selected[0]?.index ?? 0;
     return createModDotPlotCliConfigBlob({
       appVersion: __APP_VERSION__,
-      baseName: currentExportBaseName(),
       plotMode: "grid",
       sequences,
       gridSequenceIndices: gridSelectedIndices,
@@ -2829,7 +2828,6 @@ function currentModDotPlotCliConfig(): Blob | null {
   if (!activeParameters || !pendingView) return null;
   return createModDotPlotCliConfigBlob({
     appVersion: __APP_VERSION__,
-    baseName: currentExportBaseName(),
     plotMode,
     sequences,
     gridSequenceIndices: gridSelectedIndices,
