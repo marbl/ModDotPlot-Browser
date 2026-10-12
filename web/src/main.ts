@@ -12,17 +12,14 @@ import {
 import { selectDetailResolution, selectTiles } from "./detail";
 import { DnaLoader } from "./dna-loader";
 import { ExportController } from "./export-controller";
-import { createNumericExport, exportBaseName, type ExportProvenance, type NumericExportContext } from "./export";
+import { exportBaseName, type ExportProvenance } from "./export";
 import { createModDotPlotCliConfigBlob } from "./moddotplot-config";
 import {
   DEFAULT_EXACT_KMER_GEOMETRY,
-  DEFAULT_EXACT_VISUALIZATION,
   exactConfigDigest,
   exactGeometryLabel,
-  exactIdentityLabel,
   exactModeBannerText,
   type ExactKmerGeometry,
-  type ExactVisualizationMode,
 } from "./exact-mode";
 import { formatBases, formatBytes, formatInterval, formatPlotWindowSize, plotWindowSizeBases } from "./format";
 import { GridPairRenderer } from "./grid-renderer";
@@ -137,8 +134,6 @@ const plotGridView = element<HTMLElement>("plot-grid-view");
 const plotGrid = element<HTMLElement>("plot-grid");
 const plotLoading = element<HTMLElement>("plot-loading");
 const backToGridButton = element<HTMLButtonElement>("back-to-grid");
-const exactModeControls = element<HTMLElement>("exact-mode-controls");
-const exactViewButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-exact-view]")];
 const exactModeBanner = element<HTMLElement>("exact-mode-banner");
 const exactBaseLegend = element<HTMLElement>("exact-base-legend");
 const dnaLoader = new DnaLoader();
@@ -338,7 +333,6 @@ let lastHoverDatum: HoverDatum | null = null;
 let lastHoverEvent: PointerEvent | null = null;
 let activeRuler: RulerAnchor | null = null;
 let currentMeasurement: "sketch" | "kmer" = "sketch";
-let exactVisualization: ExactVisualizationMode = DEFAULT_EXACT_VISUALIZATION;
 const exactGeometry: ExactKmerGeometry = DEFAULT_EXACT_KMER_GEOMETRY;
 let overviewReadyText = "Ready";
 let plotStatusText = "Ready";
@@ -747,12 +741,6 @@ paletteColorEditor.addEventListener("cancel", (event) => {
   event.preventDefault();
   closePaletteColorEditor(true);
 });
-for (const button of exactViewButtons) {
-  button.addEventListener("click", () => {
-    const mode = button.dataset.exactView;
-    if (mode === "identity" || mode === "bases") setExactVisualization(mode);
-  });
-}
 for (const button of backgroundButtons) {
   button.addEventListener("click", () => {
     for (const peer of backgroundButtons) peer.setAttribute("aria-pressed", String(peer === button));
@@ -788,9 +776,7 @@ new ExportController({
   axes,
   baseName: currentExportBaseName,
   provenance: currentExportProvenance,
-  numericContext: currentNumericExportContext,
   cliConfig: currentModDotPlotCliConfig,
-  gridCommandEntries: currentGridCommandEntries,
   prepareDetailedExport,
   progressDialog: exportProgressDialog,
   progressMessage: exportProgressMessage,
@@ -1908,6 +1894,8 @@ function requestFeatureTracks(): void {
 
 function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   if (!datum) {
+    featureTracks.setPlotHover(null);
+    importedTracks.setPlotHover(null);
     lastHoverDatum = null;
     lastHoverEvent = null;
     hoverCard.hidden = true;
@@ -1916,9 +1904,13 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   }
   lastHoverDatum = datum;
   lastHoverEvent = event;
-  const identity = datum.quality === "exact"
-    ? exactIdentityLabel(datum.identity)
-    : datum.identity === null
+  const hoverCoordinates = {
+    x: (datum.genomicXStart + datum.genomicXEnd) / 2,
+    y: (datum.genomicYStart + datum.genomicYEnd) / 2,
+  };
+  featureTracks.setPlotHover(hoverCoordinates);
+  importedTracks.setPlotHover(hoverCoordinates);
+  const identity = datum.identity === null
       ? "identity unavailable"
       : `identity ${datum.identity.toFixed(2)}%`;
   const xName = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "sequence";
@@ -1930,29 +1922,23 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
   const yPosition = delta
     ? `Δy ${yName} · ${formatSignedDistance(delta.y)}`
     : `y ${yName} · ${formatInterval(datum.genomicYStart, datum.genomicYEnd)}`;
-  const lines = [
-    Object.assign(document.createElement("strong"), { textContent: identity }),
-    Object.assign(document.createElement("span"), { textContent: xPosition }),
-    Object.assign(document.createElement("span"), { textContent: yPosition }),
-  ];
   const showBase = datum.quality === "exact"
-    && exactVisualization === "bases"
     && selectedColorMode() === "similarity"
     && datum.xBase !== undefined
     && datum.xBase !== null;
-  if (showBase) {
-    lines.push(Object.assign(document.createElement("span"), {
-      textContent: `Base ${datum.xBase}`,
-    }));
-  }
+  const measurement = showBase ? `Base ${datum.xBase}` : datum.quality === "exact" ? "exact k-mer match" : identity;
+  const lines = [
+    Object.assign(document.createElement("strong"), { textContent: measurement }),
+    Object.assign(document.createElement("span"), { textContent: xPosition }),
+    Object.assign(document.createElement("span"), { textContent: yPosition }),
+  ];
   if (delta) {
     lines.push(Object.assign(document.createElement("small"), {
       textContent: "Ruler active · press R to return to absolute coordinates",
     }));
   }
   hoverCard.replaceChildren(...lines);
-  const baseSummary = showBase ? `; Base ${datum.xBase}` : "";
-  plotSummary.textContent = `${identity}; ${xPosition}; ${yPosition}${baseSummary}.`;
+  plotSummary.textContent = `${measurement}; ${xPosition}; ${yPosition}.`;
   hoverCard.hidden = false;
   const frame = hoverCard.parentElement?.getBoundingClientRect();
   if (frame) {
@@ -2246,29 +2232,14 @@ function setColorMode(mode: "similarity" | "direction"): void {
   updateExactModeUi();
 }
 
-function setExactVisualization(mode: ExactVisualizationMode): void {
-  exactVisualization = mode;
-  renderer.setExactVisualizationMode(mode);
-  if (activeParameters && currentMeasurement === "kmer") {
-    updateScientificProvenance(activeConfigurations, activeParameters.k);
-  }
-  updateExactModeUi();
-}
-
 function updateExactModeUi(): void {
   const active = plotMode !== "grid" && currentMeasurement === "kmer";
   const colorMode = selectedColorMode();
-  renderer.setExactVisualizationMode(exactVisualization);
-  exactModeControls.hidden = !active;
   exactModeBanner.hidden = !active;
-  exactBaseLegend.hidden = !active || exactVisualization !== "bases" || colorMode === "direction";
-  for (const button of exactViewButtons) {
-    button.setAttribute("aria-pressed", String(button.dataset.exactView === exactVisualization));
-  }
+  exactBaseLegend.hidden = !active || colorMode === "direction";
   exactModeBanner.textContent = exactModeBannerText(
     Number(activeParameters?.k ?? kmerInput.value),
     exactGeometry,
-    exactVisualization,
     colorMode,
   );
 }
@@ -2476,7 +2447,6 @@ function clearSession(): void {
   recoveryRemoteFasta = null;
   comparisonReady = false;
   currentMeasurement = "sketch";
-  exactVisualization = DEFAULT_EXACT_VISUALIZATION;
   activeParameters = null;
   activeConfigurations = [];
   exportDataButton.disabled = true;
@@ -2531,7 +2501,6 @@ function clearSession(): void {
   featureTrackControls.hidden = false;
   plotActions.hidden = false;
   histogramCanvas.hidden = false;
-  renderer.setExactVisualizationMode(exactVisualization);
   setColorMode("similarity");
   workspace.hidden = true;
   landing.hidden = false;
@@ -2767,65 +2736,22 @@ function gridCommandReady(run = gridRun): boolean {
     && run!.entries.every((entry) => entry.renderer.exportTileViews().length > 0);
 }
 
-async function currentGridCommandEntries(
-  onProgress: (message: string, progress?: number) => void,
-): Promise<Array<{ name: string; data: Blob }> | null> {
-  const run = gridRun;
-  if (plotMode !== "grid") return null;
-  if (!gridCommandReady(run) || !run) throw new Error("Wait for every grid comparison to finish before exporting.");
-
-  const archiveEntries: Array<{ name: string; data: Blob }> = [];
-  const loadFiles: string[] = [];
-  const exportedAt = new Date().toISOString();
-  for (let index = 0; index < run.entries.length; index += 1) {
-    const entry = run.entries[index]!;
-    const x = sequences.find((sequence) => sequence.index === entry.comparison.xIndex);
-    const y = sequences.find((sequence) => sequence.index === entry.comparison.yIndex);
-    if (!x || !y) throw new Error("A selected grid sequence is no longer available.");
-    onProgress(
-      `Building grid BEDPE ${index + 1}/${run.entries.length} · ${x.selectionId} vs ${y.selectionId}`,
-      index / (run.entries.length + 1),
-    );
-    const fileName = `${exportBaseName(x.selectionId, y.selectionId)}.bedpe`;
-    const domainLength = Math.max(1, x.length, y.length);
-    const resolution = entry.parameters.resolution;
-    const viewport = { x: 0, y: 0, width: resolution, height: resolution };
-    const provenance = gridExportProvenance(entry, x, y, viewport, exportedAt);
-    archiveEntries.push({
-      name: fileName,
-      data: createNumericExport(entry.renderer.exportTileViews(), {
-        domainLength,
-        baseResolution: resolution,
-        viewport,
-        xName: x.name,
-        yName: y.name,
-      }, provenance, "bedpe"),
-    });
-    loadFiles.push(fileName);
-  }
-
-  const selected = gridSelectedIndices.map((index) => sequences.find((sequence) => sequence.index === index))
-    .filter((sequence): sequence is SequenceMetadata => Boolean(sequence));
-  const domainLength = Math.max(1, ...selected.map((sequence) => sequence.length));
-  const resolution = Math.min(GRID_OVERVIEW_RESOLUTION, domainLength);
-  const firstIndex = selected[0]?.index ?? 0;
-  const template = run.entries[0]!.parameters;
-  const baseName = currentExportBaseName();
-  onProgress("Building grid-only ModDotPlot config", run.entries.length / (run.entries.length + 1));
-  archiveEntries.push({
-    name: `${baseName}.config.json`,
-    data: createModDotPlotCliConfigBlob({
+function currentModDotPlotCliConfig(): Blob | null {
+  if (plotMode === "grid") {
+    const run = gridRun;
+    if (!gridCommandReady(run) || !run) return null;
+    const selected = gridSelectedIndices.map((index) => sequences.find((sequence) => sequence.index === index))
+      .filter((sequence): sequence is SequenceMetadata => Boolean(sequence));
+    const domainLength = Math.max(1, ...selected.map((sequence) => sequence.length));
+    const resolution = Math.min(GRID_OVERVIEW_RESOLUTION, domainLength);
+    const firstIndex = selected[0]?.index ?? 0;
+    return createModDotPlotCliConfigBlob({
       appVersion: __APP_VERSION__,
-      baseName,
+      baseName: currentExportBaseName(),
       plotMode: "grid",
       sequences,
       gridSequenceIndices: gridSelectedIndices,
-      parameters: {
-        ...template,
-        xIndex: firstIndex,
-        yIndex: firstIndex,
-        resolution,
-      },
+      parameters: { ...run.entries[0]!.parameters, xIndex: firstIndex, yIndex: firstIndex, resolution },
       domainLength,
       currentResolution: resolution,
       viewport: { x: 0, y: 0, width: resolution, height: resolution, domain: resolution, minSize: 1 },
@@ -2834,60 +2760,8 @@ async function currentGridCommandEntries(
       paletteColors: activeHeatmapColors(),
       heatmapRange,
       colorMode: selectedColorMode(),
-      loadFiles,
-    }),
-  });
-  return archiveEntries;
-}
-
-function gridExportProvenance(
-  entry: GridRunEntry,
-  x: SequenceMetadata,
-  y: SequenceMetadata,
-  viewport: { x: number; y: number; width: number; height: number },
-  exportedAt: string,
-): ExportProvenance {
-  const darkBackground = backgroundButtons.some(
-    (button) => button.dataset.backgroundMode === "black" && button.getAttribute("aria-pressed") === "true",
-  );
-  return {
-    software: __APP_VERSION__,
-    exportedAt,
-    method: "ANI_c=C^(1/k), the historical containment-derived ModDotPlot display score; exact complete distinct canonical k-mer-set containment is the validation oracle, not alignment-derived ANI_m.",
-    schedulerPolicyVersion: REFINEMENT_POLICY_VERSION,
-    comparison: entry.parameters,
-    configurations: entry.configurations,
-    display: {
-      measurement: "sketch",
-      colorMode: selectedColorMode(),
-      exactVisualization: null,
-      exactGeometry: null,
-      palette: selectedHeatmapPalette(),
-      paletteColorCount: selectedHeatmapColorCount(),
-      paletteReversed,
-      paletteColors: activeHeatmapColors(),
-      heatmapRange,
-      background: darkBackground ? "black" : "white",
-    },
-    viewport,
-    sequences: { x, y },
-  };
-}
-
-function currentNumericExportContext(): NumericExportContext | null {
-  if (!activeParameters || !pendingView) return null;
-  const xName = sequences.find((sequence) => sequence.index === activeParameters?.xIndex)?.name ?? "x";
-  const yName = sequences.find((sequence) => sequence.index === activeParameters?.yIndex)?.name ?? "y";
-  return {
-    domainLength: activeDomainLength,
-    baseResolution: activeParameters.resolution,
-    viewport: pendingView.view,
-    xName,
-    yName,
-  };
-}
-
-function currentModDotPlotCliConfig(): Blob | null {
+    });
+  }
   if (!activeParameters || !pendingView) return null;
   return createModDotPlotCliConfigBlob({
     appVersion: __APP_VERSION__,
@@ -2933,7 +2807,7 @@ function currentExportProvenance(): ExportProvenance {
     display: {
       measurement: currentMeasurement,
       colorMode: selectedColorMode(),
-      exactVisualization: currentMeasurement === "kmer" ? exactVisualization : null,
+      exactVisualization: currentMeasurement === "kmer" ? "bases" : null,
       exactGeometry: currentMeasurement === "kmer" ? exactGeometry : null,
       palette: selectedHeatmapPalette(),
       paletteColorCount: selectedHeatmapColorCount(),
@@ -2974,11 +2848,7 @@ function updateScientificProvenance(
   k: number,
 ): void {
   if (currentMeasurement === "kmer") {
-    const visualization = selectedColorMode() === "direction"
-      ? "direction"
-      : exactVisualization === "bases"
-        ? "Bases"
-        : "identity";
+    const visualization = selectedColorMode() === "direction" ? "direction" : "Bases";
     scientificProvenance.textContent = `Exact canonical ${k}-mer mode · ${exactGeometryLabel(exactGeometry)} · ${visualization} · software ${__APP_VERSION__}`;
     scientificProvenance.title = [
       `software=${__APP_VERSION__}`,
@@ -2987,7 +2857,7 @@ function updateScientificProvenance(
       `k=${k}`,
       "resolution=1 bp/cell",
       `geometry=${exactGeometry}`,
-      `visualization=${exactVisualization}`,
+      "visualization=bases",
       `color-mode=${selectedColorMode()}`,
       "estimator=none",
     ].join("\n");

@@ -7,6 +7,21 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-11
+
+### Changed
+
+* Replaced **Export ModDotPlot command** with **Export ModDotPlot config**. It now
+  saves one `moddotplot_config.json` file and no longer builds BEDPE or ZIP output.
+* Simplified one-base exact mode to its useful base-colored view and removed the
+  identity/base view selector.
+* Added always-on coordinate-linked highlighting for computed and imported X and Y
+  feature tracks.
+* Reduced the palette menu to the requested sequential, qualitative, and diverging
+  ColorBrewer choices while retaining the featured Spectral and Viridis palettes.
+* Compressed the palette color editor to its content height so it no longer fills the
+  plot vertically.
+
 ## [1.0.1] - 2026-10-11
 
 ### Added

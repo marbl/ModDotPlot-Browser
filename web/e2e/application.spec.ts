@@ -4,25 +4,6 @@ import { gzipSync } from "node:zlib";
 
 const shortFasta = ">chrShort\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
 
-function readStoredZip(buffer: Buffer): Map<string, Buffer> {
-  const entries = new Map<string, Buffer>();
-  let offset = 0;
-  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
-    const method = buffer.readUInt16LE(offset + 8);
-    if (method !== 0) throw new Error(`Unexpected ZIP compression method ${method}`);
-    const size = buffer.readUInt32LE(offset + 18);
-    const nameLength = buffer.readUInt16LE(offset + 26);
-    const extraLength = buffer.readUInt16LE(offset + 28);
-    const nameStart = offset + 30;
-    const dataStart = nameStart + nameLength + extraLength;
-    const name = buffer.subarray(nameStart, nameStart + nameLength).toString("utf8");
-    entries.set(name, buffer.subarray(dataStart, dataStart + size));
-    offset = dataStart + size;
-  }
-  if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error("ZIP central directory is missing");
-  return entries;
-}
-
 function deterministicDna(length: number, seed = 17): string {
   let state = seed;
   return Array.from({ length }, () => {
@@ -244,9 +225,8 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#plot-canvas")).toBeVisible();
   await expect(page.locator("#plot-loading")).toBeHidden();
-  await expect(page.locator("#exact-mode-controls")).toBeVisible();
-  await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('[data-exact-view="identity"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#exact-mode-controls")).toHaveCount(0);
+  await expect(page.locator("[data-exact-view]")).toHaveCount(0);
   await expect(page.locator("[data-exact-geometry]")).toHaveCount(0);
   await expect(page.locator("#show-direction")).toHaveCount(0);
   await expect(page.locator("#exact-mode-banner")).toHaveText(
@@ -256,9 +236,6 @@ test("short inputs enter exact mode without network egress", async ({ page }) =>
   await expect(page.locator("#exact-base-legend")).toBeVisible();
   await expect(page.locator("#exact-base-legend strong")).toHaveText("Base");
 
-  await page.locator('[data-exact-view="identity"]').click();
-  await expect(page.locator("#exact-base-legend")).toBeHidden();
-  await expect(page.locator("#exact-mode-banner")).toContainText("color = identity");
   await page.locator('[data-color-mode="direction"]').click();
   await expect(page.locator('[data-color-mode="direction"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#exact-base-legend")).toBeHidden();
@@ -346,7 +323,7 @@ test("Clear restores Bases with similarity coloring for a new exact session", as
 
   await expect(page.locator('[data-color-mode="similarity"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator('[data-color-mode="direction"]')).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-exact-view]")).toHaveCount(0);
   await expect(page.locator("#exact-mode-banner")).toContainText("color = Base");
   await expect(page.locator("#exact-base-legend")).toBeVisible();
 });
@@ -699,7 +676,7 @@ test("the merged landing drop stages FASTA and annotations until Explore opens t
   await expect(stagedTrack.locator('input[id$="-both"]')).toBeChecked();
 });
 
-test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions", async ({ page, browserName }) => {
+test("Save As exports one ModDotPlot config and complete PNG/SVG/PDF compositions", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "download payload inspection runs on the Chromium channels");
   await page.addInitScript(() => {
     type SaveHarness = Window & {
@@ -753,7 +730,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 15_000 });
   await expect(page.locator("#export-data-format")).toHaveCount(0);
   await expect(page.locator("#export-image-format")).toHaveCount(0);
-  await expect(page.locator("#export-data")).toHaveText("Export ModDotPlot command");
+  await expect(page.locator("#export-data")).toHaveText("Export ModDotPlot config");
   await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
   await expect(page.locator("#heatmap-color-count")).toHaveValue("12");
   await expect(page.locator("#heatmap-color-count")).toHaveAttribute("min", "3");
@@ -770,34 +747,18 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   expect(exportImageFit.scrollWidth).toBeLessThanOrEqual(exportImageFit.clientWidth);
   expect(exportImageFit.scrollHeight).toBeLessThanOrEqual(exportImageFit.clientHeight);
 
-  const commandDownload = page.waitForEvent("download");
+  const configDownload = page.waitForEvent("download");
   await page.locator("#export-data").click();
-  const commandArtifact = await commandDownload;
-  expect(commandArtifact.suggestedFilename()).toBe(
-    "moddotplot-chrShort_short-vs-chrShort_short.zip",
-  );
-  const commandPath = await commandArtifact.path();
-  if (!commandPath) throw new Error("ModDotPlot command ZIP has no temporary path");
-  const commandEntries = readStoredZip(await readFile(commandPath));
-  expect([...commandEntries.keys()]).toEqual([
-    "moddotplot-chrShort_short-vs-chrShort_short.bedpe",
-    "moddotplot-chrShort_short-vs-chrShort_short.config.json",
-  ]);
-  const bedpe = commandEntries.get("moddotplot-chrShort_short-vs-chrShort_short.bedpe")?.toString("utf8");
-  if (!bedpe) throw new Error("ModDotPlot command ZIP has no BEDPE entry");
-  expect(bedpe).toContain("# provenance=");
-  expect(bedpe).toContain("exact complete distinct canonical k-mer-set containment");
-  expect(bedpe).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
-  expect(bedpe).not.toContain("quality\tconfig_digest");
+  const configArtifact = await configDownload;
+  expect(configArtifact.suggestedFilename()).toBe("moddotplot_config.json");
+  const configPath = await configArtifact.path();
+  if (!configPath) throw new Error("ModDotPlot config has no temporary path");
   const saveOptions = await page.evaluate(() =>
     (window as unknown as { __saveOptions?: { startIn?: string; types?: unknown[] } }).__saveOptions);
   expect(saveOptions?.startIn).toBe("downloads");
   expect(saveOptions?.types).toHaveLength(1);
-  const configEntry = commandEntries.get("moddotplot-chrShort_short-vs-chrShort_short.config.json");
-  if (!configEntry) throw new Error("ModDotPlot command ZIP has no config entry");
-  const cliConfig = JSON.parse(configEntry.toString("utf8"));
+  const cliConfig = JSON.parse((await readFile(configPath)).toString("utf8"));
   expect(cliConfig).toMatchObject({
-    load: ["./moddotplot-chrShort_short-vs-chrShort_short.bedpe"],
     sequence: ["chrShort"],
     kmer: 21,
     compare_only: false,
@@ -806,9 +767,10 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
     colors: expect.any(Array),
     breakpoints: expect.any(Array),
     _moddotplot_browser: {
-      command: "moddotplot -c moddotplot-chrShort_short-vs-chrShort_short.config.json -l moddotplot-chrShort_short-vs-chrShort_short.bedpe",
+      command: "moddotplot -c moddotplot_config.json",
     },
   });
+  expect(cliConfig).not.toHaveProperty("load");
   expect(cliConfig).not.toHaveProperty("fasta");
   expect(cliConfig.colors).toHaveLength(12);
   expect(cliConfig.breakpoints).toHaveLength(13);
@@ -959,7 +921,7 @@ test("Save As exports current-view BEDPE and complete PNG/SVG/PDF compositions",
   }
 });
 
-test("exports wait for detailed visible tiles behind a blocking progress dialog", async ({ page, browserName }) => {
+test("image exports wait for detailed visible tiles behind a blocking progress dialog", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "export payload inspection runs on the Chromium channel");
   await page.addInitScript(() => {
     const state = { bytes: [] as number[], closedCount: 0 };
@@ -982,7 +944,7 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   const sequence = deterministicDna(6_000);
   await loadFasta(page, "detailed.fa", `>detailed\n${sequence}\n`);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await page.locator("#export-data").click();
+  await page.locator("#export-image").click();
   await expect(page.locator("#export-progress-dialog")).toBeVisible();
   expect(await page.locator("#export-progress-dialog").evaluate((dialog) => dialog.matches(":modal"))).toBe(true);
   await page.waitForFunction(() =>
@@ -991,21 +953,7 @@ test("exports wait for detailed visible tiles behind a blocking progress dialog"
   await expect(page.locator("#export-progress-dialog")).toBeHidden();
   const bytes = await page.evaluate(() =>
     (window as unknown as { __detailedSave: { bytes: number[] } }).__detailedSave.bytes);
-  const entries = readStoredZip(Buffer.from(bytes));
-  const contents = entries.get("moddotplot-detailed_detailed-vs-detailed_detailed.bedpe")?.toString("utf8");
-  if (!contents) throw new Error("Detailed export ZIP has no BEDPE entry");
-  expect(contents).toContain("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2");
-  const rows = contents.split("\n").filter((row) => /^detailed\t/.test(row));
-  expect(rows.length).toBeGreaterThan(0);
-  expect(rows.every((row) => row.split("\t").length === 13)).toBe(true);
-  expect(contents).not.toContain("identity_fixed");
-  expect(contents).not.toContain("config_digest");
-  const config = entries.get("moddotplot-detailed_detailed-vs-detailed_detailed.config.json");
-  if (!config) throw new Error("Detailed export ZIP has no config entry");
-  expect(JSON.parse(config.toString("utf8"))).toMatchObject({
-    load: ["./moddotplot-detailed_detailed-vs-detailed_detailed.bedpe"],
-    sequence: ["detailed"],
-  });
+  expect(Buffer.from(bytes).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
 });
 
 test("FASTA descriptions stay on axes while source-qualified IDs disambiguate selections and saves", async ({ page }) => {
@@ -1058,22 +1006,13 @@ test("FASTA descriptions stay on axes while source-qualified IDs disambiguate se
     (window as unknown as { __nativeSave?: { closedCount: number } }).__nativeSave?.closedCount === 1);
   const saved = await page.evaluate(() =>
     (window as unknown as { __nativeSave: { suggestedName: string; bytes: number[] } }).__nativeSave);
-  expect(saved.suggestedName).toBe("moddotplot-chr1_human-vs-chr1_gorilla.zip");
-  const entries = readStoredZip(Buffer.from(saved.bytes));
-  const bedpe = entries.get("moddotplot-chr1_human-vs-chr1_gorilla.bedpe")?.toString("utf8");
-  if (!bedpe) throw new Error("Qualified-sequence export ZIP has no BEDPE entry");
-  const dataRows = bedpe.split("\n").filter((row) => row && !row.startsWith("#"));
-  expect(dataRows.length).toBeGreaterThan(0);
-  expect(dataRows.every((row) => row.startsWith("chr1\t"))).toBe(true);
-  expect(bedpe).not.toContain("human chromosome one\t");
-  expect(bedpe).not.toContain("gorilla chromosome one\t");
-  const config = entries.get("moddotplot-chr1_human-vs-chr1_gorilla.config.json");
-  if (!config) throw new Error("Qualified-sequence export ZIP has no config entry");
-  expect(JSON.parse(config.toString("utf8"))).toMatchObject({
-    load: ["./moddotplot-chr1_human-vs-chr1_gorilla.bedpe"],
+  expect(saved.suggestedName).toBe("moddotplot_config.json");
+  const config = JSON.parse(Buffer.from(saved.bytes).toString("utf8"));
+  expect(config).toMatchObject({
     sequence: ["chr1", "chr1"],
     compare_only: true,
   });
+  expect(config).not.toHaveProperty("load");
 });
 
 test("multi-record inputs expose self, pairwise, and bounded grid plot modes", async ({ page }) => {
@@ -1186,24 +1125,16 @@ test("multi-record inputs expose self, pairwise, and bounded grid plot modes", a
     (window as unknown as { __gridSave?: { closedCount: number } }).__gridSave?.closedCount === 1);
   const gridSave = await page.evaluate(() =>
     (window as unknown as { __gridSave: { suggestedName: string; bytes: number[] } }).__gridSave);
-  expect(gridSave.suggestedName).toBe(
-    "moddotplot-grid-alpha_three-beta_three-gamma_three.zip",
-  );
-  const gridCommandEntries = readStoredZip(Buffer.from(gridSave.bytes));
-  const gridBedpeNames = [...gridCommandEntries.keys()].filter((name) => name.endsWith(".bedpe"));
-  expect(gridBedpeNames).toHaveLength(6);
-  const gridConfigName = [...gridCommandEntries.keys()].find((name) => name.endsWith(".config.json"));
-  if (!gridConfigName) throw new Error("Grid ModDotPlot command ZIP has no config entry");
-  const gridConfig = JSON.parse(gridCommandEntries.get(gridConfigName)!.toString("utf8"));
+  expect(gridSave.suggestedName).toBe("moddotplot_config.json");
+  const gridConfig = JSON.parse(Buffer.from(gridSave.bytes).toString("utf8"));
   expect(gridConfig).toMatchObject({
     sequence: ["alpha", "beta", "gamma"],
     grid_only: true,
     compare_only: false,
   });
-  expect(gridConfig.load).toHaveLength(6);
-  expect(gridConfig.load).toEqual(gridBedpeNames.map((name) => `./${name}`));
+  expect(gridConfig).not.toHaveProperty("load");
   expect(gridConfig._moddotplot_browser.command).toBe(
-    `moddotplot --grid-only -c ${gridConfigName} -l ${gridBedpeNames.join(" ")}`,
+    "moddotplot --grid-only -c moddotplot_config.json",
   );
 
   const openedGridCell = page.locator('.grid-plot-cell[data-grid-row="0"][data-grid-column="0"]');
@@ -1778,10 +1709,10 @@ test("exact mode keeps fixed full footprints while the initial comparison is pre
 
   await page.goto("/");
   await loadFasta(page, "delayed-exact.fa", shortFasta);
-  await expect(page.locator("#exact-mode-controls")).toBeVisible();
+  await expect(page.locator("#exact-mode-controls")).toHaveCount(0);
   await expect(page.locator("[data-exact-geometry]")).toHaveCount(0);
   await expect(page.locator("#show-direction")).toHaveCount(0);
-  await expect(page.locator('[data-exact-view="bases"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-exact-view]")).toHaveCount(0);
   await expect(page.locator("#exact-mode-banner")).toContainText("full footprints");
   await expect(page.locator("#scientific-provenance")).toContainText("Full footprints");
 
@@ -2130,6 +2061,31 @@ test("stacked sequence tracks pan with the plot and preserve its genomic viewpor
         && pixels[index + 3] === 255,
     ) ?? false;
   })).toBe(true);
+  const computedTrackHighlightWidth = (): Promise<number> => page.locator("#gc-track-x-canvas")
+    .evaluate((track: HTMLCanvasElement) => {
+      const pixels = track.getContext("2d")?.getImageData(0, 0, track.width, track.height).data;
+      if (!pixels) return 0;
+      const highlightedColumns = new Set<number>();
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (
+          (pixels[index] ?? 0) > 240
+          && (pixels[index + 1] ?? 0) > 190
+          && (pixels[index + 2] ?? 255) < 160
+          && (pixels[index + 3] ?? 0) > 0
+        ) highlightedColumns.add((index / 4) % track.width);
+      }
+      return highlightedColumns.size;
+    });
+  await hoverPlotCenter(page);
+  await expect.poll(computedTrackHighlightWidth).toBeGreaterThanOrEqual(6);
+  await expect(page.locator("#feature-hover-highlight")).toHaveCount(0);
+  const plotBoundsForHighlight = await page.locator("#plot-canvas").boundingBox();
+  if (!plotBoundsForHighlight) throw new Error("Plot has no bounds");
+  await page.mouse.move(
+    plotBoundsForHighlight.x + plotBoundsForHighlight.width / 2,
+    plotBoundsForHighlight.y + plotBoundsForHighlight.height / 2,
+  );
+  await expect.poll(computedTrackHighlightWidth).toBeGreaterThanOrEqual(6);
   const gcBounds = await page.locator("#gc-track-x-canvas").boundingBox();
   if (!gcBounds) throw new Error("GC track has no bounds");
   await page.mouse.move(gcBounds.x + gcBounds.width / 2, gcBounds.y + gcBounds.height / 2);
@@ -2350,6 +2306,15 @@ test("BED and GFF logical tracks span matching sequences and disable by dragging
       && (pixels[index + 2] ?? 255) < 80
       && pixels[index + 3] === 255) ?? false;
   })).toBe(true);
+  await expect(page.locator("#feature-hover-highlight")).toHaveCount(0);
+  const plotHoverBounds = await page.locator("#plot-canvas").boundingBox();
+  if (!plotHoverBounds) throw new Error("Plot has no bounds");
+  await page.mouse.move(
+    plotHoverBounds.x + plotHoverBounds.width * (100 / 1_200),
+    plotHoverBounds.y + plotHoverBounds.height / 2,
+  );
+  await expect(bedPanel).toHaveClass(/has-hover-highlight/);
+  await expect(bedPanel).toHaveAttribute("data-hover-highlight-count", "1");
   const bedHoverBounds = await bedPanel.boundingBox();
   if (!bedHoverBounds) throw new Error("BED track has no bounds");
   await page.mouse.move(
@@ -2508,11 +2473,11 @@ test("heatmap palette and plot background controls update without recomputation"
   expect(paletteGroups).toEqual([
     { label: "Spectral", options: 1 },
     { label: "Viridis", options: 1 },
-    { label: "Sequential", options: 18 },
-    { label: "Diverging", options: 8 },
-    { label: "Qualitative", options: 8 },
+    { label: "Sequential", options: 4 },
+    { label: "Diverging", options: 3 },
+    { label: "Qualitative", options: 3 },
   ]);
-  await expect(page.locator("#heatmap-palette option")).toHaveCount(36);
+  await expect(page.locator("#heatmap-palette option")).toHaveCount(12);
   await expect(page.locator("#heatmap-palette option").nth(0)).toHaveAttribute("value", "Spectral");
   await expect(page.locator("#heatmap-palette option").nth(1)).toHaveAttribute("value", "Viridis");
   await expect(page.locator("#heatmap-palette")).toHaveValue("Viridis");
@@ -2570,6 +2535,8 @@ test("heatmap palette and plot background controls update without recomputation"
   const firstPaletteSwatch = page.locator(".palette-swatch").first();
   await firstPaletteSwatch.click();
   await expect(page.locator("#palette-color-editor")).toBeVisible();
+  const editorBox = await page.locator("#palette-color-editor").boundingBox();
+  expect(editorBox?.height).toBeLessThanOrEqual(360);
   await expect(page.locator("#palette-color-wheel")).toHaveValue("#440154");
   await expect(page.locator("#palette-color-hex")).toBeFocused();
   await page.locator("#palette-color-hex").fill("#123456");

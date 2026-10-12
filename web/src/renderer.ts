@@ -24,10 +24,7 @@ const MISSING_IDENTITY = 65_535;
 const MAX_TILE_CACHE_BYTES = 192 * 1024 * 1024;
 const MAX_DEVICE_PIXEL_RATIO = 3;
 
-/** Selects how exact one-base tiles are colored without changing their scientific values. */
-export type ExactVisualizationMode = "identity" | "bases";
 export type ExactBase = "A" | "C" | "G" | "T" | "N";
-export const DEFAULT_EXACT_VISUALIZATION_MODE: ExactVisualizationMode = "bases";
 
 export interface CanvasPixelSize {
   width: number;
@@ -91,7 +88,6 @@ interface Uniforms {
   paletteSize: WebGLUniformLocation;
   background: WebGLUniformLocation;
   exact: WebGLUniformLocation;
-  exactVisualization: WebGLUniformLocation;
 }
 
 export class DotplotRenderer {
@@ -110,7 +106,6 @@ export class DotplotRenderer {
   #paletteColorCount = DEFAULT_HEATMAP_COLOR_COUNT;
   #paletteColors = normalizeHeatmapColors(DEFAULT_HEATMAP_PALETTE, DEFAULT_HEATMAP_COLOR_COUNT);
   #darkBackground = false;
-  #exactVisualization: ExactVisualizationMode = DEFAULT_EXACT_VISUALIZATION_MODE;
   #activeResolution = 1;
   #cachedTileBytes = 0;
   #useCounter = 0;
@@ -285,11 +280,6 @@ export class DotplotRenderer {
 
   setDarkBackground(dark: boolean): void {
     this.#darkBackground = dark;
-    this.#requestRender();
-  }
-
-  setExactVisualizationMode(mode: ExactVisualizationMode): void {
-    this.#exactVisualization = mode;
     this.#requestRender();
   }
 
@@ -483,7 +473,6 @@ export class DotplotRenderer {
       paletteSize: requiredUniform(gl, this.#program, "u_palette_size"),
       background: requiredUniform(gl, this.#program, "u_background"),
       exact: requiredUniform(gl, this.#program, "u_exact"),
-      exactVisualization: requiredUniform(gl, this.#program, "u_exact_visualization"),
     };
     this.#fallbackBaseTexture = createIntegerTexture(
       gl,
@@ -748,11 +737,6 @@ export class DotplotRenderer {
     );
     gl.uniform1i(this.#uniforms.paletteSize, this.#paletteColorCount);
     gl.uniform3f(this.#uniforms.background, background[0], background[1], background[2]);
-    gl.uniform1i(
-      this.#uniforms.exactVisualization,
-      this.#exactVisualization === "bases" ? 1 : 0,
-    );
-
     const tiles = [...this.#tiles.values()].sort((left, right) =>
       left.resolution - right.resolution || qualityRank(left.quality) - qualityRank(right.quality)
     );
@@ -1047,7 +1031,6 @@ uniform float u_heatmap_max;
 uniform vec3 u_palette[12];
 uniform int u_palette_size;
 uniform vec3 u_background;
-uniform int u_exact_visualization;
 out vec4 out_color;
 
 float palette_position(float value) {
@@ -1101,7 +1084,7 @@ void main() {
 
   vec3 color;
   if (u_mode == 0) {
-    if (u_exact == 1 && u_exact_visualization == 1) {
+    if (u_exact == 1) {
       int base_x = clamp(texel.x, 0, textureSize(u_bases, 0).x - 1);
       color = base_palette(texelFetch(u_bases, ivec2(base_x, 0), 0).r);
     } else {

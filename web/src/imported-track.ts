@@ -39,6 +39,7 @@ interface ImportedTrackState {
   panels: Record<FeatureTrackAxis, HTMLElement>;
   canvases: Record<FeatureTrackAxis, HTMLCanvasElement>;
   hitTargets: Record<FeatureTrackAxis, FeatureHit[]>;
+  highlighted: Record<FeatureTrackAxis, Set<ImportedFeature>>;
   row: HTMLElement;
   detail: HTMLElement;
 }
@@ -100,6 +101,7 @@ export class ImportedTrackManager {
   #nextSourceId = 0;
   #metadata: FeatureTrackMetadata | null = null;
   #view: ViewChange | null = null;
+  #hoverCoordinates: Record<FeatureTrackAxis, number | null> = { x: null, y: null };
   readonly #batchAliasConfirmations: BatchAliasConfirmation[] = [];
   #batchAliasConfirmationActive = false;
 
@@ -163,6 +165,11 @@ export class ImportedTrackManager {
     this.#setTooltip([hover.label, hover.value, formatInterval(hover.start, hover.end)], event);
   }
 
+  setPlotHover(coordinates: { x: number; y: number } | null): void {
+    this.#hoverCoordinates = coordinates ?? { x: null, y: null };
+    this.#updateHoverHighlights();
+  }
+
   estimatedBytes(): number {
     return this.#tracks.reduce((total, track) => total + [...track.sequenceData.values()].reduce(
       (sequenceTotal, sequence) => sequenceTotal + sequence.features.reduce(
@@ -201,6 +208,7 @@ export class ImportedTrackManager {
       track.row.remove();
     }
     this.#tracks.length = 0;
+    this.#hoverCoordinates = { x: null, y: null };
     if (this.#worker && this.#pending.size > 0) {
       const request: TrackParserRequest = {
         type: "cancel",
@@ -530,6 +538,7 @@ export class ImportedTrackManager {
       panels: { x: xView.panel, y: yView.panel },
       canvases: { x: xView.canvas, y: yView.canvas },
       hitTargets: { x: [], y: [] },
+      highlighted: { x: new Set(), y: new Set() },
       row,
       detail,
     };
@@ -607,6 +616,7 @@ export class ImportedTrackManager {
       this.#syncBothInput(track);
     }
     this.#options.onLayoutChange();
+    this.#updateHoverHighlights();
   }
 
   #updateTrackVisibility(track: ImportedTrackState, axis: FeatureTrackAxis): void {
@@ -663,6 +673,40 @@ export class ImportedTrackManager {
       if (hit) hits.push(hit);
     }
     track.hitTargets[axis] = hits;
+    const highlighted = track.highlighted[axis];
+    for (const hit of hits) {
+      if (!highlighted.has(hit.feature)) continue;
+      context.save();
+      context.fillStyle = "rgba(255, 216, 77, 0.24)";
+      context.strokeStyle = "#ffd84d";
+      context.lineWidth = Math.max(2, 2 * dpr);
+      const left = Math.max(0, hit.left);
+      const top = Math.max(0, hit.top);
+      const width = Math.max(dpr, Math.min(canvas.width, hit.right) - left);
+      const height = Math.max(dpr, Math.min(canvas.height, hit.bottom) - top);
+      context.fillRect(left, top, width, height);
+      context.strokeRect(left, top, width, height);
+      context.restore();
+    }
+  }
+
+  #updateHoverHighlights(): void {
+    const metadata = this.#metadata;
+    for (const track of this.#tracks) {
+      for (const axis of ["x", "y"] as const) {
+        const coordinate = this.#hoverCoordinates[axis];
+        const sequenceIndex = metadata ? (axis === "x" ? metadata.xIndex : metadata.yIndex) : -1;
+        const sequenceData = track.sequenceData.get(sequenceIndex);
+        const next = coordinate === null || !sequenceData
+          ? new Set<ImportedFeature>()
+          : overlappingFeatures(sequenceData, coordinate);
+        if (sameFeatureSet(track.highlighted[axis], next)) continue;
+        track.highlighted[axis] = next;
+        track.panels[axis].dataset.hoverHighlightCount = String(next.size);
+        track.panels[axis].classList.toggle("has-hover-highlight", next.size > 0);
+        if (!track.panels[axis].hidden) this.#draw(track, axis);
+      }
+    }
   }
 
   #syncBothInput(track: ImportedTrackState): void {
@@ -874,6 +918,24 @@ function firstOverlappingIndex(prefixEnds: number[], start: number): number {
     else low = middle + 1;
   }
   return low;
+}
+
+function overlappingFeatures(
+  sequenceData: ImportedSequenceTrackData,
+  coordinate: number,
+): Set<ImportedFeature> {
+  const matches = new Set<ImportedFeature>();
+  const first = firstOverlappingIndex(sequenceData.prefixMaximumEnds, coordinate);
+  for (let index = first; index < sequenceData.features.length; index += 1) {
+    const feature = sequenceData.features[index];
+    if (!feature || feature.start > coordinate) break;
+    if (feature.end > coordinate) matches.add(feature);
+  }
+  return matches;
+}
+
+function sameFeatureSet(left: Set<ImportedFeature>, right: Set<ImportedFeature>): boolean {
+  return left.size === right.size && [...left].every((feature) => right.has(feature));
 }
 
 function drawHorizontalFeature(

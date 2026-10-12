@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { featureBarRectangle, featureTrackRequests } from "../src/feature-track";
+import { featureBarRectangle, featureHighlightRectangle, featureTrackRequests } from "../src/feature-track";
 
 describe("sequence feature tracks", () => {
   const metadata = {
@@ -65,5 +65,33 @@ describe("sequence feature tracks", () => {
       height: 100,
     });
     expect(featureBarRectangle("x", Number.NaN, 0, 1, 10, 10)).toBeNull();
+  });
+
+  it("maps hovered bins to full-track coordinate bands", () => {
+    expect(featureHighlightRectangle("x", 0.25, 0.3, 400, 28)).toEqual({
+      x: 100,
+      y: 0,
+      width: 20,
+      height: 28,
+    });
+    expect(featureHighlightRectangle("y", 0.25, 0.3, 28, 400)).toEqual({
+      x: 0,
+      y: 280,
+      width: 28,
+      height: 20,
+    });
+    expect(featureHighlightRectangle("x", 0.5, 0.501, 100, 40, 6)).toEqual({
+      x: 48,
+      y: 0,
+      width: 6,
+      height: 40,
+    });
+    expect(featureHighlightRectangle("y", 0.5, 0.501, 100, 40, 6)).toEqual({
+      x: 0,
+      y: 17,
+      width: 100,
+      height: 6,
+    });
+    expect(featureHighlightRectangle("x", 1.1, 1.2, 400, 28)).toBeNull();
   });
 });

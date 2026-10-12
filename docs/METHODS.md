@@ -165,9 +165,9 @@ At this resolution:
 - Reverse-complement matches produce reverse diagonals.
 - Reverse-complement-palindromic *k*-mers have neutral direction evidence.
 
-The default exact view colors matches by the corresponding base from the X sequence.
-An identity-colored exact view is also available. Changing exact-view colors does not
-change the underlying exact match matrix.
+The exact view colors matches by the corresponding base from the X sequence. Exact
+containment values remain part of the scientific provenance, but the redundant
+identity-colored exact display is not exposed.
 
 ## How this differs from the published ModDotPlot algorithm
 
