@@ -1979,7 +1979,13 @@ function showHover(datum: HoverDatum | null, event: PointerEvent): void {
     && selectedColorMode() === "similarity"
     && datum.xBase !== undefined
     && datum.xBase !== null;
-  const measurement = showBase ? `Base ${datum.xBase}` : datum.quality === "exact" ? "exact k-mer match" : identity;
+  const measurement = datum.quality === "exact" && datum.identity === null
+    ? "no k-mer evidence"
+    : showBase && (datum.identity ?? 0) > 0
+      ? `Base ${datum.xBase}`
+      : datum.quality === "exact" && (datum.identity ?? 0) > 0
+        ? "exact k-mer match"
+        : identity;
   const lines = [
     Object.assign(document.createElement("strong"), { textContent: measurement }),
     Object.assign(document.createElement("span"), { textContent: xPosition }),
