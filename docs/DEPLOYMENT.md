@@ -1,6 +1,6 @@
 # Local installation and HPC deployment
 
-> **Note:** This project was generated using ChatGPT 5.6 Sol (ie. vibe-coded) under the direction of Adam Phillippy and Alex Sweeten. For analyses intended for publication, please use the official [ModDotPlot CLI](https://github.com/marbl/ModDotPlot) and cite the [ModDotPlot paper](https://doi.org/10.1093/bioinformatics/btae493).
+> **Note:** This document was generated using GPT-5.6 Sol and has not been thoroughly checked by a human for correctness.
 
 `ModDotPlot Browser` is a static Rust/WebAssembly web application. After it has been
 built, it does not require an application server or database. A web server only
@@ -260,24 +260,24 @@ Package the generated static site:
 
 ```bash
 tar -C web/dist \
-  -czf moddotplot-browser-v1.0.2-dist.tar.gz \
+  -czf moddotplot-browser-v1.0.3-dist.tar.gz \
   .
 ```
 
 Copy it to the HPC system:
 
 ```bash
-scp moddotplot-browser-v1.0.2-dist.tar.gz \
+scp moddotplot-browser-v1.0.3-dist.tar.gz \
   USER@login.cluster.example.edu:/path/to/destination/
 ```
 
 On the HPC system:
 
 ```bash
-mkdir -p /path/to/moddotplot-browser-v1.0.2
+mkdir -p /path/to/moddotplot-browser-v1.0.3
 
-tar -xzf /path/to/destination/moddotplot-browser-v1.0.2-dist.tar.gz \
-  -C /path/to/moddotplot-browser-v1.0.2
+tar -xzf /path/to/destination/moddotplot-browser-v1.0.3-dist.tar.gz \
+  -C /path/to/moddotplot-browser-v1.0.3
 ```
 
 The extracted directory is the complete static website. It can be published through

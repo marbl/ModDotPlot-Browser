@@ -38,7 +38,9 @@ interface ImportedTrackState {
   bothInput: HTMLInputElement;
   panels: Record<FeatureTrackAxis, HTMLElement>;
   canvases: Record<FeatureTrackAxis, HTMLCanvasElement>;
+  hoverCanvases: Record<FeatureTrackAxis, HTMLCanvasElement>;
   hitTargets: Record<FeatureTrackAxis, FeatureHit[]>;
+  hitTargetsByFeature: Record<FeatureTrackAxis, Map<ImportedFeature, FeatureHit>>;
   highlighted: Record<FeatureTrackAxis, Set<ImportedFeature>>;
   row: HTMLElement;
   detail: HTMLElement;
@@ -59,9 +61,19 @@ interface BatchAliasConfirmation {
   ambiguousIdentifiers: string[];
 }
 
+interface DeferredTrackSource {
+  sourceId: number;
+  file: File;
+  candidates: Map<number, SequenceTarget>;
+  admittedFeatures: number;
+  loadedSequenceIndices: Set<number>;
+  pendingSequenceIndices: Set<number>;
+  queuedSequenceIndices: Set<number>;
+}
+
 type PendingImport =
   | { kind: "parse"; axis: FeatureTrackAxis; sequence: SequenceTarget }
-  | { kind: "batch"; sourceId: number };
+  | { kind: "batch"; sourceId: number; deferredSequenceIndices?: number[] };
 
 type SequenceTarget = Pick<SequenceMetadata, "index" | "name" | "length">;
 
@@ -95,6 +107,7 @@ export class ImportedTrackManager {
   #worker: Worker | null = null;
   readonly #tracks: ImportedTrackState[] = [];
   readonly #pending = new Map<number, PendingImport>();
+  readonly #deferredSources: DeferredTrackSource[] = [];
   readonly #resizeObserver: ResizeObserver;
   #nextRequestId = 0;
   #nextTrackId = 0;
@@ -102,6 +115,8 @@ export class ImportedTrackManager {
   #metadata: FeatureTrackMetadata | null = null;
   #view: ViewChange | null = null;
   #hoverCoordinates: Record<FeatureTrackAxis, number | null> = { x: null, y: null };
+  readonly #pendingHoverDraws = new Map<ImportedTrackState, Set<FeatureTrackAxis>>();
+  #hoverDrawFrame = 0;
   readonly #batchAliasConfirmations: BatchAliasConfirmation[] = [];
   #batchAliasConfirmationActive = false;
 
@@ -142,6 +157,7 @@ export class ImportedTrackManager {
 
   updateSequenceContext(metadata: FeatureTrackMetadata | null): void {
     this.#metadata = metadata;
+    this.#queueDeferredTracksForContext();
     this.#updateEligibilityAndDraw();
   }
 
@@ -170,6 +186,23 @@ export class ImportedTrackManager {
     this.#updateHoverHighlights();
   }
 
+  plotHoverFeatureNames(): Record<FeatureTrackAxis, string[]> {
+    const names: Record<FeatureTrackAxis, Set<string>> = {
+      x: new Set<string>(),
+      y: new Set<string>(),
+    };
+    for (const track of this.#tracks) {
+      for (const axis of ["x", "y"] as const) {
+        if (!track.enabled[axis] || track.panels[axis].hidden) continue;
+        for (const feature of track.highlighted[axis]) {
+          const name = feature.name.trim();
+          if (name) names[axis].add(name);
+        }
+      }
+    }
+    return { x: [...names.x], y: [...names.y] };
+  }
+
   estimatedBytes(): number {
     return this.#tracks.reduce((total, track) => total + [...track.sequenceData.values()].reduce(
       (sequenceTotal, sequence) => sequenceTotal + sequence.features.reduce(
@@ -185,21 +218,17 @@ export class ImportedTrackManager {
     if (files.length > 0) this.#autoImportFiles([...files]);
   }
 
-  /** Matches launch-screen annotations against every record in the loaded FASTA set. */
+  /** Retains launch-screen annotations for the visible chromosomes and loads others on demand. */
   importFilesForSequences(files: readonly File[], sequences: readonly SequenceMetadata[]): void {
     if (files.length === 0 || sequences.length === 0) return;
-    const x = this.#options.getSequence("x");
-    const candidates: TrackSequenceCandidate[] = sequences.map((sequence) => ({
-      axis: sequence.index === x?.index ? "x" : "y",
-      index: sequence.index,
-      name: sequence.name,
-      length: sequence.length,
-    }));
-    for (const file of files) this.#startBatchParse(file, candidates);
+    this.#registerDeferredFiles(files, sequences);
     this.#options.onStatus(`Reading ${files[0]?.name ?? "feature track"}`);
   }
 
   clear(): void {
+    if (this.#hoverDrawFrame !== 0) window.cancelAnimationFrame(this.#hoverDrawFrame);
+    this.#hoverDrawFrame = 0;
+    this.#pendingHoverDraws.clear();
     for (const track of this.#tracks) {
       this.#resizeObserver.unobserve(track.panels.x);
       this.#resizeObserver.unobserve(track.panels.y);
@@ -208,6 +237,7 @@ export class ImportedTrackManager {
       track.row.remove();
     }
     this.#tracks.length = 0;
+    this.#deferredSources.length = 0;
     this.#hoverCoordinates = { x: null, y: null };
     if (this.#worker && this.#pending.size > 0) {
       const request: TrackParserRequest = {
@@ -283,25 +313,96 @@ export class ImportedTrackManager {
       this.#showReport("Track import unavailable", "Load a FASTA sequence before importing a feature track.", []);
       return;
     }
-    const x = this.#options.getSequence("x");
-    const y = this.#options.getSequence("y");
-    const candidates: TrackSequenceCandidate[] = sequences.map((sequence) => ({
-      axis: sequence.index === y?.index && sequence.index !== x?.index ? "y" : "x",
-      index: sequence.index,
-      name: sequence.name,
-      length: sequence.length,
-    }));
-    for (const file of files) {
-      this.#startBatchParse(file, candidates);
-    }
+    this.#registerDeferredFiles(files, sequences);
     this.#options.onStatus(`Matching ${files[0]?.name ?? "feature track"}`);
   }
 
-  #startBatchParse(file: File, candidates: TrackSequenceCandidate[]): void {
+  #registerDeferredFiles(files: readonly File[], sequences: readonly SequenceTarget[]): void {
+    for (const file of files) {
+      this.#deferredSources.push({
+        sourceId: ++this.#nextSourceId,
+        file,
+        candidates: new Map(sequences.map((sequence) => [sequence.index, {
+          index: sequence.index,
+          name: sequence.name,
+          length: sequence.length,
+        }])),
+        admittedFeatures: 0,
+        loadedSequenceIndices: new Set(),
+        pendingSequenceIndices: new Set(),
+        queuedSequenceIndices: new Set(),
+      });
+    }
+    this.#queueDeferredTracksForContext();
+  }
+
+  #startBatchParse(
+    file: File,
+    candidates: TrackSequenceCandidate[],
+    sourceId = ++this.#nextSourceId,
+    deferredSequenceIndices?: number[],
+    initialAdmittedFeatures = 0,
+  ): void {
     const requestId = ++this.#nextRequestId;
-    this.#pending.set(requestId, { kind: "batch", sourceId: ++this.#nextSourceId });
-    const request: TrackParserRequest = { type: "parse-batch", requestId, file, candidates };
+    this.#pending.set(requestId, { kind: "batch", sourceId, deferredSequenceIndices });
+    const request: TrackParserRequest = {
+      type: "parse-batch",
+      requestId,
+      file,
+      candidates,
+      initialAdmittedFeatures,
+    };
     this.#parserWorker().postMessage(request);
+  }
+
+  #queueDeferredTracksForContext(): void {
+    const metadata = this.#metadata;
+    if (!metadata) return;
+    const desired = new Set([metadata.xIndex, metadata.yIndex]);
+    for (const source of this.#deferredSources) {
+      for (const sequenceIndex of desired) {
+        if (!source.candidates.has(sequenceIndex)
+          || source.loadedSequenceIndices.has(sequenceIndex)
+          || source.pendingSequenceIndices.has(sequenceIndex)) continue;
+        source.queuedSequenceIndices.add(sequenceIndex);
+      }
+      this.#startNextDeferredBatch(source);
+    }
+  }
+
+  #startNextDeferredBatch(source: DeferredTrackSource): void {
+    if (source.pendingSequenceIndices.size > 0 || source.queuedSequenceIndices.size === 0) return;
+    const metadata = this.#metadata;
+    const sequenceIndices = [...source.queuedSequenceIndices];
+    source.queuedSequenceIndices.clear();
+    const candidates = sequenceIndices.map((sequenceIndex): TrackSequenceCandidate | null => {
+      const sequence = source.candidates.get(sequenceIndex);
+      if (!sequence) return null;
+      const axis: FeatureTrackAxis = metadata && sequenceIndex === metadata.yIndex && metadata.yIndex !== metadata.xIndex
+        ? "y"
+        : "x";
+      return { ...sequence, axis };
+    }).filter((candidate): candidate is TrackSequenceCandidate => candidate !== null);
+    if (candidates.length === 0) return;
+    source.pendingSequenceIndices = new Set(candidates.map((candidate) => candidate.index));
+    this.#startBatchParse(
+      source.file,
+      candidates,
+      source.sourceId,
+      [...source.pendingSequenceIndices],
+      source.admittedFeatures,
+    );
+  }
+
+  #finishDeferredBatch(pending: Extract<PendingImport, { kind: "batch" }>): void {
+    if (!pending.deferredSequenceIndices) return;
+    const source = this.#deferredSources.find((candidate) => candidate.sourceId === pending.sourceId);
+    if (!source) return;
+    for (const sequenceIndex of pending.deferredSequenceIndices) {
+      source.loadedSequenceIndices.add(sequenceIndex);
+      source.pendingSequenceIndices.delete(sequenceIndex);
+    }
+    this.#startNextDeferredBatch(source);
   }
 
   #importFiles(files: File[], axis: FeatureTrackAxis): void {
@@ -347,6 +448,7 @@ export class ImportedTrackManager {
     }
     this.#pending.delete(message.requestId);
     if (message.type === "error") {
+      if (pending.kind === "batch") this.#finishDeferredBatch(pending);
       this.#showReport("Track import failed", message.message, message.issues.map(
         (issue) => `Line ${issue.line.toLocaleString()}: ${issue.message}`,
       ));
@@ -358,34 +460,38 @@ export class ImportedTrackManager {
       return;
     }
     if (message.type === "batch-complete") {
-      if (pending.kind === "batch") {
-        const exactResults = message.results.filter(({ report }) => report.matchKind === "exact");
-        const aliasResults = message.results.filter(({ report }) => report.matchKind === "alias");
-        for (const { candidate, report } of exactResults) {
-          this.#addReport(
-            report,
-            { kind: "parse", axis: candidate.axis, sequence: candidate },
-            pending.sourceId,
-          );
-        }
-        if (aliasResults.length > 0) {
-          this.#confirmBatchAliases(
-            aliasResults,
-            message.ambiguousRecords,
-            message.ambiguousIdentifiers,
-            pending.sourceId,
-          );
-        } else if (message.ambiguousRecords > 0) {
-          this.#showReport(
-            "Some annotation records were skipped",
-            `${message.ambiguousRecords.toLocaleString()} records had aliases matching more than one loaded FASTA sequence.`,
-            [
-              "Ambiguous records were not duplicated.",
-              `Identifiers: ${message.ambiguousIdentifiers.slice(0, 12).join(", ")}`,
-            ],
-          );
-        }
+      if (pending.kind !== "batch") return;
+      const source = this.#deferredSources.find((candidate) => candidate.sourceId === pending.sourceId);
+      // Reserve alias results before confirmation so a following batch cannot reuse
+      // feature budget that is still retained by the pending dialog.
+      if (source) source.admittedFeatures = Math.max(source.admittedFeatures, message.admittedFeatures);
+      const exactResults = message.results.filter(({ report }) => report.matchKind === "exact");
+      const aliasResults = message.results.filter(({ report }) => report.matchKind === "alias");
+      for (const { candidate, report } of exactResults) {
+        this.#addReport(
+          report,
+          { kind: "parse", axis: candidate.axis, sequence: candidate },
+          pending.sourceId,
+        );
       }
+      if (aliasResults.length > 0) {
+        this.#confirmBatchAliases(
+          aliasResults,
+          message.ambiguousRecords,
+          message.ambiguousIdentifiers,
+          pending.sourceId,
+        );
+      } else if (message.ambiguousRecords > 0) {
+        this.#showReport(
+          "Some annotation records were skipped",
+          `${message.ambiguousRecords.toLocaleString()} records had aliases matching more than one loaded FASTA sequence.`,
+          [
+            "Ambiguous records were not duplicated.",
+            `Identifiers: ${message.ambiguousIdentifiers.slice(0, 12).join(", ")}`,
+          ],
+        );
+      }
+      this.#finishDeferredBatch(pending);
       if (this.#pending.size === 0) this.#options.onIdle();
       return;
     }
@@ -537,7 +643,9 @@ export class ImportedTrackManager {
       bothInput: bothInput.input,
       panels: { x: xView.panel, y: yView.panel },
       canvases: { x: xView.canvas, y: yView.canvas },
+      hoverCanvases: { x: xView.hoverCanvas, y: yView.hoverCanvas },
       hitTargets: { x: [], y: [] },
+      hitTargetsByFeature: { x: new Map(), y: new Map() },
       highlighted: { x: new Set(), y: new Set() },
       row,
       detail,
@@ -596,6 +704,7 @@ export class ImportedTrackManager {
   }
 
   #deleteTrack(track: ImportedTrackState): void {
+    this.#pendingHoverDraws.delete(track);
     this.#resizeObserver.unobserve(track.panels.x);
     this.#resizeObserver.unobserve(track.panels.y);
     track.panels.x.remove();
@@ -631,7 +740,10 @@ export class ImportedTrackManager {
     track.panels[axis].dataset.trackSize = String(importedTrackSize(track.lanes));
     track.panels[axis].style.flexBasis = `${importedTrackSize(track.lanes)}px`;
     if (visible) this.#draw(track, axis);
-    else clearCanvas(track.canvases[axis]);
+    else {
+      clearCanvas(track.canvases[axis]);
+      clearCanvas(track.hoverCanvases[axis]);
+    }
   }
 
   #draw(track: ImportedTrackState, axis: FeatureTrackAxis): void {
@@ -647,13 +759,17 @@ export class ImportedTrackManager {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
     track.hitTargets[axis] = [];
+    track.hitTargetsByFeature[axis].clear();
     const coordinate = axis === "x" ? view.view.x : view.view.y;
     const matrixSpan = axis === "x" ? view.view.width : view.view.height;
     const length = axis === "x" ? metadata.xLength : metadata.yLength;
     const visibleStart = coordinate / metadata.baseResolution * metadata.domainLength;
     const visibleSpan = matrixSpan / metadata.baseResolution * metadata.domainLength;
     const visibleEnd = Math.min(length, visibleStart + visibleSpan);
-    if (visibleSpan <= 0 || visibleEnd <= visibleStart) return;
+    if (visibleSpan <= 0 || visibleEnd <= visibleStart) {
+      this.#drawHoverHighlight(track, axis);
+      return;
+    }
     const hits: FeatureHit[] = [];
     const first = firstOverlappingIndex(sequenceData.prefixMaximumEnds, visibleStart);
     const dpr = canvas.width / Math.max(1, canvas.clientWidth);
@@ -673,9 +789,23 @@ export class ImportedTrackManager {
       if (hit) hits.push(hit);
     }
     track.hitTargets[axis] = hits;
+    track.hitTargetsByFeature[axis] = new Map(hits.map((hit) => [hit.feature, hit]));
+    this.#drawHoverHighlight(track, axis);
+  }
+
+  #drawHoverHighlight(track: ImportedTrackState, axis: FeatureTrackAxis): void {
+    const canvas = track.hoverCanvases[axis];
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    resizeCanvas(canvas);
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (track.panels[axis].hidden) return;
+    const dpr = canvas.width / Math.max(1, canvas.clientWidth);
     const highlighted = track.highlighted[axis];
-    for (const hit of hits) {
-      if (!highlighted.has(hit.feature)) continue;
+    for (const feature of highlighted) {
+      const hit = track.hitTargetsByFeature[axis].get(feature);
+      if (!hit) continue;
       context.save();
       context.fillStyle = "rgba(255, 216, 77, 0.24)";
       context.strokeStyle = "#ffd84d";
@@ -704,9 +834,25 @@ export class ImportedTrackManager {
         track.highlighted[axis] = next;
         track.panels[axis].dataset.hoverHighlightCount = String(next.size);
         track.panels[axis].classList.toggle("has-hover-highlight", next.size > 0);
-        if (!track.panels[axis].hidden) this.#draw(track, axis);
+        if (!track.panels[axis].hidden) this.#queueHoverDraw(track, axis);
       }
     }
+  }
+
+  #queueHoverDraw(track: ImportedTrackState, axis: FeatureTrackAxis): void {
+    const axes = this.#pendingHoverDraws.get(track) ?? new Set<FeatureTrackAxis>();
+    axes.add(axis);
+    this.#pendingHoverDraws.set(track, axes);
+    if (this.#hoverDrawFrame !== 0) return;
+    this.#hoverDrawFrame = window.requestAnimationFrame(() => {
+      this.#hoverDrawFrame = 0;
+      const pending = [...this.#pendingHoverDraws];
+      this.#pendingHoverDraws.clear();
+      for (const [pendingTrack, pendingAxes] of pending) {
+        if (!this.#tracks.includes(pendingTrack)) continue;
+        for (const pendingAxis of pendingAxes) this.#drawHoverHighlight(pendingTrack, pendingAxis);
+      }
+    });
   }
 
   #syncBothInput(track: ImportedTrackState): void {
@@ -885,7 +1031,11 @@ function smallButton(text: string, ariaLabel: string): HTMLButtonElement {
   return button;
 }
 
-function createTrackPanel(name: string, axis: FeatureTrackAxis, id: number): { panel: HTMLElement; canvas: HTMLCanvasElement } {
+function createTrackPanel(
+  name: string,
+  axis: FeatureTrackAxis,
+  id: number,
+): { panel: HTMLElement; canvas: HTMLCanvasElement; hoverCanvas: HTMLCanvasElement } {
   const panel = document.createElement("div");
   panel.id = `imported-track-${id}-${axis}-panel`;
   panel.className = `feature-track-panel feature-track-panel-${axis} imported-feature-track-panel`;
@@ -894,9 +1044,13 @@ function createTrackPanel(name: string, axis: FeatureTrackAxis, id: number): { p
   label.className = "feature-track-name";
   label.textContent = name;
   const canvas = document.createElement("canvas");
+  canvas.className = "imported-feature-track-base";
   canvas.setAttribute("aria-label", `${axis.toUpperCase()}-axis ${name} feature track`);
-  panel.append(label, canvas);
-  return { panel, canvas };
+  const hoverCanvas = document.createElement("canvas");
+  hoverCanvas.className = "imported-feature-track-hover";
+  hoverCanvas.setAttribute("aria-hidden", "true");
+  panel.append(label, canvas, hoverCanvas);
+  return { panel, canvas, hoverCanvas };
 }
 
 function prefixMaximumEnds(features: ImportedFeature[]): number[] {

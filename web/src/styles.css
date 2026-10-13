@@ -1021,6 +1021,7 @@ details[open] summary { margin-bottom: 4px; }
 }
 .hover-card strong { font-size: 12px; }
 .hover-card small { margin-top: 2px; color: #c9c5cb; }
+.hover-card-separator { height: 3px; }
 
 .exact-mode-banner,
 .exact-base-legend {
@@ -1375,6 +1376,10 @@ body.is-track-pointer-dragging * { cursor: grabbing !important; }
   display: block;
   width: 100%;
   height: 100%;
+}
+.imported-feature-track-hover {
+  z-index: 1;
+  pointer-events: none;
 }
 .feature-track-name {
   position: absolute;

@@ -91,6 +91,7 @@ test("batch parsing reads a file once and never duplicates ambiguous aliases", a
       type: "parse-batch",
       requestId: 8,
       file,
+      initialAdmittedFeatures: 0,
       candidates: [
         { axis: "x", index: 0, name: "chr1", length: 100 },
         { axis: "y", index: 1, name: "2", length: 100 },
@@ -107,6 +108,68 @@ test("batch parsing reads a file once and never duplicates ambiguous aliases", a
   expect(result.results.reduce((sum, { report }) => sum + report.validRecords, 0)).toBe(2);
   expect(result.ambiguousRecords).toBe(1);
   expect(result.ambiguousIdentifiers).toEqual(["chrMT"]);
+  expect(result.admittedFeatures).toBe(2);
+});
+
+test("batch parsing admits features against the cumulative deferred-file count", async () => {
+  const file = new File([
+    ["chr1\t0\t10\tfirst", "chr1\t10\t20\tsecond"].join("\n"),
+  ], "deferred-limit.bed", { type: "text/plain" });
+  const terminal = new Promise<TrackParserMessage>((resolve) => {
+    vi.stubGlobal("self", {
+      onmessage: null as ((event: MessageEvent<TrackParserRequest>) => void) | null,
+      postMessage(message: TrackParserMessage) {
+        if (message.type === "batch-complete" || message.type === "error") resolve(message);
+      },
+    });
+  });
+  await import("../src/track-parser-worker");
+  const worker = globalThis.self as unknown as {
+    onmessage: (event: MessageEvent<TrackParserRequest>) => void;
+  };
+  worker.onmessage({
+    data: {
+      type: "parse-batch",
+      requestId: 9,
+      file,
+      initialAdmittedFeatures: MAX_IMPORTED_ANNOTATION_RECORDS - 1,
+      candidates: [{ axis: "x", index: 0, name: "chr1", length: 100 }],
+    },
+  } as MessageEvent<TrackParserRequest>);
+
+  const result = await terminal;
+  expect(result.type).toBe("error");
+  if (result.type === "error") expect(result.message).toContain("retained features per file");
+});
+
+test("batch parsing reports the updated cumulative deferred-file count", async () => {
+  const file = new File(["chr1\t0\t10\tlast"], "deferred-boundary.bed", { type: "text/plain" });
+  const completed = new Promise<Extract<TrackParserMessage, { type: "batch-complete" }>>((resolve, reject) => {
+    vi.stubGlobal("self", {
+      onmessage: null as ((event: MessageEvent<TrackParserRequest>) => void) | null,
+      postMessage(message: TrackParserMessage) {
+        if (message.type === "error") reject(new Error(message.message));
+        if (message.type === "batch-complete") resolve(message);
+      },
+    });
+  });
+  await import("../src/track-parser-worker");
+  const worker = globalThis.self as unknown as {
+    onmessage: (event: MessageEvent<TrackParserRequest>) => void;
+  };
+  worker.onmessage({
+    data: {
+      type: "parse-batch",
+      requestId: 10,
+      file,
+      initialAdmittedFeatures: MAX_IMPORTED_ANNOTATION_RECORDS - 1,
+      candidates: [{ axis: "x", index: 0, name: "chr1", length: 100 }],
+    },
+  } as MessageEvent<TrackParserRequest>);
+
+  const result = await completed;
+  expect(result.admittedFeatures).toBe(MAX_IMPORTED_ANNOTATION_RECORDS);
+  expect(result.results[0]?.report.tracks[0]?.features).toHaveLength(1);
 });
 
 test.skipIf(!CHM13_ANNOTATION_PATH)(
@@ -133,6 +196,7 @@ test.skipIf(!CHM13_ANNOTATION_PATH)(
         type: "parse-batch",
         requestId: 53,
         file,
+        initialAdmittedFeatures: 0,
         candidates: names.map((name, index) => ({
           axis: index === 0 ? "x" : "y",
           index,

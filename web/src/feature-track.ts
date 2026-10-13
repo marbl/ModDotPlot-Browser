@@ -175,6 +175,18 @@ export class FeatureTrackOverlay {
     this.#draw();
   }
 
+  plotHoverValues(): Record<FeatureTrackAxis, QuantitativeTrackHover[]> {
+    const values: Record<FeatureTrackAxis, QuantitativeTrackHover[]> = { x: [], y: [] };
+    for (const definition of this.#definitions) {
+      const coordinate = this.#hoverCoordinates[definition.axis];
+      const cached = this.#cache.get(trackKey(definition.kind, definition.axis));
+      if (coordinate === null || !cached) continue;
+      const hover = quantitativeTrackHover(definition.kind, cached, coordinate);
+      if (hover) values[definition.axis].push(hover);
+    }
+    return values;
+  }
+
   clear(kind?: FeatureTrackKind, axis?: FeatureTrackAxis): void {
     for (const definition of this.#definitions) {
       if (kind && definition.kind !== kind) continue;
@@ -309,26 +321,31 @@ export class FeatureTrackOverlay {
     const visibleStart = coordinate / metadata.baseResolution * metadata.domainLength;
     const visibleSpan = matrixSpan / metadata.baseResolution * metadata.domainLength;
     const genomicCoordinate = visibleStart + Math.max(0, Math.min(1, fraction)) * visibleSpan;
-    const cachedSpan = cached.end - cached.start;
-    if (cachedSpan <= 0) {
+    const hover = quantitativeTrackHover(definition.kind, cached, genomicCoordinate);
+    if (!hover) {
       listener(null, event);
       return;
     }
-    const index = Math.floor((genomicCoordinate - cached.start) / Math.max(Number.EPSILON, cachedSpan) * cached.values.length);
-    const rawValue = cached.values[index];
-    if (rawValue === undefined || !Number.isFinite(rawValue)) {
-      listener(null, event);
-      return;
-    }
-    const start = cached.start + index / cached.values.length * cachedSpan;
-    const end = cached.start + (index + 1) / cached.values.length * cachedSpan;
-    listener({
-      label: definition.kind === "gc" ? "GC%" : "CpG O/E",
-      value: definition.kind === "gc" ? `${(rawValue * 100).toFixed(1)}%` : rawValue.toFixed(3),
-      start,
-      end,
-    }, event);
+    listener(hover, event);
   }
+}
+
+function quantitativeTrackHover(
+  kind: FeatureTrackKind,
+  cached: CachedTrack,
+  coordinate: number,
+): QuantitativeTrackHover | null {
+  const cachedSpan = cached.end - cached.start;
+  if (cachedSpan <= 0 || coordinate < cached.start || coordinate >= cached.end) return null;
+  const index = Math.floor((coordinate - cached.start) / cachedSpan * cached.values.length);
+  const rawValue = cached.values[index];
+  if (rawValue === undefined || !Number.isFinite(rawValue)) return null;
+  return {
+    label: kind === "gc" ? "GC%" : "CpG O/E",
+    value: kind === "gc" ? `${(rawValue * 100).toFixed(1)}%` : rawValue.toFixed(3),
+    start: cached.start + index / cached.values.length * cachedSpan,
+    end: cached.start + (index + 1) / cached.values.length * cachedSpan,
+  };
 }
 
 function trackKey(kind: FeatureTrackKind, axis: FeatureTrackAxis): string {
