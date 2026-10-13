@@ -65,6 +65,7 @@ interface DeferredTrackSource {
   sourceId: number;
   file: File;
   candidates: Map<number, SequenceTarget>;
+  admittedFeatures: number;
   loadedSequenceIndices: Set<number>;
   pendingSequenceIndices: Set<number>;
   queuedSequenceIndices: Set<number>;
@@ -326,6 +327,7 @@ export class ImportedTrackManager {
           name: sequence.name,
           length: sequence.length,
         }])),
+        admittedFeatures: 0,
         loadedSequenceIndices: new Set(),
         pendingSequenceIndices: new Set(),
         queuedSequenceIndices: new Set(),
@@ -339,10 +341,17 @@ export class ImportedTrackManager {
     candidates: TrackSequenceCandidate[],
     sourceId = ++this.#nextSourceId,
     deferredSequenceIndices?: number[],
+    initialAdmittedFeatures = 0,
   ): void {
     const requestId = ++this.#nextRequestId;
     this.#pending.set(requestId, { kind: "batch", sourceId, deferredSequenceIndices });
-    const request: TrackParserRequest = { type: "parse-batch", requestId, file, candidates };
+    const request: TrackParserRequest = {
+      type: "parse-batch",
+      requestId,
+      file,
+      candidates,
+      initialAdmittedFeatures,
+    };
     this.#parserWorker().postMessage(request);
   }
 
@@ -381,6 +390,7 @@ export class ImportedTrackManager {
       candidates,
       source.sourceId,
       [...source.pendingSequenceIndices],
+      source.admittedFeatures,
     );
   }
 
@@ -451,6 +461,10 @@ export class ImportedTrackManager {
     }
     if (message.type === "batch-complete") {
       if (pending.kind !== "batch") return;
+      const source = this.#deferredSources.find((candidate) => candidate.sourceId === pending.sourceId);
+      // Reserve alias results before confirmation so a following batch cannot reuse
+      // feature budget that is still retained by the pending dialog.
+      if (source) source.admittedFeatures = Math.max(source.admittedFeatures, message.admittedFeatures);
       const exactResults = message.results.filter(({ report }) => report.matchKind === "exact");
       const aliasResults = message.results.filter(({ report }) => report.matchKind === "alias");
       for (const { candidate, report } of exactResults) {

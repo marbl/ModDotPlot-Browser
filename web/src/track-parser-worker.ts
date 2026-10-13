@@ -166,7 +166,11 @@ async function parseBatchFile(
   signal: AbortSignal,
 ): Promise<void> {
   const candidates = [...new Map(request.candidates.map((candidate) => [candidate.index, candidate])).values()];
-  const admission: RecordAdmission = { features: 0 };
+  const admissionError = annotationAdmissionError(0, request.initialAdmittedFeatures);
+  if (!Number.isSafeInteger(request.initialAdmittedFeatures) || request.initialAdmittedFeatures < 0 || admissionError) {
+    throw new Error(admissionError ?? "Annotation feature admission state is invalid.");
+  }
+  const admission: RecordAdmission = { features: request.initialAdmittedFeatures };
   const states = new Map(candidates.map((candidate) => [
     candidate.index,
     createParseState(request.file, candidate, admission),
@@ -238,6 +242,7 @@ async function parseBatchFile(
     identifiers: [...identifiers].slice(0, 64),
     ambiguousIdentifiers: [...ambiguousIdentifiers].slice(0, 64),
     ambiguousRecords,
+    admittedFeatures: admission.features,
   });
 }
 

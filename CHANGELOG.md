@@ -27,6 +27,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 * Removed crosshair lag over dense imported annotations by caching the base feature
   canvas and painting coalesced hover highlights on a separate overlay.
+* Enforced the one-million-feature annotation limit cumulatively across deferred
+  chromosome batches from the same file.
 
 ## [1.0.2] - 2026-10-11
 

@@ -94,6 +94,8 @@ export type TrackParserRequest =
       requestId: number;
       file: File;
       candidates: TrackSequenceCandidate[];
+      /** Features already admitted from earlier deferred batches of this file. */
+      initialAdmittedFeatures: number;
     }
   | {
       type: "inspect";
@@ -117,6 +119,8 @@ export type TrackParserMessage =
       identifiers: string[];
       ambiguousIdentifiers: string[];
       ambiguousRecords: number;
+      /** Cumulative features admitted across this file's deferred batches. */
+      admittedFeatures: number;
     }
   | { type: "complete"; requestId: number; report: TrackImportReport }
   | { type: "error"; requestId: number; message: string; issues: ImportIssue[] };
