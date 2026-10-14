@@ -19,6 +19,7 @@ import {
   type ViewportState,
 } from "./viewport";
 import { selectTileEvictionCandidate } from "./cache";
+import { visibleIdentityHistogram } from "./histogram";
 
 const MISSING_IDENTITY = 65_535;
 const MAX_TILE_CACHE_BYTES = 192 * 1024 * 1024;
@@ -349,6 +350,16 @@ export class DotplotRenderer {
         direction: tile.direction,
         directionSupport: tile.directionSupport,
       }));
+  }
+
+  /** Returns identity counts clipped to the current view at the finest complete level. */
+  visibleIdentityHistogram(): Uint32Array {
+    return visibleIdentityHistogram(
+      this.#tiles.values(),
+      this.#metadata.resolution,
+      this.#activeResolution,
+      this.#view,
+    );
   }
 
   /** Reports whether every requested tile is already cached at refined or exact quality. */

@@ -2662,6 +2662,9 @@ test("heatmap palette and plot background controls update without recomputation"
   await expect(firstPaletteSwatch).toBeFocused();
 
   await page.locator("#heatmap-palette").selectOption("Spectral");
+  await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".palette-swatch").first()).toHaveCSS("background-color", "rgb(94, 79, 162)");
+  await expect(page.locator(".palette-swatch").last()).toHaveCSS("background-color", "rgb(158, 1, 66)");
   await page.locator("#heatmap-palette").selectOption("Viridis");
   await expect(page.locator("#palette-flip")).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("#heatmap-color-count")).toHaveValue("11");

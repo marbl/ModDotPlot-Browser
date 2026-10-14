@@ -11,6 +11,7 @@ import {
   paletteColorCounts,
   paletteColors,
   paletteDefaultColorCount,
+  paletteDefaultReversed,
 } from "../src/palettes";
 import { paletteColors as colorBrewerColors } from "../src/colorbrewer";
 
@@ -50,6 +51,12 @@ describe("application palette catalog", () => {
     expect(DEFAULT_PALETTE).toBe("Viridis");
     expect(DEFAULT_PALETTE_COLOR_COUNT).toBe(12);
     expect(DEFAULT_PALETTE_REVERSED).toBe(false);
+  });
+
+  it("defaults Spectral to red for high identity", () => {
+    expect(paletteDefaultReversed("Spectral")).toBe(true);
+    expect(paletteDefaultReversed("Viridis")).toBe(false);
+    expect(paletteDefaultReversed("RdGy")).toBe(false);
   });
 
   it("provides Viridis variants from three through twelve colors", () => {

@@ -2,7 +2,7 @@
 
 > **Note:** This document was generated using GPT-5.6 Sol and has not been thoroughly checked by a human for correctness.
 
-This checklist applies to the v1.0.3 release. The browser remains intended for
+This checklist applies to the v1.0.4 release. The browser remains intended for
 exploratory use; analyses intended for publication should use the official ModDotPlot CLI.
 
 ## Source and identity
@@ -104,4 +104,4 @@ npm --prefix web run verify
 - [ ] Create and verify an annotated tag from a clean tree as the final source action.
 - [ ] Produce source/binary archives, checksums, provenance, release notes, and known
   limitations under the local ignored `release-artifacts/` directory.
-- [ ] Push the verified v1.0.3 release commit to the `main` branch.
+- [ ] Push the verified v1.0.4 release commit to the `main` branch.

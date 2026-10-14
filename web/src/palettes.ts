@@ -86,7 +86,12 @@ export const PALETTE_IDS: readonly PaletteId[] = Object.freeze(
 
 export const DEFAULT_PALETTE: PaletteId = VIRIDIS_PALETTE_ID;
 export const DEFAULT_PALETTE_COLOR_COUNT = 12;
-export const DEFAULT_PALETTE_REVERSED = false;
+export const DEFAULT_PALETTE_REVERSED = paletteDefaultReversed(DEFAULT_PALETTE);
+
+/** Spectral reads from cool low-identity colors to red high-identity colors by default. */
+export function paletteDefaultReversed(palette: PaletteId): boolean {
+  return palette === "Spectral";
+}
 
 // Published as a compact RGB table by d3-scale-chromatic. Its ramp selects
 // floor(t * 256), clamped to the final color; buildViridisPalette preserves

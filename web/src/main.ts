@@ -8,6 +8,7 @@ import {
   paletteColors,
   paletteColorCounts,
   paletteDefaultColorCount,
+  paletteDefaultReversed,
 } from "./palettes";
 import { selectDetailResolution, selectTiles } from "./detail";
 import { DnaLoader } from "./dna-loader";
@@ -33,7 +34,6 @@ import {
 import {
   DEFAULT_HEATMAP_COLOR_COUNT,
   DEFAULT_HEATMAP_PALETTE,
-  addIdentitiesToHistogram,
   heatmapGradient,
   normalizeHeatmapRange,
   type HeatmapPalette,
@@ -348,8 +348,8 @@ let paletteReversed = DEFAULT_PALETTE_REVERSED;
 let activePaletteColorIndex: number | null = null;
 let paletteColorInvoker: HTMLButtonElement | null = null;
 const paletteColorOverrides = new Map<string, string[]>();
-let histogramBins = new Uint32Array(101);
-const histogramTiles = new Set<string>();
+let histogramBins: Uint32Array<ArrayBufferLike> = new Uint32Array(101);
+let histogramFrame = 0;
 const GRID_OVERVIEW_RESOLUTION = 512;
 interface GridRunEntry {
   comparison: GridComparison;
@@ -519,7 +519,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerToMainMessage>): void {
         exportImageButton.disabled = false;
       }
       setPlotLoading(false);
-      collectHistogram(message);
+      queueHistogramUpdate();
       updateMemory();
       break;
     case "complete":
@@ -719,7 +719,7 @@ for (const [name, input] of Object.entries(heatmapInputs) as Array<[keyof Heatma
 heatmapPaletteSelect.addEventListener("change", () => {
   const palette = selectedHeatmapPalette();
   updatePaletteColorCountControl(palette);
-  paletteReversed = palette === DEFAULT_HEATMAP_PALETTE && DEFAULT_PALETTE_REVERSED;
+  paletteReversed = paletteDefaultReversed(palette);
   closePaletteColorEditor(false);
   updatePaletteDirectionControl();
   renderPaletteSwatches();
@@ -821,6 +821,7 @@ renderer.onViewChange((change) => {
   if (activeFeatureTrackMetadata) featureTracks.setView(activeFeatureTrackMetadata, change);
   if (activeFeatureTrackMetadata) importedTracks.setView(activeFeatureTrackMetadata, change);
   if (comparisonReady) {
+    queueHistogramUpdate();
     queueFeatureTracks(40);
     cancelAndQueueVisibleDetail(240);
   }
@@ -846,6 +847,7 @@ document.addEventListener("keydown", (event) => {
   showHover(lastHoverDatum, lastHoverEvent);
 });
 renderer.onTileEvict((tile) => {
+  queueHistogramUpdate();
   post({ type: "evict-tiles", generation, tiles: [tile] });
 });
 populatePaletteControls();
@@ -1760,7 +1762,7 @@ function prepareComparison(): void {
   importedTracks.updateSequenceContext(activeFeatureTrackMetadata);
   pendingView = null;
   histogramBins = new Uint32Array(101);
-  histogramTiles.clear();
+  cancelHistogramUpdate();
   if (!preserveViewport) featureTracks.clear();
   drawHistogram();
   setPlotLoading(true);
@@ -1827,6 +1829,7 @@ function requestVisibleDetail(): void {
   updateScientificProvenance(activeConfigurations, parameters.k);
   updateExactModeUi();
   renderer.setActiveResolution(resolution);
+  queueHistogramUpdate();
   const tiles = selectTiles(resolution, parameters.resolution, change.view);
   const computeLabel = exactKmerLevel
     ? `Drawing exact k-mers · ${exactGeometryLabel(exactGeometry).toLowerCase()}`
@@ -2359,15 +2362,19 @@ function selectedColorMode(): "similarity" | "direction" {
     ?.dataset.colorMode === "direction" ? "direction" : "similarity";
 }
 
-function collectHistogram(message: Extract<WorkerToMainMessage, { type: "tile" }>): void {
-  if (!activeParameters || message.resolution !== activeParameters.resolution) return;
-  const finalQuality = "refined";
-  if (message.quality !== finalQuality) return;
-  const key = `${message.x}:${message.y}`;
-  if (histogramTiles.has(key)) return;
-  histogramTiles.add(key);
-  addIdentitiesToHistogram(histogramBins, message.identity);
-  drawHistogram();
+function queueHistogramUpdate(): void {
+  if (plotMode === "grid" || histogramFrame !== 0) return;
+  histogramFrame = window.requestAnimationFrame(() => {
+    histogramFrame = 0;
+    histogramBins = renderer.visibleIdentityHistogram();
+    drawHistogram();
+  });
+}
+
+function cancelHistogramUpdate(): void {
+  if (histogramFrame === 0) return;
+  window.cancelAnimationFrame(histogramFrame);
+  histogramFrame = 0;
 }
 
 function drawHistogram(): void {
@@ -2567,7 +2574,7 @@ function clearSession(): void {
   sequenceLoadPending = false;
   wasmBytes = 0;
   histogramBins = new Uint32Array(101);
-  histogramTiles.clear();
+  cancelHistogramUpdate();
   clearGrid();
   activeRuler = null;
   lastHoverDatum = null;
@@ -2796,6 +2803,7 @@ function prepareDetailedExport(
   updateScientificProvenance(activeConfigurations, parameters.k);
   updateExactModeUi();
   renderer.setActiveResolution(resolution);
+  queueHistogramUpdate();
   const tiles = selectTiles(resolution, parameters.resolution, change.view, 256, 0);
   if (renderer.hasDetailedTileCoverage(resolution, tiles)) return Promise.resolve();
   tileRequestId += 1;
