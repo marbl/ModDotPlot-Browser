@@ -7,6 +7,15 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-14
+
+### Changed
+
+* Reversed Spectral's initial direction so its red endpoint represents the highest
+  identity values.
+* Made the identity histogram follow the visible plot region while zooming and
+  panning, using the finest fully loaded resolution without mixing tile levels.
+
 ## [1.0.3] - 2026-10-12
 
 ### Added
@@ -811,7 +820,8 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 * Session persistence and data/image export are not implemented.
 * Browser compatibility and graphics recovery need broader automated coverage.
 
-[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/marbl/ModDotPlot-Browser/compare/v1.0.0...v1.0.1
