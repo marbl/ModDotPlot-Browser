@@ -1632,6 +1632,55 @@ test("keyboard navigation and WebGL context recovery remain usable", async ({ pa
   expect(pageErrors).toEqual([]);
 });
 
+test("desktop controls scroll independently without moving the plot off screen", async ({ page }) => {
+  await page.setViewportSize({ width: 1_200, height: 820 });
+  await page.goto("/");
+  await page.locator("#resolution").selectOption("500", { force: true });
+  await loadFasta(page, "sidebar-scroll.fa", `>sidebarScroll\n${deterministicDna(24_000)}\n`);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+
+  await page.locator(".feature-track-controls summary").click();
+  await page.locator(".advanced-controls summary").click();
+
+  const initial = await page.evaluate(() => {
+    const controls = document.querySelector<HTMLElement>(".controls")!;
+    const plot = document.querySelector<HTMLElement>("#plot-column")!.getBoundingClientRect();
+    return {
+      controlsClientHeight: controls.clientHeight,
+      controlsScrollHeight: controls.scrollHeight,
+      documentHeight: document.documentElement.scrollHeight,
+      plotBottom: plot.bottom,
+      plotTop: plot.top,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY,
+    };
+  });
+  expect(initial.documentHeight).toBeLessThanOrEqual(initial.viewportHeight);
+  expect(initial.windowScrollY).toBe(0);
+  expect(initial.controlsScrollHeight).toBeGreaterThan(initial.controlsClientHeight);
+  expect(initial.plotTop).toBeGreaterThanOrEqual(0);
+  expect(initial.plotBottom).toBeLessThanOrEqual(initial.viewportHeight + 0.5);
+
+  const scrolled = await page.locator(".controls").evaluate((controls) => {
+    const sidebar = controls as HTMLElement;
+    const plotBefore = document.querySelector<HTMLElement>("#plot-column")!.getBoundingClientRect();
+    sidebar.scrollTop = sidebar.scrollHeight;
+    const plotAfter = document.querySelector<HTMLElement>("#plot-column")!.getBoundingClientRect();
+    return {
+      plotBottomBefore: plotBefore.bottom,
+      plotBottomAfter: plotAfter.bottom,
+      plotTopBefore: plotBefore.top,
+      plotTopAfter: plotAfter.top,
+      sidebarScrollTop: sidebar.scrollTop,
+      windowScrollY: window.scrollY,
+    };
+  });
+  expect(scrolled.sidebarScrollTop).toBeGreaterThan(0);
+  expect(scrolled.windowScrollY).toBe(0);
+  expect(scrolled.plotTopAfter).toBeCloseTo(scrolled.plotTopBefore, 5);
+  expect(scrolled.plotBottomAfter).toBeCloseTo(scrolled.plotBottomBefore, 5);
+});
+
 test("responsive controls keep Clear separate and report the current plot window size", async ({ page }) => {
   await page.setViewportSize({ width: 1_000, height: 900 });
   await page.goto("/");

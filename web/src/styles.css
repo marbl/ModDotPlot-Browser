@@ -341,9 +341,14 @@ h1 {
 .controls {
   position: sticky;
   top: 6px;
+  max-height: calc(100dvh - 12px);
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1523,11 +1528,8 @@ body.is-track-pointer-dragging * { cursor: grabbing !important; }
 
 @media (max-height: 780px) {
   .controls {
-    max-height: calc(100dvh - 12px);
     gap: 5px;
-    overflow-y: auto;
     padding: 8px;
-    scrollbar-width: thin;
   }
   .control-status { padding-bottom: 3px; }
   select, input[type="number"], .control-output { min-height: 30px; padding-block: 3px; }
@@ -1565,6 +1567,12 @@ body.is-track-pointer-dragging * { cursor: grabbing !important; }
 @media (max-width: 760px) {
   .landing-logo-heading { width: min(660px, 75vw); }
   .workspace { grid-template-columns: 1fr; }
-  .controls { position: static; }
+  .controls {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior-y: auto;
+    scrollbar-gutter: auto;
+  }
   .plot-grid-header { align-items: start; flex-direction: column; gap: 4px; }
 }

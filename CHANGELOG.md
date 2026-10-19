@@ -7,6 +7,11 @@ All notable changes to ModDotPlot Browser are recorded here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+* Kept the desktop plot in the viewport when the controls are taller than the
+  window by scrolling the left sidebar independently ([#5](https://github.com/marbl/ModDotPlot-Browser/issues/5)).
+
 ## [1.0.4] - 2026-10-14
 
 ### Changed
